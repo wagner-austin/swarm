@@ -9,6 +9,7 @@ __all__ = [
     "config",
     "state",
     "utils",
+    "conversation",
 ]
 
 # End of core/__init__.py
