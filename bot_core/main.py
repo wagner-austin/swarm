@@ -54,10 +54,16 @@ async def main() -> None:
     # Load all plugin modules so that they register their commands.
     load_plugins()
 
+    from bot_core.conversation_store import conversation_store
+    conversation_store.start_background_cleanup()
+
     # Fast exit if environment variable is set (used by tests to avoid infinite loop).
     if os.environ.get("FAST_EXIT_FOR_TESTS") == "1":
         logger.info("FAST_EXIT_FOR_TESTS is set, stopping early for test.")
         return
+
+    # Validate required runtime settings only for a real run
+    settings.validate()
 
     from bot_core.transport_discord import DiscordTransport
     transport = DiscordTransport(settings=settings)

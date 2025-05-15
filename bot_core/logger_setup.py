@@ -8,6 +8,7 @@ import logging
 import logging.config
 import copy
 import warnings
+from bot_core.utils.dict_tools import merge_dicts
 
 DEFAULT_LOGGING_CONFIG = {
     "version": 1,
@@ -57,25 +58,5 @@ def setup_logging(config_overrides=None):
             config["root"]["handlers"] = ["console"]
 
     logging.config.dictConfig(config)
-
-def merge_dicts(base, overrides):
-    """
-    merge_dicts - Recursively merge two dictionaries with graceful handling of type mismatches.
-    
-    Args:
-        base (dict): The base dictionary to update.
-        overrides (dict): The dictionary with override values.
-    
-    Returns:
-        dict: The merged dictionary.
-    """
-    for key, value in overrides.items():
-        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-            merge_dicts(base[key], value)
-        else:
-            if key in base and (isinstance(base[key], dict) != isinstance(value, dict)):
-                warnings.warn(f"Type mismatch for key '{key}': base type {type(base[key])} vs override type {type(value)}. Using override value.")
-            base[key] = value
-    return base
 
 # End of core/logger_setup.py

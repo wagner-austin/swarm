@@ -1,30 +1,21 @@
 import asyncio
-import importlib
-import types
 import pytest
 from bot_plugins.commands import browser as browser_mod
 from bot_core.state import BotStateMachine
+from bot_core.api.browser_service import BrowserService
 
 # dummy ctx with .author.id so resolve_role() works
 class DummyUser: id = 123
 class DummyCtx: author = DummyUser()
 
-@pytest.fixture(autouse=True)
-def reload_modules(monkeypatch):
-    # make sure each test has a fresh module-level session
-    import bot_core.api.browser_session_api as bs
-    bs.stop_browser_session()
-    importlib.reload(bs)
-    importlib.reload(browser_mod)
-    yield
-    bs.stop_browser_session()
 
 @pytest.mark.asyncio
 async def test_browser_command_flow(async_db, monkeypatch, tmp_path):
     # patch download dir
     monkeypatch.setattr("bot_core.settings.settings.browser_download_dir", tmp_path)
 
-    plugin = browser_mod.BrowserPlugin()
+    service = BrowserService()
+    plugin = browser_mod.BrowserPlugin(browser_service=service)
     sm = BotStateMachine()
 
     # start

@@ -1,8 +1,7 @@
 import time
 import uuid
-from typing import Optional, Dict, Any
-
-_WIZARDS: Dict[str, "Conversation"] = {}
+from typing import Optional, Any
+from bot_core.conversation_store import conversation_store
 
 class Conversation:
     TTL = 3600  # seconds
@@ -13,19 +12,19 @@ class Conversation:
         self.plugin = plugin
         self.data = data if data is not None else {}
         self.updated = time.time()
-        _WIZARDS[self.id] = self
 
     @classmethod
-    def get(cls, user_id: str, plugin: str) -> Optional["Conversation"]:
-        now = time.time()
-        # Copy to avoid modifying dict during iteration
-        for w in list(_WIZARDS.values()):
-            if now - w.updated > cls.TTL:
-                del _WIZARDS[w.id]
-                continue
-            if w.user_id == user_id and w.plugin == plugin:
-                return w
-        return None
+    async def create(cls, user_id: str, plugin: str, data: Optional[dict] = None):
+        self = cls(user_id, plugin, data)
+        await conversation_store.add(self)
+        return self
 
-    def touch(self):
-        self.updated = time.time()
+    @classmethod
+    async def get(cls, user_id: str, plugin: str) -> Optional["Conversation"]:
+        return await conversation_store.get(user_id, plugin)
+
+    async def touch(self):
+        await conversation_store.touch(self)
+
+    async def remove(self):
+        await conversation_store.remove(self)
