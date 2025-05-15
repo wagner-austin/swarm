@@ -8,6 +8,8 @@ unified and consistent approach for future updates.
 Focuses on modular, unified, consistent code that facilitates future changes.
 """
 
+# IMPORTANT: role *values* are always lower‑case; use the constants below
+# everywhere instead of hard‑coding strings like "ADMIN" or "owner".
 # Role Constants
 OWNER = "owner"
 ADMIN = "admin"

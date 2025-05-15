@@ -1,3 +1,7 @@
+# _role_map holds:
+#   - key: user-id  → value: explicit override role (set_role)
+#   - key: discord role *name* → value: bot role (copied from .env)
+# That means we never need to reach back into settings inside the hot path.
 from bot_core.settings import settings
 import logging
 log = logging.getLogger(__name__)
@@ -32,10 +36,9 @@ def resolve_role(user: 'discord.Member') -> str:
     if role:
         return role
 
-    # 2. Map Discord role names to bot roles via settings.role_name_map
-    from bot_core.settings import settings
+    # 2. Map Discord role names to bot roles via _role_map (copied from settings at import-time)
     for discord_role in getattr(user, 'roles', []):
-        mapped = settings.role_name_map.get(discord_role.name)
+        mapped = _role_map.get(discord_role.name)
         if mapped:
             return mapped
 
