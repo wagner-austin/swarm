@@ -43,7 +43,7 @@ class MessageManager:
         """
         sender_id = extract_user_id(ctx)
         # Route: if parsed.command, dispatch to plugin; else, route to chat plugin
-        if parsed.command:
+        if getattr(parsed, "command", None):
             resp = await dispatch_message(parsed, ctx, self.state_machine)
             return resp or ""
         # Fallback: call chat plugin for idle chatter

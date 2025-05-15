@@ -23,6 +23,8 @@ Follow these steps to set up your Discord bot with this project:
 DISCORD_TOKEN=YOUR_TOKEN
 ```
 
+Note: The first token of every message is treated as the command; everything after the first space is passed as the raw argument string.
+
 ---
 
 Your Discord bot is now ready to run with this project!

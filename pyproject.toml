@@ -3,7 +3,7 @@ name = "volunteer-bot"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-  "cryptography>=42",
+
   "aiosqlite>=0.20",
   "SQLAlchemy>=2.0",
   "alembic>=1.13",
@@ -11,7 +11,7 @@ dependencies = [
   "python-dotenv>=0.20",
   "pydantic>=2",
   "pydantic-settings",
-  "rotki-pysqlcipher3>=1.4",
+
   "undetected_chromedriver>=3",
   "discord.py>=2.3",
   "selenium>=4",
