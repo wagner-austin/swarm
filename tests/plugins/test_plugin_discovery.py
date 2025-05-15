@@ -18,9 +18,10 @@ def test_load_plugins_populates_registry():
     # Load plugins from the plugins package.
     manager.load_plugins()
     plugins_dict = manager.get_all_plugins()
-    # We expect that at least one plugin is loaded (assuming there are plugin modules present).
-    assert isinstance(plugins_dict, dict)
-    assert len(plugins_dict) > 0
+    # We expect that core plugins are loaded.
+    core_plugins = {"chat", "help", "plugin", "shutdown"}
+    for command in core_plugins:
+        assert command in plugins_dict, f"Core plugin '{command}' not loaded."
 
 def test_reload_plugins_clears_and_reloads():
     # Load plugins initially.

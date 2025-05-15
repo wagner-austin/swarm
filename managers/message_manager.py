@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 import logging
 from core.state import BotStateMachine
-from core.api.flow_state_api import get_active_flow
 from plugins.manager import dispatch_message
 
 logger = logging.getLogger(__name__)
@@ -36,28 +35,17 @@ class MessageManager:
         ctx: Any
     ) -> str:
         """
-        Process the incoming message by first checking if the user has an active flow.
-        If so, route the message to that flow and return its response.
-        Otherwise, dispatch the message to the recognized plugin command.
+        Process the incoming message by routing to plugin or chat plugin.
         'ctx' is the Discord context (e.g., discord.Message).
         Returns a single string response (or an empty string if no response).
         Always returns an awaitable.
         """
         sender_id = extract_user_id(ctx)
-        # 1) Check if the user is in an active flow
-        active_flow = get_active_flow(sender_id)
-        if active_flow:
-            from managers.flow_manager import FlowManager
-            fm = FlowManager()
-            resp = fm.handle_flow_input(sender_id, parsed.body or "")
-            return resp
-
-        # 2) If not in a flow, check for a plugin command and dispatch it
+        # Route: if parsed.command, dispatch to plugin; else, route to chat plugin
         if parsed.command:
             resp = await dispatch_message(parsed, ctx, self.state_machine)
             return resp or ""
-
-        # 3) Fallback: call chat plugin for idle chatter
+        # Fallback: call chat plugin for idle chatter
         resp = await dispatch_message(
             dc_replace(parsed, command="chat", args=parsed.body or ""),
             ctx,

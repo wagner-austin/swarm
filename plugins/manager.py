@@ -193,6 +193,20 @@ def load_plugins(concurrent: bool = False) -> None:
         for mname in module_names:
             import_module_inner(mname)
 
+    # ------------------------------------------------------------------
+    # Fallback safety-net: if nothing registered, force-import core set
+    # ------------------------------------------------------------------
+    if not plugin_registry:
+        core_mods = (
+            "plugins.commands.chat",
+            "plugins.commands.help",
+            "plugins.commands.plugin",
+            "plugins.commands.shutdown",
+            "plugins.commands.sora_explore_scraper",
+        )
+        for m in core_mods:
+            import_module_safe(m)
+
 
 def reload_plugins(concurrent: bool = False) -> None:
     """

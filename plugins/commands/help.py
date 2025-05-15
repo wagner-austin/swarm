@@ -12,7 +12,6 @@ from plugins.manager import plugin, get_all_plugins, disabled_plugins
 from core.permissions import has_permission, EVERYONE
 from core.state import BotStateMachine
 from plugins.abstract import BasePlugin
-from plugins.messages import INTERNAL_ERROR
 
 @plugin(["help"], canonical="help", required_role=EVERYONE) 
 class HelpPlugin(BasePlugin):
@@ -70,7 +69,12 @@ class HelpPlugin(BasePlugin):
 
             return "\n\n".join(lines) if lines else "No commands available."
         except Exception as e:
-            self.logger.error(f"Unexpected error in help command: {e}", exc_info=True)
+            # Use print as fallback if logger is not available (for test context)
+            try:
+                self.logger.error(f"Unexpected error in help command: {e}", exc_info=True)
+            except AttributeError:
+                print(f"Unexpected error in help command: {e}")
+            from plugins.messages import INTERNAL_ERROR
             return INTERNAL_ERROR
 
 # End of plugins/commands/help.py

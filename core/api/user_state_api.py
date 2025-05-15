@@ -13,9 +13,9 @@ Usage Example:
         mark_user_has_seen_welcome("+15551234567")
 """
 
-from managers.flow_manager import FlowManager
 
-_flow_manager = FlowManager()
+
+
 
 def has_user_seen_welcome(phone: str) -> bool:
     """

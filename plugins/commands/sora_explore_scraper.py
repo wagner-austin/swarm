@@ -18,12 +18,17 @@ from plugins.commands.subcommand_dispatcher import handle_subcommands, PluginArg
 from plugins.messages import INTERNAL_ERROR
 
 # Import the updated Sora Explore API
-from core.api.sora_explore_api import (
-    start_sora_explore_session,
-    stop_sora_explore_session,
-    download_sora_explore_session,
-    get_sora_explore_session_status
-)
+try:
+    from core.api.sora_explore_api import (
+        start_sora_explore_session,
+        stop_sora_explore_session,
+        download_sora_explore_session,
+        get_sora_explore_session_status
+    )
+    _SORA_OK = True
+except Exception as _exc:
+    _SORA_OK = False
+    _SORA_ERR = str(_exc)
 
 logger = logging.getLogger(__name__)
 
@@ -94,20 +99,28 @@ class SoraExploreScraperPlugin(BasePlugin):
             return INTERNAL_ERROR
 
     def _sub_start(self, rest_args):
+        if not _SORA_OK:
+            return f"Sora-explore unavailable ({_SORA_ERR})."
         return start_sora_explore_session()
 
     def _sub_stop(self, rest_args):
+        if not _SORA_OK:
+            return f"Sora-explore unavailable ({_SORA_ERR})."
         return stop_sora_explore_session()
 
     def _sub_download(self, rest_args, ctx):
         """
         Returns the coroutine for the download command, so handle_subcommands can await it.
         """
+        if not _SORA_OK:
+            return f"Sora-explore unavailable ({_SORA_ERR})."
         if ctx is None:
             return "(Sora) Error: No Discord context provided for download."
         return download_sora_explore_session(ctx)
 
     def _sub_status(self, rest_args):
+        if not _SORA_OK:
+            return f"Sora-explore unavailable ({_SORA_ERR})."
         return get_sora_explore_session_status()
 
 

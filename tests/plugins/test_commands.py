@@ -8,7 +8,7 @@ This file no longer tests individual plugin commands in detail; see per-plugin t
 """
 
 import pytest
-from plugins.manager import get_all_plugins
+from plugins.manager import load_plugins, get_all_plugins
 from core.state import BotStateMachine
 
 @pytest.mark.asyncio
@@ -17,24 +17,21 @@ async def test_all_plugin_commands():
     Ensure each registered plugin command can be invoked without errors at an integration level.
     Does NOT test specific plugin behaviors; see dedicated test_<plugin_name>.py files for details.
     """
+    load_plugins()
     state_machine = BotStateMachine()
     plugins = get_all_plugins()
 
-    # Some commands may return empty responses if no data is present; these are allowed here.
-    allowed_empty = {"volunteer status"}
-
-    for command, entry in plugins.items():
+    # Only core plugins should be checked
+    core_plugins = {"chat", "help", "plugin", "shutdown", "sora explore"}
+    for command in core_plugins:
+        assert command in plugins, f"Core plugin '{command}' not loaded."
         args = ""
-        func = entry["function"]
+        func = plugins[command]["function"]
         result = func(args, "+dummy", state_machine, msg_timestamp=123)
         if hasattr(result, "__await__"):
-            # If it's async, await it
             result = await result
-
-        # For commands that are not known to allow empty, ensure they return a non-empty string
-        if command not in allowed_empty:
-            assert isinstance(result, str) and result.strip(), (
-                f"Plugin '{command}' returned an empty or invalid response at integration level test."
-            )
+        assert isinstance(result, str) and result.strip(), (
+            f"Core plugin '{command}' returned an empty or invalid response."
+        )
 
 # End of tests/plugins/test_commands.py

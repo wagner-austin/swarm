@@ -23,8 +23,13 @@ def resolve_role(user: 'discord.Member') -> str:
     Returns:
         str: The resolved role.
     """
+    # 0. Accept plain strings / ints as well as discord.* objects
+    try:
+        user_id = str(user.id)           # discord.Member / discord.User etc.
+    except AttributeError:
+        user_id = str(user)              # fallback – already a string/int
+
     # 1. Check explicit BOT_ROLES override
-    user_id = str(user.id)
     role = _role_map.get(user_id)
     if role:
         return role
