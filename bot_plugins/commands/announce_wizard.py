@@ -1,9 +1,6 @@
 from bot_plugins.wizard import WizardPlugin
-from bot_core.conversation import _WIZARDS
-
 from bot_plugins.manager import plugin
-
-ADMIN = "ADMIN"  # Placeholder for required_role
+from bot_core.permissions import ADMIN
 
 @plugin(commands=["announce"], canonical="announce", required_role=ADMIN)
 class AnnounceWizard(WizardPlugin):
@@ -34,13 +31,11 @@ class AnnounceWizard(WizardPlugin):
             # Placeholder: replace with actual send logic
             announcement = convo.data.get("text", "<no text>")
             # await ctx.send(announcement)  # Uncomment for real bot
-            if convo.id in _WIZARDS:
-                del _WIZARDS[convo.id]
+            await convo.remove()
             return f"Announcement sent!\n{announcement}"
         else:
             return "Please type 'send' to post or 'cancel' to abort."
 
     async def _cancel(self, convo):
-        if convo.id in _WIZARDS:
-            del _WIZARDS[convo.id]
+        await convo.remove()
         return "Wizard cancelled."

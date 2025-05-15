@@ -1,6 +1,6 @@
 import pytest
 from bot_plugins.commands.announce_wizard import AnnounceWizard
-from bot_core.conversation import _WIZARDS
+from bot_core.conversation_store import conversation_store
 
 class FakeChannel:
     def __init__(self):
@@ -21,22 +21,23 @@ class FakeCtx:
 
 @pytest.mark.asyncio
 async def test_announce_wizard_flow(async_db):
-    _WIZARDS.clear()
+    await conversation_store.clear()
     wiz = AnnounceWizard()
     ctx = FakeCtx(user_id=123)
+    user_id = "123"
 
     # Start wizard
     reply = await wiz.run_command(ctx, "")
     assert "What announcement" in reply
-    assert len(_WIZARDS) == 1
+    assert await conversation_store.get(user_id, "announce") is not None
 
     # Provide body
     reply = await wiz.run_command(ctx, "Hello world!")
     assert "Preview" in reply
     assert "send" in reply
-    assert len(_WIZARDS) == 1
+    assert await conversation_store.get(user_id, "announce") is not None
 
     # Send
     reply = await wiz.run_command(ctx, "send")
     assert "Announcement sent" in reply
-    assert len(_WIZARDS) == 0
+    assert await conversation_store.get(user_id, "announce") is None

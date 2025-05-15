@@ -32,7 +32,16 @@ class Settings(BaseSettings):
         "extra": "allow"
     }
 
+    def validate(self) -> None:
+        """
+        Run explicit, start-up-time checks that shouldn’t execute at import time.
+        Extend this as new mandatory settings appear.
+        """
+        if not self.discord_token:
+            raise RuntimeError(
+                "DISCORD_TOKEN is required but not set. "
+                "Define it in your environment or .env file."
+            )
+
 settings = Settings()
 
-if not settings.discord_token:
-    raise RuntimeError("DISCORD_TOKEN is required in the environment or .env file.")

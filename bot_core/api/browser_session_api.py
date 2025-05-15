@@ -115,22 +115,16 @@ class BrowserSession:
 # Module-level session management
 _session: Optional[BrowserSession] = None
 
-def start_browser_session(profile: Optional[str] = None) -> str:
-    global _session
-    if _session is not None:
-        return "Browser session already started."
-    _session = BrowserSession(profile=profile)
-    return "Browser session started."
+# ---- compatibility layer (will be removed in v2) ---------------------
+from bot_core.api.browser_service import default_browser_service as _svc
+
+def start_browser_session(profile: str | None = None) -> str:
+    # kept for one release cycle
+    import asyncio
+    return asyncio.run(_svc.start(profile=profile))   # noqa: S301
 
 def stop_browser_session() -> str:
-    global _session
-    if _session is None:
-        return "No active session."
-    _session.close()
-    _session = None
-    return "Browser session stopped."
+    return _svc.stop()
 
 def get_browser_session_status() -> str:
-    if _session is None:
-        return "No active session."
-    return f"Current state: {_session.state.name}."
+    return _svc.status()
