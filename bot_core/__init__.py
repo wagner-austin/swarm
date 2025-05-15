@@ -14,7 +14,6 @@ from typing import List
 __all__: List[str] = ["settings"]
 
 # 2) pull settings in so `import bot_core.settings` works
-from . import config as settings  # noqa: F401
 
 # expose extras and freeze public surface
 for _name in ["bot_orchestrator", "message_manager", "parsers", "logger_setup"]:

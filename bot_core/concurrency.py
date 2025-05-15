@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-core/concurrency.py - Provides application-level concurrency utilities.
-Defines a context manager for per‑phone locking to serialize operations on the same record.
-This ensures that concurrent volunteer sign‐ups for the same phone are handled sequentially.
+concurrency.py - Provides application-level concurrency utilities.
+Defines a context manager for per-phone locking to serialize operations on the same record.
+This ensures that concurrent volunteer sign-ups for the same phone are handled sequentially.
 """
 import threading
 from contextlib import contextmanager

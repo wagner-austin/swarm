@@ -22,10 +22,6 @@ BASE_URL = "https://www.sora.com/explore"
 KEEP_BROWSER_OPEN = True
 BROWSER_STAY_DURATION = 5  # Seconds to keep the browser open
 USE_EXISTING_PROFILE = True
-USER_DATA_DIR = r"C:\Users\Test\PROJECTS\sora\ChromeProfiles"
-PROFILE_DIRECTORY = "Profile 1"
-DOWNLOAD_DIR = "./explorer_downloads"
-DOWNLOAD_FILENAME = "downloaded_media.webp"
 
 # -----------------------------
 # State Definition
@@ -75,12 +71,13 @@ class SimpleOpener:
     and manages state transitions. The download/capture operation is triggered separately
     via capture_detailed_info().
     """
-    def __init__(self, driver_path=None, plugin_manager=None):
+    def __init__(self, driver_path=None, plugin_manager=None, settings: Settings = None):
         self.driver = None
         self.wait = None
         self.driver_path = driver_path
         self.state = State.INITIAL
         self.plugin_manager = plugin_manager
+        self.settings = settings or _default_settings
         self._state_transition(State.SETUP)
         self.setup_driver()
 
@@ -99,7 +96,9 @@ class SimpleOpener:
         chrome_options.add_experimental_option("prefs", prefs)
 
         if USE_EXISTING_PROFILE:
-            full_profile_path = os.path.join(USER_DATA_DIR, PROFILE_DIRECTORY)
+            user_data_dir = getattr(self.settings, "user_data_dir", r"C:\Users\Test\PROJECTS\sora\ChromeProfiles")
+            profile_directory = getattr(self.settings, "profile_directory", "Profile 1")
+            full_profile_path = os.path.join(user_data_dir, profile_directory)
             if os.path.exists(full_profile_path):
                 chrome_options.add_argument(f"--user-data-dir={full_profile_path}")
                 logger.info(f"(Sora) Using dedicated profile from '{full_profile_path}'.")
@@ -236,7 +235,7 @@ class SimpleOpener:
         except Exception as e:
             logger.warning(f"(Sora) Error while processing detailed page media: {e}")
             media_url = ""
-            final_filename = DOWNLOAD_FILENAME
+            final_filename = getattr(self.settings, "download_filename", "downloaded_media.webp")
             file_path = ""
 
         # Capture prompt
@@ -281,8 +280,9 @@ class SimpleOpener:
         }
 
     def _save_media(self, media_url, filename) -> str:
-        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-        file_path = os.path.join(DOWNLOAD_DIR, filename)
+        download_dir = getattr(self.settings, "download_dir", "./explorer_downloads")
+        os.makedirs(download_dir, exist_ok=True)
+        file_path = os.path.join(download_dir, filename)
         try:
             response = requests.get(media_url, stream=True)
             response.raise_for_status()
@@ -320,7 +320,8 @@ def start_sora_explore_session() -> str:
     global _sora_opener
     if _sora_opener is not None:
         return "(Sora) Already started. Use 'stop' first if you want to restart."
-    _sora_opener = SimpleOpener(driver_path='chromedriver.exe', plugin_manager=_plugin_manager)
+    from bot_core.settings import settings
+    _sora_opener = SimpleOpener(driver_path='chromedriver.exe', plugin_manager=_plugin_manager, settings=settings)
     _sora_opener.open_url()
     if KEEP_BROWSER_OPEN:
         _sora_opener.wait_for_duration(BROWSER_STAY_DURATION)
@@ -332,6 +333,7 @@ async def download_sora_explore_session(ctx) -> dict | str:
 
     Args:
         ctx: The Discord context (e.g., discord.Message or interaction). This is passed through unchanged; the API does not use it today, but may use it in the future for direct messaging or richer context.
+        settings: Optionally override the Settings instance for this session.
 
     Returns:
         dict: { 'file_path': ... } on success
@@ -343,6 +345,7 @@ async def download_sora_explore_session(ctx) -> dict | str:
     current_state = _sora_opener.state
     if current_state in [State.CLOSING, State.COMPLETED]:
         return "(Sora) Session is not available for downloads. Please start again."
+
     result = _sora_opener.capture_detailed_info()
     if not result.get("file_path"):
         return "(Sora) Download command executed, but no file was saved."

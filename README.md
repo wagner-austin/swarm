@@ -43,26 +43,26 @@ Next Steps:
 Replace YOUR_SIGNAL_NUMBER with your actual Signal Bot number.
 
 
-#### .ENV FILE SETUP ####
+#### Configuration (.env file)
 
-# .env - Environment variables for the Signal Bot project.
-# BOT_NUMBER: The phone number of your Signal Bot in E.164 format.
-BOT_NUMBER=YOUR_SIGNAL_NUMBER
+Create a `.env` file in your project root with the following contents:
 
-# POLLING_INTERVAL: The interval (in seconds) at which the bot checks for new messages.
-POLLING_INTERVAL=1
-
-# SIGNAL_CLI_COMMAND: The command used to run signal-cli (adjust if using a different OS).
-SIGNAL_CLI_COMMAND=signal-cli.bat
-
-# DIRECT_REPLY_ENABLED: Enable or disable direct reply quoting feature (True/False).
-DIRECT_REPLY_ENABLED=True
-
-# ENABLE_BOT_PREFIX: Toggle requirement of the @bot command prefix (true/false).
-ENABLE_BOT_PREFIX=true
-
-# DB_NAME: The name of the SQLite database file.
+```ini
+# .env - Discord Bot configuration
+DISCORD_TOKEN=your-bot-token-here
 DB_NAME=bot_data.db
+BACKUP_INTERVAL=3600
+BACKUP_RETENTION=10
+ROLE_NAME_MAP={"123456789012345678": "owner", "987654321098765432": "admin"}
+GEMINI_API_KEY=your-gemini-key-here
+OPENAI_API_KEY=your-openai-key-here
+```
+
+- **DISCORD_TOKEN** is required for the bot to run.
+- All other fields are optional and have sensible defaults.
+- The `ROLE_NAME_MAP` must be valid JSON.
+
+> **Note:** Pydantic automatically loads environment variables from the `.env` file. You do not need to export variables in your shell. Just create or edit the `.env` file and restart the bot.
 
 
 ## Building multi-step wizards

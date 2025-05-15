@@ -10,12 +10,13 @@ from discord import Intents, Message
 from bot_core.transport import Transport
 from bot_core.parsers.message_parser import parse_message
 
+from bot_core.settings import Settings
+
 class DiscordTransport(Transport):
-    def __init__(self):
+    def __init__(self, settings: Settings):
         self.client = None
-        self.token = os.getenv("DISCORD_TOKEN")
-        if not self.token:
-            raise RuntimeError("DISCORD_TOKEN not set in environment.")
+        self.settings = settings
+        self.token = settings.discord_token
         self._on_message = None
         self._running = False
 

@@ -25,9 +25,10 @@ class MessageManager:
     """
     MessageManager - Aggregated facade for message processing.
     """
-    def __init__(self, state_machine: Optional[BotStateMachine] = None) -> None:
+    def __init__(self, state_machine: Optional[BotStateMachine] = None, settings=None) -> None:
         from bot_core.state import BotStateMachine
         self.state_machine = state_machine if state_machine else BotStateMachine()
+        self.settings = settings
 
     async def process_message(
         self,

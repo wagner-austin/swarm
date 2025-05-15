@@ -4,11 +4,14 @@ from bot_core.transport import Transport
 
 import logging
 
+from bot_core.settings import Settings
+
 class BotOrchestrator:
-    def __init__(self, transport: Transport):
+    def __init__(self, transport: Transport, settings: Settings):
         self.transport = transport
+        self.settings = settings
         from bot_core.message_manager import MessageManager
-        self._mm = MessageManager()
+        self._mm = MessageManager(settings=self.settings)
         logging.getLogger(__name__).info("BotOrchestrator initialised")
 
     async def _send(self, ctx, content: str):

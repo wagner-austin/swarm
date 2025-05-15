@@ -11,9 +11,9 @@ import logging
 import db.schema
 import logging
 from bot_core.bot_orchestrator import BotOrchestrator
+from bot_core.settings import settings
 
 from db.backup import create_backup, start_periodic_backups
-from bot_core.config import BACKUP_INTERVAL, DISK_BACKUP_RETENTION_COUNT
 from bot_plugins.manager import load_plugins
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,7 @@ async def main() -> None:
     logger.info(f"Startup backup created at: {backup_path}")
     
     # Schedule periodic backups in the background using configurable interval and retention count.
-    asyncio.create_task(start_periodic_backups(
-        interval_seconds=BACKUP_INTERVAL,
-        max_backups=DISK_BACKUP_RETENTION_COUNT))
+    asyncio.create_task(start_periodic_backups(cfg=settings))
     
     # Load all plugin modules so that they register their commands.
     load_plugins()
@@ -40,8 +38,8 @@ async def main() -> None:
         return
 
     from bot_core.transport_discord import DiscordTransport
-    transport = DiscordTransport()
-    bot = BotOrchestrator(transport)
+    transport = DiscordTransport(settings=settings)
+    bot = BotOrchestrator(transport, settings=settings)
     await bot.start()
 
 if __name__ == "__main__":

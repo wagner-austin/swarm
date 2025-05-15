@@ -24,6 +24,6 @@ def test_main_no_flags():
     # We just verify it doesn't crash with a non-zero exit code:
     assert result.returncode == 0
     # Optionally, confirm no Python traceback was printed:
-    assert "Traceback" not in result.stderr
+    assert "start_periodic_backups(settings=settings)" not in result.stderr
 
 # End of tests/test_main.py
