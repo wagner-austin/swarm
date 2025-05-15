@@ -43,7 +43,25 @@ Next Steps:
 Replace YOUR_SIGNAL_NUMBER with your actual Signal Bot number.
 
 
-#### Configuration (.env file)
+#### Configuration
+
+### Browser Session Settings
+
+The following environment variables can be set to control the browser session:
+- `CHROME_PROFILE_DIR`: Path to the Chrome user data directory.
+- `CHROME_PROFILE_NAME`: Name of the Chrome profile to use (default: Profile 1).
+- `CHROMEDRIVER_PATH`: Path to the ChromeDriver executable.
+- `BROWSER_DOWNLOAD_DIR`: Directory for browser downloads and screenshots.
+
+Example usage:
+
+```
+@bot browser start [<url>]
+@bot browser open <url>
+@bot browser screenshot
+@bot browser stop
+@bot browser status
+```
 
 Create a `.env` file in your project root with the following contents:
 

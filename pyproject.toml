@@ -4,6 +4,8 @@
 where = ["."]
 include = ["bot_core*", "bot_plugins*"]
 name = "volunteer-bot"
+# Changelog
+# - Replaced Sora-specific scraper with generic browser module.
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
@@ -12,10 +14,12 @@ dependencies = [
   "python-dotenv>=0.20",
   "pydantic>=2",
   "pydantic-settings",
-  "requests>=2.31",
+
   "rotki-pysqlcipher3>=1.4",
   "undetected_chromedriver>=3",
   "discord.py>=2.3",
+  "selenium>=4",
+  "requests>=2",
 ]
 
 [project.optional-dependencies]
