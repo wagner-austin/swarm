@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 discord = ["discord.py[voice]>=2.3"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.4", "bowler>=0.10"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.4"]
 
 [tool.setuptools]
 packages = { find = { where = [ "." ], include = ["bot_core*", "bot_plugins*"] } }

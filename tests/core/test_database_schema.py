@@ -10,7 +10,7 @@ import pathlib
 from bot_core.api import db_api
 from alembic.config import Config
 import pytest_asyncio
-from migrations.runner import run_async_migrations  # Import the async migration runner
+from migrations.env import run_async_migrations  # Import the async migration runner
 from migrations.env import do_run_migrations  # Import the migration logic
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
