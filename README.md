@@ -1,5 +1,30 @@
-README.md - Signal Bot Setup Instructions
-This file provides basic instructions for installing and using signal-cli with this bot.
+# README.md - Discord Bot Setup & Usage
+
+This file provides setup, configuration, and usage instructions for the Discord bot.
+
+## Running locally
+
+After installing dependencies and configuring your `.env`, you can start the bot in either of these ways:
+
+```sh
+python -m bot_core.main
+```
+
+or
+
+```sh
+python bot.py
+```
+
+The bot will respond to commands that start with `!` or when mentioned:
+
+```
+!help
+!browser start
+!info
+```
+
+---
 
 Installation:
 1. Install Java:

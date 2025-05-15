@@ -2,6 +2,6 @@
 # This file contains the external packages required for running the bot and its tests.
 
 cryptography
+discord.py>=2.3
 google-genai
 python-dotenv>=0.20.0
-alembic>=1.13

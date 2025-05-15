@@ -1,61 +1,58 @@
-import os
 import logging
-from bot_plugins.manager import plugin
-from bot_core.permissions import OWNER
-from bot_plugins.abstract import BasePlugin
-from bot_plugins.commands.subcommand_dispatcher import handle_subcommands
-from bot_core.parsers.plugin_arg_parser import PluginArgError
+from discord.ext import commands
 from bot_core.api.browser_service import BrowserService, default_browser_service
 from bot_core.settings import settings
-from bot_plugins.subcommand_mixin import SubcommandPluginMixin
 
 logger = logging.getLogger(__name__)
 
 USAGE = (
     "Usage:\n"
-    "  @bot browser start [<url>]\n"
-    "  @bot browser open <url>\n"
-    "  @bot browser screenshot\n"
-    "  @bot browser stop\n"
-    "  @bot browser status"
+    "  !browser start [<url>]\n"
+    "  !browser open <url>\n"
+    "  !browser screenshot\n"
+    "  !browser stop\n"
+    "  !browser status"
 )
 
-@plugin(commands=["browser"], canonical="browser", required_role=OWNER)
-class BrowserPlugin(SubcommandPluginMixin, BasePlugin):
-    def __init__(self, browser_service: BrowserService | None = None):
-        super().__init__("browser", help_text="Control a headless Chrome session")
+
+class Browser(commands.Cog):
+    def __init__(self, bot, browser_service: BrowserService | None = None):
+        self.bot = bot
         self.browser = browser_service or default_browser_service
-        self.subcommands = {
-            "start": self._sub_start,
-            "open": self._sub_open,
-            "screenshot": self._sub_screenshot,
-            "stop": self._sub_stop,
-            "status": self._sub_status,
-        }
 
-    async def run_command(self, args, ctx, state_machine, **kw):
-        return await self.dispatch_subcommands(
-            args,
-            subcommands=self.subcommands,
-            usage_msg=USAGE,
-            unknown_subcmd_msg="Unknown subcommand.  See usage:\n" + USAGE,
-            parse_mode="positional",
-        )
+    @commands.group(name="browser", invoke_without_command=True)
+    @commands.is_owner()
+    async def browser(self, ctx):
+        # If no subcommand is given, print usage
+        await ctx.send(USAGE)
 
-    async def _sub_start(self, rest):
-        url = rest[0] if rest else None
-        return await self.browser.start(url=url)
+    @browser.command(name="start")
+    async def start(self, ctx, url: str = None):
+        msg = await self.browser.start(url=url)
+        await ctx.send(msg)
 
-    async def _sub_open(self, rest):
-        if not rest:
-            return USAGE
-        return await self.browser.open(rest[0])
+    @browser.command(name="open")
+    async def open(self, ctx, url: str = None):
+        if not url:
+            await ctx.send(USAGE)
+            return
+        msg = await self.browser.open(url)
+        await ctx.send(msg)
 
-    async def _sub_screenshot(self, rest):
-        return await self.browser.screenshot()
+    @browser.command(name="screenshot")
+    async def screenshot(self, ctx):
+        msg = await self.browser.screenshot()
+        await ctx.send(msg)
 
-    async def _sub_stop(self, rest):
-        return await self.browser.stop()
+    @browser.command(name="stop")
+    async def stop(self, ctx):
+        msg = await self.browser.stop()
+        await ctx.send(msg)
 
-    async def _sub_status(self, rest):
-        return self.browser.status()
+    @browser.command(name="status")
+    async def status(self, ctx):
+        msg = self.browser.status()
+        await ctx.send(msg)
+
+async def setup(bot):
+    await bot.add_cog(Browser(bot))

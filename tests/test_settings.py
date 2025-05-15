@@ -15,7 +15,6 @@ discord_token = test_token
 db_name = test.db
 backup_interval = 123
 backup_retention = 3
-role_name_map = {\"admin\": \"admin\"}
 gemini_api_key = test-gemini
 openai_api_key = test-openai
 """)
@@ -25,7 +24,6 @@ openai_api_key = test-openai
         monkeypatch.delenv("DB_NAME", raising=False)
         monkeypatch.delenv("BACKUP_INTERVAL", raising=False)
         monkeypatch.delenv("BACKUP_RETENTION", raising=False)
-        monkeypatch.delenv("ROLE_NAME_MAP", raising=False)
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         # Instantiate settings with custom env_file (Pydantic v2 does not cache settings globally)
@@ -34,7 +32,6 @@ openai_api_key = test-openai
         assert s.db_name == "test.db"
         assert s.backup_interval == 123
         assert s.backup_retention == 3
-        assert s.role_name_map == {"admin": "admin"}
         assert s.gemini_api_key == "test-gemini"
         assert s.openai_api_key == "test-openai"
 
