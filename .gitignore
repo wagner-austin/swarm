@@ -1,0 +1,27 @@
+# .gitignore
+# Ignore Python bytecode cache directories
+__pycache__/
+
+# Ignore temporary file
+temp.txt
+
+# Ignore database
+bot_data.db
+bot_data_e.db
+
+# Exclude environment variable files
+.env
+
+# Exclude backup files
+backups/
+
+# Ignore the profile information for privacy
+ChromeProfiles/
+
+# Ignore the downloaded files for privacy
+explorer_downloads/
+
+# Exclude env files
+venv/
+.env/
+myenv/
