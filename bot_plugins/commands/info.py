@@ -7,43 +7,22 @@ Usage:
   @bot info
 """
 
-from bot_plugins.manager import plugin
-from bot_core.permissions import EVERYONE
-from bot_plugins.abstract import BasePlugin
-from bot_plugins.messages import INFO_USAGE, INFO_TEXT, INTERNAL_ERROR
+from discord.ext import commands
 
-@plugin(["info"], canonical="info", required_role=EVERYONE)
-class InfoPlugin(BasePlugin):
-    """
-    Display bot information.
 
-    Usage:
-      @bot info
-    """
-    def __init__(self):
-        super().__init__(
-            "info",
-            help_text="Display information about our cause."
-        )
 
-    async def run_command(
-        self,
-        args: str,
-        ctx,
-        state_machine,
-        **kwargs
-    ) -> str:
-        usage = INFO_USAGE
-        user_input = args.strip()
+class Info(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
 
-        # If there's extraneous user input, show usage
-        if user_input:
-            return usage
-
+    @commands.command(name="info")
+    async def info(self, ctx):
         try:
-            return INFO_TEXT
-        except Exception as e:
-            self.logger.error(f"Unexpected error in info command: {e}", exc_info=True)
-            return INTERNAL_ERROR
+            await ctx.send("Hi! I’m the volunteer-coordination bot.")
+        except Exception:
+            await ctx.send("An internal error occurred. Please try again later.")
+
+async def setup(bot):
+    await bot.add_cog(Info(bot))
 
 # End of plugins/commands/info.py

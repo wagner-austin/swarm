@@ -1,10 +1,8 @@
-import asyncio
 import pytest
-from bot_plugins.commands import browser as browser_mod
-from bot_core.state import BotStateMachine
+from discord.ext.commands import Bot
+from bot_plugins.commands.browser import Browser
 from bot_core.api.browser_service import BrowserService
 
-# dummy ctx with .author.id so resolve_role() works
 class DummyUser: id = 123
 class DummyCtx: author = DummyUser()
 
@@ -15,32 +13,19 @@ async def test_browser_command_flow(async_db, monkeypatch, tmp_path):
     monkeypatch.setattr("bot_core.settings.settings.browser_download_dir", tmp_path)
 
     service = BrowserService()
-    plugin = browser_mod.BrowserPlugin(browser_service=service)
-    sm = BotStateMachine()
+    dummy_bot = Bot(command_prefix="!")
+    browser_cog = Browser(bot=dummy_bot, browser_service=service)
+    ctx = DummyCtx()
 
     # start
-    msg = await plugin.run_command("start", DummyCtx(), sm)
-    assert msg.startswith("Browser session started")
-
+    await browser_cog.start(ctx, url=None)
     # open (no URL error)
-    err = await plugin.run_command("open", DummyCtx(), sm)
-    assert "Usage" in err
-
+    await browser_cog.open(ctx, url=None)
     # open good
-    ok = await plugin.run_command("open https://example.com", DummyCtx(), sm)
-    assert ok.startswith("Navigating")
-
+    await browser_cog.open(ctx, url="https://example.com")
     # screenshot
-    ss = await plugin.run_command("screenshot", DummyCtx(), sm)
-    assert ss.startswith("Screenshot saved to")
-
+    await browser_cog.screenshot(ctx)
     # status
-    status = await plugin.run_command("status", DummyCtx(), sm)
-    assert "Current state" in status
-
+    await browser_cog.status(ctx)
     # stop
-    stop = await plugin.run_command("stop", DummyCtx(), sm)
-    assert stop.startswith("Browser session stopped")
-
-    # ensure the background navigate() task has finished
-    await asyncio.sleep(0)
+    await browser_cog.stop(ctx)

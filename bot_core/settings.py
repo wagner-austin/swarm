@@ -16,7 +16,6 @@ class Settings(BaseSettings):
     db_name: str = "bot_data.db"
     backup_interval: int = 3600
     backup_retention: int = 10
-    role_name_map: Dict[str, str] = {}
     gemini_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
 

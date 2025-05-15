@@ -1,94 +1,49 @@
 """
 plugins/commands/plugin.py - Plugin management command plugin.
-Provides subcommands for listing, enabling, and disabling plugins.
+Provides subcommands for listing, enabling, and disabling plugins using Discord's extension system.
 Usage:
-  @bot plugin list
-  @bot plugin enable <plugin_name>
-  @bot plugin disable <plugin_name>
+  !plugins list
+  !plugins enable <extension>
+  !plugins disable <extension>
 """
 
-import logging
-from typing import List
-from bot_plugins.manager import plugin, get_all_plugins, enable_plugin, disable_plugin, disabled_plugins
-from bot_core.permissions import ADMIN
-from bot_core.state import BotStateMachine
-from bot_plugins.commands.subcommand_dispatcher import handle_subcommands, PluginArgError
-from bot_plugins.abstract import BasePlugin
-from bot_plugins.subcommand_mixin import SubcommandPluginMixin
+from discord.ext import commands
 
-@plugin(commands=['plugin'], canonical='plugin', required_role=ADMIN)
-class PluginManagerCommand(SubcommandPluginMixin, BasePlugin):
-    """
-    Manage plugins at runtime with subcommands: list, enable, disable.
-    Usage:
-      @bot plugin list
-      @bot plugin enable <plugin_name>
-      @bot plugin disable <plugin_name>
-    """
-    def __init__(self):
-        super().__init__(
-            "plugin",
-            help_text=(
-                "Manage plugins, list, enable, disable.")
-        )
-        self.subcommands = {
-            "list": self._sub_list,
-            "enable": self._sub_enable,
-            "disable": self._sub_disable
-        }
+class PluginManager(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
 
-    async def run_command(
-        self,
-        args: str,
-        ctx,
-        state_machine,
-        **kwargs
-    ) -> str:
-        usage = (
-            "Usage: @bot plugin <list|enable|disable> [args]\n"
-            "Examples:\n"
-            "  @bot plugin list\n"
-            "  @bot plugin enable <plugin_name>\n"
-            "  @bot plugin disable <plugin_name>"
-        )
-        return await self.dispatch_subcommands(
-            args,
-            subcommands=self.subcommands,
-            usage_msg=usage,
-            unknown_subcmd_msg="Unknown subcommand. See usage: " + usage,
-            default_subcommand="default",
-        )
+    @commands.group(name="plugins", invoke_without_command=True)
+    @commands.is_owner()
+    async def plugins(self, ctx):
+        await ctx.send("Usage: !plugins <list|enable|disable> [extension]")
 
-    def _sub_list(self, rest: List[str]) -> str:
-        info = get_all_plugins()
-        if not info:
-            return "No plugins found."
-        lines = []
-        for canonical, pdata in sorted(info.items()):
-            if canonical in disabled_plugins:
-                lines.append(f"{canonical} (disabled)")
-            else:
-                lines.append(f"{canonical}")
-        return "Installed Plugins:\n" + "\n".join(lines)
+    @plugins.command(name="list")
+    async def list_plugins(self, ctx):
+        # List loaded extensions
+        loaded = list(self.bot.extensions.keys())
+        if not loaded:
+            await ctx.send("No extensions loaded.")
+        else:
+            await ctx.send("Loaded extensions:\n" + "\n".join(loaded))
 
-    def _sub_enable(self, rest: List[str]) -> str:
-        if not rest:
-            return "Usage: @bot plugin enable <plugin_name>"
-        target = rest[0].lower()
-        plugins_dict = get_all_plugins()
-        if target not in plugins_dict:
-            return f"No plugin found with canonical name '{target}'."
-        enable_plugin(target)
-        return f"Plugin '{target}' has been enabled."
+    @plugins.command(name="enable")
+    async def enable_plugin(self, ctx, extension: str):
+        try:
+            await self.bot.load_extension(extension)
+            await ctx.send(f"Extension '{extension}' has been enabled.")
+        except Exception as e:
+            await ctx.send(f"Failed to enable extension '{extension}': {e}")
 
-    def _sub_disable(self, rest: List[str]) -> str:
-        if not rest:
-            return "Usage: @bot plugin disable <plugin_name>"
-        target = rest[0].lower()
-        plugins_dict = get_all_plugins()
-        if target not in plugins_dict:
-            return f"No plugin found with canonical name '{target}'."
-        disable_plugin(target)
-        return f"Plugin '{target}' has been disabled."
+    @plugins.command(name="disable")
+    async def disable_plugin(self, ctx, extension: str):
+        try:
+            await self.bot.unload_extension(extension)
+            await ctx.send(f"Extension '{extension}' has been disabled.")
+        except Exception as e:
+            await ctx.send(f"Failed to disable extension '{extension}': {e}")
+
+async def setup(bot):
+    await bot.add_cog(PluginManager(bot))
 
 # End of plugins/commands/plugin.py

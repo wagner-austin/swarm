@@ -27,11 +27,6 @@ class TestCoreConfig:
             pytest.skip("Skipping default db_name test because we are using an in-memory DB.")
         assert config.settings.db_name.endswith(".db")
 
-    @pytest.mark.asyncio
-    async def test_role_name_map(self):
-        assert isinstance(config.settings.role_name_map, dict)
-        # By default, should be empty dict
-        assert config.settings.role_name_map == {}
 
     @pytest.mark.asyncio
     async def test_backup_interval(self):
@@ -55,7 +50,6 @@ class TestCoreConfig:
         from bot_core.settings import Settings
         s = Settings(_env_file=None)
         assert s.db_name.endswith(".db")
-        assert s.role_name_map == {}
         assert s.backup_interval == 3600
         assert s.backup_retention == 10
 

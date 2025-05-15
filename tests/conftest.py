@@ -68,21 +68,6 @@ async def reset_user_state():
     yield
     await clear_user_states()
 
-@pytest.fixture
-def dummy_plugin():
-    """
-    tests/conftest.py - Fixture for dummy plugin registration.
-    Registers a dummy plugin in plugins.manager.plugin_registry and unregisters it after the test.
-    """
-    from plugins.manager import plugin_registry
-    dummy_plugin_data = {
-        "function": lambda args, sender, state_machine, msg_timestamp=None: "yes",
-        "aliases": ["test"],
-        "help_visible": True,
-    }
-    plugin_registry["test"] = dummy_plugin_data
-    yield dummy_plugin_data
-    plugin_registry.pop("test", None)
 
 @pytest.fixture
 def cli_runner():
