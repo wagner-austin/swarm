@@ -4,7 +4,9 @@ tests/parsers/test_message_parser.py - Tests for message parsing functionalities
 
 from bot_core.parsers.message_parser import parse_message
 
-def test_message_parsing():
+import pytest
+@pytest.mark.asyncio
+async def test_message_parsing():
     sample_message = (
         "Envelope\n"
         "from: +1234567890\n"

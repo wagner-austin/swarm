@@ -20,7 +20,7 @@ class FakeCtx:
         await self.channel.send(msg)
 
 @pytest.mark.asyncio
-async def test_announce_wizard_flow():
+async def test_announce_wizard_flow(async_db):
     _WIZARDS.clear()
     wiz = AnnounceWizard()
     ctx = FakeCtx(user_id=123)

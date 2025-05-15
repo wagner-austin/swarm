@@ -25,3 +25,8 @@ explorer_downloads/
 venv/
 .env/
 myenv/
+
+# Ignore setuptools build metadata
+test_build/
+*.egg-info/
+volunteer_bot.egg-info/

@@ -13,9 +13,11 @@ Usage Example:
 """
 
 from typing import Any, Dict, Optional, Tuple, List
-from db.repository import execute_sql
+from db.repository import BaseRepository
+from bot_core.storage import acquire
+import aiosqlite  # Ensure this is imported
 
-def fetch_one(query: str, params: Tuple[Any, ...] = ()) -> Optional[Dict[str, Any]]:
+async def fetch_one(query: str, params: Tuple[Any, ...] = ()) -> Optional[Dict[str, Any]]:
     """
     fetch_one(query, params=()) -> dict or None
     -------------------------------------------
@@ -24,14 +26,23 @@ def fetch_one(query: str, params: Tuple[Any, ...] = ()) -> Optional[Dict[str, An
     Usage Example:
         from bot_core.api.db_api import fetch_one
 
-        row = fetch_one("SELECT * FROM Volunteers WHERE phone=?", ("+15551234567",))
+        row = await fetch_one("SELECT * FROM Volunteers WHERE phone=?", ("+15551234567",))
         if row:
             print("Found volunteer:", row["phone"])
     """
-    row = execute_sql(query, params, fetchone=True)
-    return dict(row) if row else None
+    row = await _execute_sql_async(query, params, fetchone=True)
+    if row is None:
+        return None
+    # If row is already dict-like
+    if hasattr(row, 'keys'):
+        return {col: row[col] for col in row.keys()}
+    # If row is a tuple, try to get column names from cursor description (handled in _execute_sql_async)
+    if isinstance(row, dict):
+        return row
+    # Fallback: enumerate
+    return dict(enumerate(row))
 
-def fetch_all(query: str, params: Tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
+async def fetch_all(query: str, params: Tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
     """
     fetch_all(query, params=()) -> list of dict
     -------------------------------------------
@@ -40,14 +51,21 @@ def fetch_all(query: str, params: Tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
     Usage Example:
         from bot_core.api.db_api import fetch_all
 
-        rows = fetch_all("SELECT * FROM Volunteers WHERE available=?", (1,))
+        rows = await fetch_all("SELECT * FROM Volunteers WHERE available=?", (1,))
         for row in rows:
             print("Available volunteer:", row["phone"])
     """
-    rows = execute_sql(query, params, fetchall=True)
-    return [dict(r) for r in rows] if rows else []
+    rows = await _execute_sql_async(query, params, fetchall=True)
+    if not rows:
+        return []
+    if hasattr(rows[0], 'keys'):
+        return [{col: r[col] for col in r.keys()} for r in rows]
+    if isinstance(rows[0], dict):
+        return rows
+    # Fallback: enumerate
+    return [dict(enumerate(r)) for r in rows]
 
-def execute_query(query: str, params: Tuple[Any, ...] = (), commit: bool = False) -> None:
+async def execute_query(query: str, params: Tuple[Any, ...] = (), commit: bool = False) -> None:
     """
     execute_query(query, params=(), commit=False) -> None
     -----------------------------------------------------
@@ -57,11 +75,11 @@ def execute_query(query: str, params: Tuple[Any, ...] = (), commit: bool = False
     Usage Example:
         from bot_core.api.db_api import execute_query
 
-        execute_query("UPDATE Volunteers SET available=? WHERE phone=?", (0, "+15551234567"), commit=True)
+        await execute_query("UPDATE Volunteers SET available=? WHERE phone=?", (0, "+15551234567"), commit=True)
     """
-    execute_sql(query, params, commit=commit)
+    await _execute_sql_async(query, params, commit=commit)
 
-def insert_record(table: str, data: Dict[str, Any], replace: bool = False) -> int:
+async def insert_record(table: str, data: Dict[str, Any], replace: bool = False) -> int:
     """
     insert_record(table, data, replace=False) -> int
     ------------------------------------------------
@@ -71,11 +89,32 @@ def insert_record(table: str, data: Dict[str, Any], replace: bool = False) -> in
     Usage Example:
         from bot_core.api.db_api import insert_record
 
-        new_id = insert_record("Volunteers", {"phone": "+15551234567", "name": "Alice"}, replace=False)
+        new_id = await insert_record("Volunteers", {"phone": "+15551234567", "name": "Alice"}, replace=False)
         print("Inserted row with ID =", new_id)
     """
-    from db.repository import BaseRepository
     repo = BaseRepository(table_name=table)
-    return repo.create(data, replace=replace)
+    return await repo.create(data, replace=replace)
+
+async def _execute_sql_async(query: str, params: Tuple[Any, ...] = (), commit: bool = False, fetchone: bool = False, fetchall: bool = False):
+    async with acquire() as conn:
+        # Ensure rows are returned as dict-like objects
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(query, params)
+        result = None
+        if fetchone:
+            result = await cursor.fetchone()
+        elif fetchall:
+            result = await cursor.fetchall()
+        if commit:
+            await conn.commit()
+        # Attach cursor description for fallback dict conversion
+        if hasattr(cursor, 'description') and cursor.description is not None:
+            result_cursor_desc = [desc[0] for desc in cursor.description]
+            if fetchone and result is not None and not hasattr(result, 'keys'):
+                # Convert tuple row to dict using description
+                result = dict(zip(result_cursor_desc, result))
+            elif fetchall and result and not hasattr(result[0], 'keys'):
+                result = [dict(zip(result_cursor_desc, r)) for r in result]
+        return result
 
 # End of core/api/db_api.py

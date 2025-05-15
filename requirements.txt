@@ -4,3 +4,4 @@
 cryptography
 google-genai
 python-dotenv>=0.20.0
+alembic>=1.13

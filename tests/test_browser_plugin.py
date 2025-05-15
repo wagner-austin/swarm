@@ -20,7 +20,7 @@ def reload_modules(monkeypatch):
     bs.stop_browser_session()
 
 @pytest.mark.asyncio
-async def test_browser_command_flow(monkeypatch, tmp_path):
+async def test_browser_command_flow(async_db, monkeypatch, tmp_path):
     # patch download dir
     monkeypatch.setattr("bot_core.settings.settings.browser_download_dir", tmp_path)
 

@@ -12,7 +12,9 @@ import types
 from unittest.mock import patch
 from bot_plugins import manager
 
-def test_load_plugins_populates_registry():
+import pytest
+@pytest.mark.asyncio
+async def test_load_plugins_populates_registry():
     # Clear any existing plugins.
     manager.clear_plugins()
     # Load plugins from the plugins package.
@@ -23,7 +25,8 @@ def test_load_plugins_populates_registry():
     for command in core_plugins:
         assert command in plugins_dict, f"Core plugin '{command}' not loaded."
 
-def test_reload_plugins_clears_and_reloads():
+@pytest.mark.asyncio
+async def test_reload_plugins_clears_and_reloads():
     # Load plugins initially.
     manager.load_plugins()
     initial_plugins = manager.get_all_plugins().copy()
@@ -35,7 +38,8 @@ def test_reload_plugins_clears_and_reloads():
     # Although the references might be updated, the keys should remain consistent.
     assert set(initial_plugins.keys()) == set(reloaded_plugins.keys())
 
-def test_reload_plugins_with_dynamic_changes():
+@pytest.mark.asyncio
+async def test_reload_plugins_with_dynamic_changes():
     """
     Test reload_plugins() after dynamically adding/removing a plugin file.
     Mocks pkgutil.walk_packages to simulate plugin modules being discovered or removed at runtime.

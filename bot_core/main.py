@@ -8,7 +8,6 @@ import asyncio
 import os
 import logging
 
-import db.schema
 import logging
 from bot_core.bot_orchestrator import BotOrchestrator
 from bot_core.settings import settings
@@ -20,8 +19,31 @@ logger = logging.getLogger(__name__)
 
 async def main() -> None:
     # Initialize the SQLite database (creates tables if they do not exist)
-    db.schema.init_db()
-    
+    import subprocess, pathlib, os
+    # Always use the correct alembic.ini location and run from project root
+    project_root = pathlib.Path(__file__).resolve().parent.parent
+    alembic_ini = project_root / "migrations" / "alembic.ini"
+
+    # Always use DB_URL from environment
+    env = os.environ.copy()
+    db_url = env.get("DB_URL")
+    if db_url:
+        env["DB_URL"] = db_url
+    # Ensure PYTHONPATH includes the project root so 'migrations' is importable
+    env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
+    result = subprocess.run(
+        [
+            "alembic", "-c", str(alembic_ini), "upgrade", "head"
+        ],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        env=env
+    )
+    if result.returncode != 0:
+        print("Alembic failed:\n", result.stdout, result.stderr)
+        raise RuntimeError(f"Alembic failed with exit code {result.returncode}")
+
     # Create an automatic backup at startup
     backup_path = create_backup()
     logger.info(f"Startup backup created at: {backup_path}")

@@ -10,7 +10,9 @@ import pytest
 from bot_plugins.manager import plugin, clear_plugins, plugin_registry, alias_mapping
 
 
-def test_substring_alias_coexistence():
+import pytest
+@pytest.mark.asyncio
+async def test_substring_alias_coexistence():
     """
     Ensure that registering plugins with aliases where one is a substring/prefix of the other
     (e.g., 'info' vs. 'information') does not cause incorrect conflicts or matches.
@@ -43,12 +45,8 @@ def test_substring_alias_coexistence():
 
     # Mock arguments
     import asyncio
-    info_result = func_info("", "+1234", None)
-    if asyncio.iscoroutine(info_result):
-        info_result = asyncio.get_event_loop().run_until_complete(info_result)
-    information_result = func_information("", "+5678", None)
-    if asyncio.iscoroutine(information_result):
-        information_result = asyncio.get_event_loop().run_until_complete(information_result)
+    info_result = await func_info("", "+1234", None)
+    information_result = await func_information("", "+5678", None)
 
     assert "Invoked info plugin" in info_result
     assert "Invoked information plugin" in information_result

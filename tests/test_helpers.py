@@ -5,9 +5,11 @@ This module provides common functions for inserting test records, fetching resul
 All tests requiring database operations should import these functions to avoid code duplication and ensure consistency.
 """
 
-from db.connection import get_connection
+from bot_core.storage import acquire
+import pytest
 
-def insert_record(query, params):
+@pytest.mark.asyncio
+async def insert_record(query, params):
     """
     insert_record - Inserts a record using the provided SQL query and parameters.
     
@@ -18,15 +20,14 @@ def insert_record(query, params):
     Returns:
         int: The last inserted row id.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    conn.commit()
-    last_id = cursor.lastrowid
-    conn.close()
-    return last_id
+    async with acquire() as conn:
+        cursor = await conn.execute(query, params)
+        await conn.commit()
+        last_id = cursor.lastrowid
+        return last_id
 
-def fetch_one(query, params=()):
+@pytest.mark.asyncio
+async def fetch_one(query, params=()):
     """
     fetch_one - Executes a SQL query and returns a single result.
     
@@ -37,24 +38,21 @@ def fetch_one(query, params=()):
     Returns:
         sqlite3.Row: The first row of the result set.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    row = cursor.fetchone()
-    conn.close()
-    return row
+    async with acquire() as conn:
+        cursor = await conn.execute(query, params)
+        row = await cursor.fetchone()
+        return row
 
-def cleanup_table(table_name):
+@pytest.mark.asyncio
+async def cleanup_table(table_name):
     """
     cleanup_table - Deletes all records from the specified table.
     
     Args:
         table_name (str): Name of the table to clean.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(f"DELETE FROM {table_name}")
-    conn.commit()
-    conn.close()
+    async with acquire() as conn:
+        await conn.execute(f"DELETE FROM {table_name}")
+        await conn.commit()
 
 # End of tests/test_helpers.py

@@ -82,6 +82,7 @@ OPENAI_API_KEY=your-openai-key-here
 
 > **Note:** Pydantic automatically loads environment variables from the `.env` file. You do not need to export variables in your shell. Just create or edit the `.env` file and restart the bot.
 
+> **Note:** Run Alembic migrations to initialize the database schema and restart the bot.
 
 ## Building multi-step wizards
 
