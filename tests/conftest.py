@@ -11,49 +11,62 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import tempfile
 import pytest
+import asyncio
+import pathlib
+import os
+import pytest_asyncio
+from bot_core.storage import acquire
 
-# Immediately override DB_NAME for tests before any other modules are imported.
-fd, temp_db_path = tempfile.mkstemp(prefix="bot_data_test_", suffix=".db")
-os.close(fd)
-os.environ["DB_NAME"] = temp_db_path
+# --- Robust file-based test DB setup ---
+@pytest.fixture(scope="session", autouse=True)
+def test_db_file():
+    db_fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(db_fd)
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+    os.environ["DB_URL"] = db_url
+    yield db_path
+    os.remove(db_path)
+
+from alembic.config import Config
+from alembic import command
 
 @pytest.fixture(scope="session", autouse=True)
-def test_database():
-    """
-    tests/conftest.py - Creates and initializes a temporary database for testing.
-    The DB_NAME environment variable is set to a temporary file for isolation.
-    After tests, the temporary database file is removed and DB_NAME is unset.
-    """
-    import db.schema
-    db.schema.init_db()
-    yield
-    try:
-        os.remove(temp_db_path)
-    except Exception:
-        pass
-    os.environ.pop("DB_NAME", None)
+def apply_migrations(test_db_file):
+    alembic_ini = pathlib.Path(__file__).parents[1] / "alembic.ini"
+    alembic_cfg = Config(str(alembic_ini))
+    alembic_cfg.set_main_option("sqlalchemy.url", os.environ["DB_URL"])
+    alembic_cfg.set_main_option("script_location", "migrations")
+    command.upgrade(alembic_cfg, "head")
 
-@pytest.fixture(scope="session", autouse=True)
-def reset_user_state():
+
+@pytest_asyncio.fixture(scope="function")
+async def async_db():
     """
-    Fixture to initialize the DB schema once per test session and reset UserStates between tests.
-    Mirrors the Discord-centric schema and keeps tests independent.
+    Async fixture to yield an aiosqlite connection with in-memory DB.
     """
-    import db.schema
-    db.schema.init_db()
-    from db.connection import get_connection
-    def clear_user_states():
-        conn = get_connection()
-        cursor = conn.cursor()
-        # Check if UserStates table exists before attempting to delete
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='UserStates'")
-        if cursor.fetchone() is not None:
-            cursor.execute("DELETE FROM UserStates")
-            conn.commit()
-        conn.close()
-    clear_user_states()
+    async with acquire() as conn:
+        yield conn
+
+import pathlib
+import pytest_asyncio
+from bot_core.api import db_api
+from alembic.config import Config
+from alembic import command
+
+
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def reset_user_state():
+    """
+    Clear UserStates table between tests. Alembic migrations are already applied session-wide.
+    """
+    async def clear_user_states():
+        row = await db_api.fetch_one("SELECT name FROM sqlite_master WHERE type='table' AND name='UserStates'")
+        if row is not None:
+            await db_api.execute_query("DELETE FROM UserStates", commit=True)
+    await clear_user_states()
     yield
-    clear_user_states()
+    await clear_user_states()
 
 @pytest.fixture
 def dummy_plugin():
@@ -82,7 +95,7 @@ def cli_runner():
 
 import sys, types, pytest
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True, scope="function")
 def patch_uc(monkeypatch):
     """Stub out undetected_chromedriver and the selenium import tree."""
     dummy_driver = types.SimpleNamespace(

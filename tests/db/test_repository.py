@@ -6,39 +6,38 @@ Ensures that execute_sql and BaseRepository methods work as expected,
 including fetchone/fetchall usage and basic CRUD operations.
 """
 
-from db.connection import db_connection
-from db.repository import execute_sql
+import pytest
+from bot_core.api import db_api
 
 
-def test_execute_sql_fetchone():
+@pytest.mark.asyncio
+async def test_execute_sql_fetchone(async_db):
     """
-    Ensure execute_sql can fetch exactly one row with fetchone=True.
+    Ensure async DB API can fetch exactly one row with fetch_one.
     """
-    # Create a temporary table and insert a record.
-    with db_connection() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS TestTable (id INTEGER PRIMARY KEY, value TEXT)")
-        conn.execute("DELETE FROM TestTable")  # Clear table
-        conn.execute("INSERT INTO TestTable (value) VALUES (?)", ("test_value",))
-        conn.commit()
+    # Create a temporary table and insert a record using async DB API
+    await db_api.execute_query("CREATE TABLE IF NOT EXISTS TestTable (id INTEGER PRIMARY KEY, value TEXT)", commit=True)
+    await db_api.execute_query("DELETE FROM TestTable", commit=True)
+    await db_api.execute_query("INSERT INTO TestTable (value) VALUES (?)", ("test_value",), commit=True)
 
-    result = execute_sql("SELECT value FROM TestTable WHERE id = ?", (1,), fetchone=True)
-    assert result is not None
-    assert result["value"] == "test_value"
+    row = await db_api.fetch_one("SELECT value FROM TestTable WHERE id = ?", (1,))
+    assert row is not None
+    assert row["value"] == "test_value"
 
 
-def test_execute_sql_fetchall():
+@pytest.mark.asyncio
+async def test_execute_sql_fetchall(async_db):
     """
-    Ensure execute_sql can fetch multiple rows with fetchall=True.
+    Ensure async DB API can fetch multiple rows with fetch_all.
     """
-    with db_connection() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS TestTable (id INTEGER PRIMARY KEY, value TEXT)")
-        conn.execute("DELETE FROM TestTable")  # Clear table
-        conn.executemany("INSERT INTO TestTable (value) VALUES (?)", [("val1",), ("val2",), ("val3",)])
-        conn.commit()
+    await db_api.execute_query("CREATE TABLE IF NOT EXISTS TestTable (id INTEGER PRIMARY KEY, value TEXT)", commit=True)
+    await db_api.execute_query("DELETE FROM TestTable", commit=True)
+    for val in ["val1", "val2", "val3"]:
+        await db_api.execute_query("INSERT INTO TestTable (value) VALUES (?)", (val,), commit=True)
 
-    results = execute_sql("SELECT value FROM TestTable", fetchall=True)
-    assert len(results) == 3
-    values = [row["value"] for row in results]
+    rows = await db_api.fetch_all("SELECT value FROM TestTable")
+    assert len(rows) == 3
+    values = [row["value"] for row in rows]
     assert "val1" in values and "val2" in values and "val3" in values
 
 # End of tests/db/test_repository.py
