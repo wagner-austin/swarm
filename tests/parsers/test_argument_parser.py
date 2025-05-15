@@ -5,7 +5,7 @@ Verifies that split_args and parse_key_value_args work as expected.
 """
 
 import pytest
-from parsers.argument_parser import split_args, parse_key_value_args
+from bot_core.parsers.argument_parser import split_args, parse_key_value_args
 
 def test_split_args_default():
     # When no delimiter is provided, split on whitespace.

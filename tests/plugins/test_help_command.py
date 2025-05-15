@@ -5,11 +5,12 @@ Tests for the 'help' command plugin.
 Verifies that the plugin returns a non-empty string and references at least one whitelisted command.
 """
 
-from core.state import BotStateMachine
-from plugins.manager import get_plugin
+from bot_core.state import BotStateMachine
+from bot_plugins.manager import get_plugin, load_plugins
 import asyncio
 
 def test_help_command():
+    load_plugins()
     state_machine = BotStateMachine()
     help_plugin = get_plugin("help")
     response = help_plugin("", "+dummy", state_machine, msg_timestamp=123)

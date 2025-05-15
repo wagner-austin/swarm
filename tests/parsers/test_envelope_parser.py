@@ -3,7 +3,7 @@ tests/parsers/test_envelope_parser.py - Tests for envelope parsing functionaliti
 This module tests extraction of sender, body, timestamps, group info, and reply details from message envelopes.
 """
 
-from parsers.envelope_parser import parse_sender, parse_body, parse_timestamp, parse_group_info, parse_reply_id, parse_message_timestamp
+from bot_core.parsers.envelope_parser import parse_sender, parse_body, parse_timestamp, parse_group_info, parse_reply_id, parse_message_timestamp
 
 def test_parse_sender():
     message = "Envelope\nfrom: +1234567890\nBody: Hello"

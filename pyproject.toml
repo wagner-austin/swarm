@@ -1,0 +1,37 @@
+[project]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bot_core*", "bot_plugins*"]
+name = "volunteer-bot"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+  "cryptography>=42",
+  "google-genai>=0.4",
+  "python-dotenv>=0.20",
+  "pydantic>=2",
+  "requests>=2.31",
+  "rotki-pysqlcipher3>=1.4",
+  "undetected_chromedriver>=3",
+  "discord.py>=2.3",
+]
+
+[project.optional-dependencies]
+discord = ["discord.py[voice]>=2.3"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.4",
+  "bowler>=0.10",
+]
+
+[project.packages]
+bot_core = { from = "bot_core" }
+bot_plugins = { from = "bot_plugins" }
+
+[project.entry-points."bot_plugins"]
+builtin = "bot_plugins.commands"
+
+[project.scripts]
+volunteer-bot = "bot_core.main:main"

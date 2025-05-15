@@ -2,7 +2,7 @@
 tests/core/test_state.py - Tests for the bot state management.
 """
 
-from core.state import BotStateMachine
+from bot_core.state import BotStateMachine
 
 def test_state_machine_initially_running():
     state_machine = BotStateMachine()

@@ -3,7 +3,7 @@ tests/core/test_metrics.py - Tests for the metrics module.
 Ensures uptime and message counting functionality work as expected.
 """
 
-import core.metrics as metrics
+import bot_core.metrics as metrics
 
 def test_get_uptime():
     uptime = metrics.get_uptime()

@@ -14,7 +14,7 @@ import shutil
 from datetime import datetime
 import asyncio
 import logging
-from core.config import DB_NAME, BACKUP_INTERVAL
+from bot_core.config import DB_NAME, BACKUP_INTERVAL
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ Also tests that substring/prefix aliases like "info" vs. "information" do not co
 """
 
 import pytest
-from plugins.manager import plugin, clear_plugins, plugin_registry, alias_mapping
+from bot_plugins.manager import plugin, clear_plugins, plugin_registry, alias_mapping
 
 
 def test_substring_alias_coexistence():

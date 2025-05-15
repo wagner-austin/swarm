@@ -2,7 +2,7 @@
 tests/parsers/test_message_parser.py - Tests for message parsing functionalities.
 """
 
-from parsers.message_parser import parse_message
+from bot_core.parsers.message_parser import parse_message
 
 def test_message_parsing():
     sample_message = (
