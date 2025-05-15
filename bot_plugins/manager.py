@@ -19,6 +19,30 @@ from typing import Callable, Any, Optional, Dict, List, Union, Set
 
 logger = logging.getLogger(__name__)
 
+# ------------------------------------------------------------------ #
+# Internal exceptions for plugin dispatch helpers                     #
+# ------------------------------------------------------------------ #
+class _PluginNotFound(RuntimeError):
+    """Raised when no matching plugin exists or the plugin is disabled."""
+
+class _PluginExecutionError(RuntimeError):
+    """Raised by execute_plugin() to bubble-up unexpected failures."""
+
+# ------------------------------------------------------------------ #
+# Helper: guarantee we always deal with an *awaitable* callable.     #
+# ------------------------------------------------------------------ #
+def _ensure_awaitable(func):
+    """
+    Return *func* unchanged if it is already a coroutine-function.
+    Otherwise wrap it in a lightweight coroutine so callers can
+    always use `await` safely.
+    """
+    if inspect.iscoroutinefunction(func):
+        return func
+    async def _wrapper(*a, **kw):          # type: ignore[no-redef]
+        return func(*a, **kw)
+    return _wrapper
+
 # Import role constants and permission check
 from bot_core.permissions import OWNER, has_permission
 from bot_core.identity import resolve_role
@@ -65,11 +89,7 @@ def plugin(
         if inspect.isclass(obj):
             instance = obj()  # Instantiate once
             help_text = getattr(instance, "help_text", "") or (obj.__doc__ or "").strip()
-            async def plugin_func(args, ctx, state_machine, **kwargs):
-                if inspect.iscoroutinefunction(instance.run_command):
-                    return await instance.run_command(args, ctx, state_machine, **kwargs)
-                else:
-                    return instance.run_command(args, ctx, state_machine, **kwargs)
+            plugin_func = _ensure_awaitable(instance.run_command)
             plugin_registry[canonical_name] = {
                 "function": plugin_func,
                 "aliases": normalized_commands,
@@ -82,12 +102,7 @@ def plugin(
             if not hasattr(obj, "help_text"):
                 obj.help_text = ""
             help_text = getattr(obj, "help_text", "") or (obj.__doc__ or "").strip()
-            if inspect.iscoroutinefunction(obj):
-                async def plugin_func(args, ctx, state_machine, **kwargs):
-                    return await obj(args, ctx, state_machine, **kwargs)
-            else:
-                async def plugin_func(args, ctx, state_machine, **kwargs):
-                    return obj(args, ctx, state_machine, **kwargs)
+            plugin_func = _ensure_awaitable(obj)
             plugin_registry[canonical_name] = {
                 "function": plugin_func,
                 "aliases": normalized_commands,
@@ -191,83 +206,88 @@ def reload_plugins(concurrent: bool = False) -> None:
     load_plugins(concurrent=concurrent)
 
 
-async def dispatch_message(parsed, ctx, state_machine, logger=None) -> Any:
+def resolve_plugin(parsed) -> tuple[str, dict]:
     """
-    dispatch_message - Processes an incoming message by dispatching commands to plugins.
-    Also enforces role-based permissions by comparing the user's role
-    to the plugin's required_role.
+    Return *(canonical_name, plugin_info)* or raise _PluginNotFound.
 
-    Returns either a string or a coroutine that the caller should await.
+    Does alias lookup, fuzzy matching, and disabled-plugin checks but
+    **does not** touch permissions or run the code.
     """
-    command: Optional[str] = parsed.command
-    if command is None:
-        return ""
+    command = normalize_alias(parsed.command or "")
+    canonical = alias_mapping.get(command)
 
-    if logger is None:
-        logger = logging.getLogger(__name__)
+    # Direct hit
+    if canonical and canonical not in disabled_plugins:
+        return canonical, plugin_registry[canonical]
 
-    args: Optional[str] = parsed.args
-
-    # ctx is expected to be a discord.Message or compatible object
-    user_role = resolve_role(getattr(ctx, 'author', ctx))
-
-    # Attempt to find the plugin info by direct alias lookup
-    canonical_cmd = alias_mapping.get(normalize_alias(command))
-    plugin_info = None
-    if canonical_cmd is not None:
-        plugin_info = plugin_registry.get(canonical_cmd)
-
-    # If not found, attempt fuzzy matching
-    if not plugin_info:
-        available_commands = list(plugin_registry.keys())
-        matches = difflib.get_close_matches(normalize_alias(command), available_commands, n=1, cutoff=0.75)
+    # Fuzzy match
+    if not canonical:
+        matches = difflib.get_close_matches(
+            command, plugin_registry.keys(), n=1, cutoff=0.75
+        )
         if matches:
-            matched_cmd = matches[0]
-            plugin_info = plugin_registry[matched_cmd]
-            logger.info(f"Fuzzy matching: '{command}' -> '{matched_cmd}'")
-            # If the matched plugin is disabled, treat as None
-            if matched_cmd in disabled_plugins:
-                return f"Plugin '{matched_cmd}' is currently disabled."
-        else:
-            return ""
+            canonical = matches[0]
+            if canonical not in disabled_plugins:
+                logger.info("Fuzzy matching: %s  %s", parsed.command, canonical)
+                return canonical, plugin_registry[canonical]
 
-    # If somehow still None, bail out
-    if not plugin_info:
-        return ""
+    # Anything else is treated as not found / disabled
+    raise _PluginNotFound
 
-    # Check if plugin is disabled
-    canon_name = None
-    for k, v in plugin_registry.items():
-        if v is plugin_info:
-            canon_name = k
-            break
-    if canon_name and canon_name in disabled_plugins:
-        return f"Plugin '{canon_name}' is currently disabled."
 
-    # Enforce role-based permission
-    required_role = plugin_info.get("required_role", OWNER)
+def check_permission(plugin_info: dict, user_role: str) -> None:
+    """
+    Raise PermissionError if *user_role* lacks access to *plugin_info*.
+    """
+    required = plugin_info.get("required_role", OWNER)
+    if not has_permission(user_role, required):
+        raise PermissionError
 
-    # User role is already determined by resolve_role(sender) in the calling context
-    if not has_permission(user_role, required_role):
-        return "You do not have permission to use this command."
 
+async def execute_plugin(
+    plugin_info: dict, args: str, ctx, state_machine, *, logger
+) -> str:
+    """
+    Run the plugin function, catching and re-raising internal errors as
+    _PluginExecutionError so dispatch_message() can decide what to say to
+    the user.
+    """
     plugin_func = plugin_info.get("function")
     if not plugin_func:
-        return ""
+        raise _PluginExecutionError("missing plugin function")
 
     try:
-        response = await plugin_func(args or "", ctx, state_machine)
-        if response is None or not isinstance(response, str):
+        result = await plugin_func(args, ctx, state_machine)
+        if not isinstance(result, str):
             logger.warning(
-                f"Plugin '{command}' returned non-string or None. Returning empty string."
+                "Plugin %s returned non-string %r", plugin_info, type(result)
             )
-            response = ""
-        return response
-    except Exception as e:
-        logger.exception(
-            f"Error executing plugin for command '{command}' with args '{args}' "
-            f"from sender '{getattr(ctx, 'author', ctx)}': {e}"
-        )
+            return ""
+        return result
+    except Exception as exc:                     # noqa: BLE001
+        logger.exception("Plugin execution failure: %s", exc)
+        raise _PluginExecutionError from exc
+
+
+async def dispatch_message(parsed, ctx, state_machine, logger=None):
+    if parsed.command is None:
+        return ""
+
+    logger = logger or logging.getLogger(__name__)
+    user_role = resolve_role(getattr(ctx, "author", ctx))
+
+    try:
+        canonical, info = resolve_plugin(parsed)
+        check_permission(info, user_role)
+        return await execute_plugin(info, parsed.args or "", ctx, state_machine, logger=logger)
+
+    except _PluginNotFound:
+        return ""  # silent fall-through  command not recognised
+
+    except PermissionError:
+        return "You do not have permission to use this command."
+
+    except _PluginExecutionError:
         return "An internal error occurred while processing your command."
 
 # End of plugins/manager.py

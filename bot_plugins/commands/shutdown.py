@@ -12,13 +12,14 @@ from typing import List, Optional
 from bot_plugins.manager import plugin
 from bot_core.permissions import OWNER
 from bot_core.state import BotStateMachine
-from bot_plugins.commands.subcommand_dispatcher import handle_subcommands, PluginArgError
+from bot_plugins.commands.subcommand_dispatcher import handle_subcommands
 from bot_plugins.abstract import BasePlugin
 from bot_plugins.messages import BOT_SHUTDOWN, INTERNAL_ERROR
+from bot_plugins.subcommand_mixin import SubcommandPluginMixin
 
 
 @plugin(['shutdown', 'shut down'], canonical='shutdown', required_role=OWNER)
-class ShutdownPlugin(BasePlugin):
+class ShutdownPlugin(SubcommandPluginMixin, BasePlugin):
     """
     Shut down the bot.
     Usage:
@@ -41,21 +42,12 @@ class ShutdownPlugin(BasePlugin):
         **kwargs
     ) -> str:
         self.state_machine = state_machine
-        usage = "Usage: @bot shutdown"
-        try:
-            return handle_subcommands(
-                args,
-                subcommands=self.subcommands,
-                usage_msg=usage,
-                unknown_subcmd_msg="Unknown subcommand. See usage: " + usage,
-                default_subcommand="default"
-            )
-        except PluginArgError as e:
-            self.logger.error(f"Argument parsing error in shutdown command: {e}", exc_info=True)
-            return str(e)
-        except Exception as e:
-            self.logger.error(f"Unexpected error in shutdown command: {e}", exc_info=True)
-            return INTERNAL_ERROR
+        return await self.dispatch_subcommands(
+            args,
+            subcommands=self.subcommands,
+            usage_msg="Usage: @bot shutdown",
+            default_subcommand="default",
+        )
     
     def _default_subcmd(self, rest: List[str]) -> str:
         if rest:

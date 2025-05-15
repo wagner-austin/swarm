@@ -14,9 +14,10 @@ from bot_core.permissions import ADMIN
 from bot_core.state import BotStateMachine
 from bot_plugins.commands.subcommand_dispatcher import handle_subcommands, PluginArgError
 from bot_plugins.abstract import BasePlugin
+from bot_plugins.subcommand_mixin import SubcommandPluginMixin
 
 @plugin(commands=['plugin'], canonical='plugin', required_role=ADMIN)
-class PluginManagerCommand(BasePlugin):
+class PluginManagerCommand(SubcommandPluginMixin, BasePlugin):
     """
     Manage plugins at runtime with subcommands: list, enable, disable.
     Usage:
@@ -50,28 +51,13 @@ class PluginManagerCommand(BasePlugin):
             "  @bot plugin enable <plugin_name>\n"
             "  @bot plugin disable <plugin_name>"
         )
-        try:
-            return handle_subcommands(
-                args,
-                subcommands=self.subcommands,
-                usage_msg=usage,
-                unknown_subcmd_msg="Unknown subcommand. See usage: " + usage,
-                default_subcommand="default"
-            )
-        except PluginArgError as e:
-            # Use print as fallback if logger is not available (for test context)
-            try:
-                self.logger.error(f"Argument parsing error in plugin command: {e}", exc_info=True)
-            except AttributeError:
-                print(f"Argument parsing error in plugin command: {e}")
-            return str(e)
-        except Exception as e:
-            # Use print as fallback if logger is not available (for test context)
-            try:
-                self.logger.error(f"Unexpected error in plugin command: {e}", exc_info=True)
-            except AttributeError:
-                print(f"Unexpected error in plugin command: {e}")
-            return "An internal error occurred."
+        return await self.dispatch_subcommands(
+            args,
+            subcommands=self.subcommands,
+            usage_msg=usage,
+            unknown_subcmd_msg="Unknown subcommand. See usage: " + usage,
+            default_subcommand="default",
+        )
 
     def _sub_list(self, rest: List[str]) -> str:
         info = get_all_plugins()

@@ -1,5 +1,4 @@
 import os
-import asyncio
 import logging
 from bot_plugins.manager import plugin
 from bot_core.permissions import OWNER
@@ -8,6 +7,7 @@ from bot_plugins.commands.subcommand_dispatcher import handle_subcommands
 from bot_core.parsers.plugin_arg_parser import PluginArgError
 from bot_core.api.browser_service import BrowserService, default_browser_service
 from bot_core.settings import settings
+from bot_plugins.subcommand_mixin import SubcommandPluginMixin
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ USAGE = (
 )
 
 @plugin(commands=["browser"], canonical="browser", required_role=OWNER)
-class BrowserPlugin(BasePlugin):
+class BrowserPlugin(SubcommandPluginMixin, BasePlugin):
     def __init__(self, browser_service: BrowserService | None = None):
         super().__init__("browser", help_text="Control a headless Chrome session")
         self.browser = browser_service or default_browser_service
@@ -34,26 +34,13 @@ class BrowserPlugin(BasePlugin):
         }
 
     async def run_command(self, args, ctx, state_machine, **kw):
-        try:
-            result = handle_subcommands(
-                args,
-                subcommands=self.subcommands,
-                usage_msg=USAGE,
-                unknown_subcmd_msg="Unknown subcommand.  See usage:\n" + USAGE,
-                parse_mode="positional",
-                default_subcommand=None
-            )
-            if asyncio.iscoroutine(result):
-                result = await result
-            if isinstance(result, str):
-                return result
-            logger.warning("Non-string result from subcommand: %r", result)
-            return ""
-        except PluginArgError as e:
-            return str(e)
-        except Exception as e:
-            logger.exception("Unhandled error in browser plugin")
-            return "An internal error occurred."
+        return await self.dispatch_subcommands(
+            args,
+            subcommands=self.subcommands,
+            usage_msg=USAGE,
+            unknown_subcmd_msg="Unknown subcommand.  See usage:\n" + USAGE,
+            parse_mode="positional",
+        )
 
     async def _sub_start(self, rest):
         url = rest[0] if rest else None
