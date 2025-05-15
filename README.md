@@ -63,3 +63,21 @@ ENABLE_BOT_PREFIX=true
 
 # DB_NAME: The name of the SQLite database file.
 DB_NAME=bot_data.db
+
+
+## Building multi-step wizards
+
+You can build interactive, multi-step workflows using the `WizardPlugin` mix-in. Wizards keep short-lived, per-user state (TTL: 1 hour) and can be extended for REST or chat use. Example:
+
+```python
+class MyWizard(WizardPlugin):
+    def __init__(self):
+        self.command_name = "mywiz"
+        self.steps = {"start": self.ask, "next": self.next_step}
+    async def ask(self, ctx, convo):
+        convo.data["step"] = "next"
+        return "What is your input?"
+    async def next_step(self, ctx, convo, answer):
+        return f"You said: {answer}"
+```
+See `plugins/wizard.py` for details. Wizards are channel-agnostic and can be used in REST APIs or chatbots alike.
