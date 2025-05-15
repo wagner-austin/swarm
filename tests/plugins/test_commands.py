@@ -8,8 +8,8 @@ This file no longer tests individual plugin commands in detail; see per-plugin t
 """
 
 import pytest
-from plugins.manager import load_plugins, get_all_plugins
-from core.state import BotStateMachine
+from bot_plugins.manager import load_plugins, get_all_plugins
+from bot_core.state import BotStateMachine
 
 @pytest.mark.asyncio
 async def test_all_plugin_commands():

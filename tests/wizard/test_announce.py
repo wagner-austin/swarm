@@ -1,6 +1,6 @@
 import pytest
-from plugins.commands.announce_wizard import AnnounceWizard
-from core.conversation import _WIZARDS
+from bot_plugins.commands.announce_wizard import AnnounceWizard
+from bot_core.conversation import _WIZARDS
 
 class FakeChannel:
     def __init__(self):

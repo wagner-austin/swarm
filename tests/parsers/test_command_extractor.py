@@ -3,7 +3,7 @@ tests/parsers/test_command_extractor.py - Tests for command extraction functiona
 This module tests the extraction of commands and arguments from message bodies.
 """
 
-from parsers.command_extractor import parse_command_from_body
+from bot_core.parsers.command_extractor import parse_command_from_body
 
 def test_parse_command_with_prefix():
     body = "@bot register John Doe"

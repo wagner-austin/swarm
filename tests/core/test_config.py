@@ -10,7 +10,7 @@ import importlib
 import pytest
 import logging
 from unittest.mock import patch
-import core.config as config
+import bot_core.config as config
 
 @pytest.mark.usefixtures("reset_user_state")  # If needed in your environment
 class TestCoreConfig:

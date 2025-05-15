@@ -10,7 +10,7 @@ import pkgutil
 import importlib
 import types
 from unittest.mock import patch
-from plugins import manager
+from bot_plugins import manager
 
 def test_load_plugins_populates_registry():
     # Clear any existing plugins.
@@ -45,14 +45,14 @@ def test_reload_plugins_with_dynamic_changes():
 
     # Simulate an initial list of discovered plugin modules
     initial_module_list = [
-        pkgutil.ModuleInfo(None, "plugins.commands.existing_a", False),
-        pkgutil.ModuleInfo(None, "plugins.commands.existing_b", False),
+        pkgutil.ModuleInfo(None, "bot_plugins.commands.existing_a", False),
+        pkgutil.ModuleInfo(None, "bot_plugins.commands.existing_b", False),
     ]
 
     # Then simulate that 'existing_b' is removed and 'new_plugin' is added
     updated_module_list = [
-        pkgutil.ModuleInfo(None, "plugins.commands.existing_a", False),
-        pkgutil.ModuleInfo(None, "plugins.commands.new_plugin", False),
+        pkgutil.ModuleInfo(None, "bot_plugins.commands.existing_a", False),
+        pkgutil.ModuleInfo(None, "bot_plugins.commands.new_plugin", False),
     ]
 
     call_count = {"count": 0}
@@ -70,14 +70,14 @@ def test_reload_plugins_with_dynamic_changes():
         with patch("importlib.import_module") as mock_import:
             def import_side_effect(name, *args, **kwargs):
                 if name in {
-                    "plugins.commands.existing_a",
-                    "plugins.commands.existing_b",
-                    "plugins.commands.new_plugin",
+                    "bot_plugins.commands.existing_a",
+                    "bot_plugins.commands.existing_b",
+                    "bot_plugins.commands.new_plugin",
                 }:
                     dummy_module = types.ModuleType(name)
                     final_part = name.split(".")[-1]
                     code = f'''
-from plugins.manager import plugin
+from bot_plugins.manager import plugin
 
 @plugin(commands=["{final_part}"], canonical="{final_part}", help_visible=True)
 def dummy_plugin_command(args, sender, state_machine, msg_timestamp=None):

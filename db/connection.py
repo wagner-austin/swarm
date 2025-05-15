@@ -8,7 +8,7 @@ import sqlite3
 import logging
 from sqlite3 import Connection
 from contextlib import contextmanager
-from core.config import DB_NAME
+from bot_core.config import DB_NAME
 
 logger = logging.getLogger(__name__)
 
