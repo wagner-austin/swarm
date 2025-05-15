@@ -8,9 +8,12 @@ import sqlite3
 import logging
 from sqlite3 import Connection
 from contextlib import contextmanager
-from bot_core.config import DB_NAME
+import threading
+from bot_core.settings import settings
 
 logger = logging.getLogger(__name__)
+
+_DB_LOCK = threading.Lock()
 
 def get_connection() -> Connection:
     """
@@ -23,15 +26,16 @@ def get_connection() -> Connection:
         Connection: The SQLite connection object with row_factory set to sqlite3.Row.
     """
     try:
-        conn = sqlite3.connect(DB_NAME)
-        conn.row_factory = sqlite3.Row
-        return conn
+        with _DB_LOCK:
+            conn = sqlite3.connect(settings.db_name, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            return conn
     except (sqlite3.OperationalError, OSError) as e:
-        logger.error(f"Error connecting to SQLite database {DB_NAME!r}: {e}")
+        logger.error(f"Error connecting to SQLite database {settings.db_name!r}: {e}")
         raise
     except Exception as ex:
         # Catch-all for unexpected exceptions
-        logger.error(f"Unexpected error while connecting to SQLite database {DB_NAME!r}: {ex}")
+        logger.error(f"Unexpected error while connecting to SQLite database {settings.db_name!r}: {ex}")
         raise
 
 @contextmanager

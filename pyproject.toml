@@ -11,6 +11,7 @@ dependencies = [
   "google-genai>=0.4",
   "python-dotenv>=0.20",
   "pydantic>=2",
+  "pydantic-settings",
   "requests>=2.31",
   "rotki-pysqlcipher3>=1.4",
   "undetected_chromedriver>=3",

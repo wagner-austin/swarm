@@ -1,6 +1,6 @@
 from bot_plugins.manager import plugin
 from bot_core.permissions import EVERYONE
-import os
+from bot_core.settings import settings
 
 # Requires: pip install google-genai
 
@@ -13,7 +13,7 @@ async def run_command(args: str, ctx, state_machine, **kwargs):
     except ImportError:
         return "google-genai package is not installed. Please run: pip install google-genai"
 
-    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+    GEMINI_API_KEY = settings.gemini_api_key
     if not GEMINI_API_KEY:
         return "GEMINI_API_KEY is not configured."
 

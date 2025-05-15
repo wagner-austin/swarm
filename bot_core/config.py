@@ -4,37 +4,9 @@ core/config.py - Centralized configuration for the Signal bot.
 Loads configuration settings from environment variables with default values.
 """
 
-import os
-import logging
-import json
-from dotenv import load_dotenv
-
-logger = logging.getLogger(__name__)
-
-
-def parse_int_env(value_str: str, default: int, var_name: str) -> int:
-    """
-    parse_int_env(value_str: str, default: int, var_name: str) -> int
-    Safely parse an integer from a string environment variable.
-
-    If parsing fails, logs a warning and returns the provided default.
-
-    Args:
-        value_str (str): The string value from environment to parse.
-        default (int): Default integer to return if parsing fails.
-        var_name (str): Name of the environment variable (for logging).
-
-    Returns:
-        int: The parsed integer or the default on error.
-    """
-    try:
-        return int(value_str)
-    except (ValueError, TypeError):
-        logger.warning(
-            f"Invalid integer value for {var_name}: {value_str!r}. "
-            f"Using default {default}."
-        )
-        return default
+from warnings import warn
+from bot_core.settings import settings  # noqa: F401
+warn("bot_core.config is deprecated; use bot_core.settings", DeprecationWarning, stacklevel=2)
 
 # Check if .env file exists; if not, log info. Otherwise, load it.
 dotenv_path = os.path.join(os.getcwd(), '.env')
@@ -42,8 +14,6 @@ if not os.path.exists(dotenv_path):
     logger.info(f"No .env found at {dotenv_path}, skipping environment file load.")
 else:
     load_dotenv(dotenv_path)
-
-
 
 # Database name for SQLite, defaulting to "bot_data.db" if not set.
 DB_NAME: str = os.environ.get("DB_NAME", "bot_data.db")

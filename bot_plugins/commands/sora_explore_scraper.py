@@ -18,6 +18,7 @@ from bot_plugins.commands.subcommand_dispatcher import handle_subcommands, Plugi
 from bot_plugins.messages import INTERNAL_ERROR
 
 # Import the updated Sora Explore API
+from bot_core.settings import settings
 try:
     from bot_core.api.sora_explore_api import (
         start_sora_explore_session,

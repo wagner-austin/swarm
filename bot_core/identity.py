@@ -1,12 +1,10 @@
-import json
-import os
+from bot_core.settings import settings
 import logging
 log = logging.getLogger(__name__)
 
 _DEFAULT_ROLE = "owner"
 
-# env EXAMPLE: BOT_ROLES='{"123456789012345678":"owner","987…":"admin"}'
-_role_map = json.loads(os.getenv("BOT_ROLES", "{}"))
+_role_map = settings.role_name_map
 
 def resolve_role(user: 'discord.Member') -> str:
     """
@@ -34,10 +32,10 @@ def resolve_role(user: 'discord.Member') -> str:
     if role:
         return role
 
-    # 2. Map Discord role names to bot roles via ROLE_NAME_MAP
-    from bot_core.config import ROLE_NAME_MAP
+    # 2. Map Discord role names to bot roles via settings.role_name_map
+    from bot_core.settings import settings
     for discord_role in getattr(user, 'roles', []):
-        mapped = ROLE_NAME_MAP.get(discord_role.name)
+        mapped = settings.role_name_map.get(discord_role.name)
         if mapped:
             return mapped
 
