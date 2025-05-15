@@ -13,7 +13,7 @@ Usage Example:
 """
 
 from typing import Any, Dict, Optional, Tuple, List
-from db.repository import BaseRepository
+# from db.repository import BaseRepository  # Removed: use direct aiosqlite/SQLAlchemy queries instead
 from bot_core.storage import acquire
 import aiosqlite  # Ensure this is imported
 
@@ -92,7 +92,7 @@ async def insert_record(table: str, data: Dict[str, Any], replace: bool = False)
         new_id = await insert_record("Volunteers", {"phone": "+15551234567", "name": "Alice"}, replace=False)
         print("Inserted row with ID =", new_id)
     """
-    repo = BaseRepository(table_name=table)
+    # repo = BaseRepository(table_name=table)  # Removed: use direct aiosqlite/SQLAlchemy queries instead
     return await repo.create(data, replace=replace)
 
 async def _execute_sql_async(query: str, params: Tuple[Any, ...] = (), commit: bool = False, fetchone: bool = False, fetchall: bool = False):
