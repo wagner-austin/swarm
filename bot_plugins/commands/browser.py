@@ -20,6 +20,16 @@ class Browser(commands.Cog):
         self.bot = bot
         self.browser = browser_service or default_browser_service
 
+        # ---- test helper -------------------------------------------------
+        # If the cog is instantiated manually (as in the unit-tests) the
+        # Command objects defined at *class* level never get their ``cog``
+        # attribute.  Bind them here so direct calls like
+        # ``await Browser.open(ctx, ....)`` work.
+        for attr in dir(self.__class__):
+            maybe_cmd = getattr(self.__class__, attr, None)
+            if isinstance(maybe_cmd, commands.Command) and getattr(maybe_cmd, 'cog', None) is None:
+                maybe_cmd.cog = self
+
     @commands.group(name="browser", invoke_without_command=True)
     @commands.is_owner()
     async def browser(self, ctx):
@@ -29,7 +39,9 @@ class Browser(commands.Cog):
     @browser.command(name="start")
     async def start(self, ctx, url: str = None):
         msg = await self.browser.start(url=url)
-        await ctx.send(msg)
+        if hasattr(ctx, "send"):
+            await ctx.send(msg)
+        return msg
 
     @browser.command(name="open")
     async def open(self, ctx, url: str = None):
@@ -37,22 +49,30 @@ class Browser(commands.Cog):
             await ctx.send(USAGE)
             return
         msg = await self.browser.open(url)
-        await ctx.send(msg)
+        if hasattr(ctx, "send"):
+            await ctx.send(msg)
+        return msg
 
     @browser.command(name="screenshot")
     async def screenshot(self, ctx):
         msg = await self.browser.screenshot()
-        await ctx.send(msg)
+        if hasattr(ctx, "send"):
+            await ctx.send(msg)
+        return msg
 
     @browser.command(name="stop")
     async def stop(self, ctx):
         msg = await self.browser.stop()
-        await ctx.send(msg)
+        if hasattr(ctx, "send"):
+            await ctx.send(msg)
+        return msg
 
     @browser.command(name="status")
     async def status(self, ctx):
         msg = self.browser.status()
-        await ctx.send(msg)
+        if hasattr(ctx, "send"):
+            await ctx.send(msg)
+        return msg
 
 async def setup(bot):
     await bot.add_cog(Browser(bot))
