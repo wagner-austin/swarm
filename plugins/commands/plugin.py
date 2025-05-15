@@ -59,10 +59,18 @@ class PluginManagerCommand(BasePlugin):
                 default_subcommand="default"
             )
         except PluginArgError as e:
-            self.logger.error(f"Argument parsing error in plugin command: {e}", exc_info=True)
+            # Use print as fallback if logger is not available (for test context)
+            try:
+                self.logger.error(f"Argument parsing error in plugin command: {e}", exc_info=True)
+            except AttributeError:
+                print(f"Argument parsing error in plugin command: {e}")
             return str(e)
         except Exception as e:
-            logger.error(f"Unexpected error in plugin command: {e}", exc_info=True)
+            # Use print as fallback if logger is not available (for test context)
+            try:
+                self.logger.error(f"Unexpected error in plugin command: {e}", exc_info=True)
+            except AttributeError:
+                print(f"Unexpected error in plugin command: {e}")
             return "An internal error occurred."
 
     def _sub_list(self, rest: List[str]) -> str:

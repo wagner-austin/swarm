@@ -33,23 +33,27 @@ def test_database():
         pass
     os.environ.pop("DB_NAME", None)
 
-@pytest.fixture(autouse=True)
-def clear_database_tables():
+@pytest.fixture(scope="session", autouse=True)
+def reset_user_state():
     """
-    tests/conftest.py - Fixture to clear key tables (Volunteers, DeletedVolunteers) before and after tests.
-    Ensures a clean database state to prevent data leakage between tests.
+    Fixture to initialize the DB schema once per test session and reset UserStates between tests.
+    Mirrors the Discord-centric schema and keeps tests independent.
     """
+    import db.schema
+    db.schema.init_db()
     from db.connection import get_connection
-    def clear_tables():
+    def clear_user_states():
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM Volunteers")
-        cursor.execute("DELETE FROM DeletedVolunteers")
-        conn.commit()
+        # Check if UserStates table exists before attempting to delete
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='UserStates'")
+        if cursor.fetchone() is not None:
+            cursor.execute("DELETE FROM UserStates")
+            conn.commit()
         conn.close()
-    clear_tables()
+    clear_user_states()
     yield
-    clear_tables()
+    clear_user_states()
 
 @pytest.fixture
 def dummy_plugin():

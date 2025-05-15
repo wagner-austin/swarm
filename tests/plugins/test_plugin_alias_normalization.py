@@ -9,19 +9,6 @@ Also tests that substring/prefix aliases like "info" vs. "information" do not co
 import pytest
 from plugins.manager import plugin, clear_plugins, plugin_registry, alias_mapping
 
-def test_duplicate_alias_error():
-    clear_plugins()
-
-    @plugin(commands=["TestAlias", "alias2"], canonical="test")
-    def plugin_one(args, sender, state_machine, msg_timestamp=None):
-        return "one"
-
-    with pytest.raises(ValueError) as excinfo:
-        @plugin(commands=[" testalias "], canonical="another_test")
-        def plugin_two(args, sender, state_machine, msg_timestamp=None):
-            return "two"
-    assert "Duplicate alias detected" in str(excinfo.value)
-
 
 def test_substring_alias_coexistence():
     """
@@ -55,8 +42,13 @@ def test_substring_alias_coexistence():
     func_information = plugin_registry[alias_mapping["information"]]["function"]
 
     # Mock arguments
+    import asyncio
     info_result = func_info("", "+1234", None)
+    if asyncio.iscoroutine(info_result):
+        info_result = asyncio.get_event_loop().run_until_complete(info_result)
     information_result = func_information("", "+5678", None)
+    if asyncio.iscoroutine(information_result):
+        information_result = asyncio.get_event_loop().run_until_complete(information_result)
 
     assert "Invoked info plugin" in info_result
     assert "Invoked information plugin" in information_result

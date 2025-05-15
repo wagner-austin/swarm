@@ -14,7 +14,6 @@ import db.schema
 import logging
 from core.bot_orchestrator import BotOrchestrator
 
-from core.transport_discord import DiscordTransport
 from db.backup import create_backup, start_periodic_backups
 from core.config import BACKUP_INTERVAL, DISK_BACKUP_RETENTION_COUNT
 from plugins.manager import load_plugins
@@ -41,7 +40,8 @@ async def main() -> None:
     if os.environ.get("FAST_EXIT_FOR_TESTS") == "1":
         logger.info("FAST_EXIT_FOR_TESTS is set, stopping early for test.")
         return
-    
+
+    from core.transport_discord import DiscordTransport
     transport = DiscordTransport()
     bot = BotOrchestrator(transport)
     await bot.start()
