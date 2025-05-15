@@ -34,14 +34,19 @@ class Chat(commands.Cog):
             generate_content_config = types.GenerateContentConfig(
                 response_mime_type="text/plain",
             )
-            # Stream and collect the response
+            # Stream and collect the response – works for both async *and* sync generators
             response_text = ""
-            async for chunk in client.models.generate_content_stream(
+            stream = client.models.generate_content_stream(
                 model=model,
                 contents=contents,
                 config=generate_content_config,
-            ):
-                response_text += getattr(chunk, "text", "")
+            )
+            if hasattr(stream, "__aiter__"):           # real API
+                async for chunk in stream:
+                    response_text += getattr(chunk, "text", "")
+            else:                                      # the sync dummy used by tests
+                for chunk in stream:
+                    response_text += getattr(chunk, "text", "")
             await ctx.send(response_text or "[No response from Gemini]")
         except Exception as e:
             await ctx.send(f"Gemini API error: {e}")
