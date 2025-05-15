@@ -1,11 +1,7 @@
 from bot_plugins.wizard import WizardPlugin
 from bot_core.conversation import _WIZARDS
 
-def plugin(commands, canonical, required_role):
-    # Dummy decorator for demonstration; replace with real one if needed
-    def decorator(cls):
-        return cls
-    return decorator
+from bot_plugins.manager import plugin
 
 ADMIN = "ADMIN"  # Placeholder for required_role
 
