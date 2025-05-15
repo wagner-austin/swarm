@@ -8,6 +8,32 @@ from warnings import warn
 from bot_core.settings import settings  # noqa: F401
 warn("bot_core.config is deprecated; use bot_core.settings", DeprecationWarning, stacklevel=2)
 
+import os
+import logging, json
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+def parse_int_env(value_str: str, default: int, var_name: str) -> int:
+    try:
+        return int(value_str)
+    except (ValueError, TypeError):
+        logger.warning(
+            f"Invalid integer value for {var_name}: {value_str!r}. Using default {default}."
+        )
+        return default
+
+# Patch browser session config from env for backward compatibility
+if os.environ.get("CHROME_PROFILE_DIR"):
+    settings.chrome_profile_dir = os.environ["CHROME_PROFILE_DIR"]
+if os.environ.get("CHROME_PROFILE_NAME"):
+    settings.chrome_profile_name = os.environ["CHROME_PROFILE_NAME"]
+if os.environ.get("CHROMEDRIVER_PATH"):
+    settings.chromedriver_path = os.environ["CHROMEDRIVER_PATH"]
+if os.environ.get("BROWSER_DOWNLOAD_DIR"):
+    settings.browser_download_dir = os.environ["BROWSER_DOWNLOAD_DIR"]
+
+
 # Check if .env file exists; if not, log info. Otherwise, load it.
 dotenv_path = os.path.join(os.getcwd(), '.env')
 if not os.path.exists(dotenv_path):

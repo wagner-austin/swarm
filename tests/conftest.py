@@ -80,4 +80,42 @@ def cli_runner():
     from tests.cli.cli_test_helpers import run_cli_command
     yield run_cli_command
 
+import sys, types, pytest
+
+@pytest.fixture(autouse=True)
+def patch_uc(monkeypatch):
+    """Stub out undetected_chromedriver and the selenium import tree."""
+    dummy_driver = types.SimpleNamespace(
+        get=lambda *a, **k: None,
+        save_screenshot=lambda path: True,
+        quit=lambda: None,
+    )
+    dummy_wait = object()
+
+    # --- undetected_chromedriver ------------------------------------------
+    uc_mod = types.ModuleType("undetected_chromedriver")
+    uc_mod.ChromeOptions = lambda: types.SimpleNamespace(
+        add_experimental_option=lambda *a, **k: None,
+        add_argument=lambda *a, **k: None,
+    )
+    uc_mod.Chrome = lambda *a, **k: dummy_driver
+    monkeypatch.setitem(sys.modules, "undetected_chromedriver", uc_mod)
+
+    # --- selenium.webdriver.support.ui ------------------------------------
+    sel_mod  = types.ModuleType("selenium")
+    wd_mod   = types.ModuleType("selenium.webdriver")
+    supp_mod = types.ModuleType("selenium.webdriver.support")
+    ui_mod   = types.ModuleType("selenium.webdriver.support.ui")
+    ui_mod.WebDriverWait = lambda *a, **k: dummy_wait
+
+    supp_mod.ui = ui_mod
+    wd_mod.support = supp_mod
+    sel_mod.webdriver = wd_mod
+
+    monkeypatch.setitem(sys.modules, "selenium", sel_mod)
+    monkeypatch.setitem(sys.modules, "selenium.webdriver", wd_mod)
+    monkeypatch.setitem(sys.modules, "selenium.webdriver.support", supp_mod)
+    monkeypatch.setitem(sys.modules, "selenium.webdriver.support.ui", ui_mod)
+    yield
+
 # End of tests/conftest.py
