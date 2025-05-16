@@ -2,6 +2,8 @@
 parsers/__init__.py
 -------------------
 Parsers package for the personal Discord bot. Provides message parsing utilities for extracting key information from incoming messages.
+
+Note: import directly from bot_core.parsers – all legacy alias modules have been removed.
 """
 
 from pydantic import BaseModel
@@ -12,7 +14,6 @@ __all__: list[str] = [
     "split_args",
     "parse_key_value_args",
     "parse_message",
-    "message_parser",
     "SkillQueryModel",
     "SkillListModel",
 ]

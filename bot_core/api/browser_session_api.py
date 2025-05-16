@@ -8,7 +8,9 @@ from bot_core.settings import settings
 """
 bot_core/api/browser_session_api.py
 ------------------
-Generic browser session API for plugins and downstream consumers.
+Browser session API for plugins and downstream consumers.
+
+This module now only provides the BrowserSession class and its helpers. All legacy module-level session helpers have been removed.
 """
 
 logger = logging.getLogger(__name__)
@@ -146,35 +148,3 @@ class BrowserSession:
             except Exception as e:
                 logger.info(f"[BrowserSession] Error quitting driver: {e}")
         self._state_transition(State.COMPLETED)
-
-
-# Module-level session management (legacy helpers – scheduled for removal)
-_session: Optional[BrowserSession] = None
-
-# ---- backwards-compat wrappers ----------------------------------------
-
-if TYPE_CHECKING:
-    from bot_core.api.browser_service import BrowserService
-
-
-def _default_service() -> "BrowserService":
-    """Late import to avoid circular dependency with browser_service.py."""
-    from bot_core.api.browser_service import default_browser_service
-
-    return default_browser_service
-
-
-def start_browser_session(profile: str | None = None) -> str:
-    import asyncio
-
-    return asyncio.run(_default_service().start(profile=profile))
-
-
-def stop_browser_session() -> str:
-    import asyncio
-
-    return asyncio.run(_default_service().stop())
-
-
-def get_browser_session_status() -> str:
-    return _default_service().status()
