@@ -1,31 +1,23 @@
-#!/usr/bin/env python
+from warnings import warn
+from bot_core.validation import CLIValidationError
+import re
+
+warn(
+    "core.validators is deprecated; import core.validation instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 """
 core/validators.py
 ------------------
 Utility module for CLI argument validation, plus phone validation.
 Ensures phone meets a +digits pattern, or else raises an error.
-
-CHANGES:
- - Updated 'Invalid phone number format' message to exactly match test expectations.
 """
-
-import re
-from bot_plugins.constants import DANGEROUS_PATTERN
-from bot_core.exceptions import VolunteerError
-
-# Precompile the dangerous pattern regex
-DANGEROUS_REGEX = re.compile(DANGEROUS_PATTERN)
-
-class CLIValidationError(Exception):
-    """Custom exception for CLI validation errors."""
 
 
 def validate_phone(number: str) -> None:
-    """
-    Validate a phone number using E.164 format. Raise VolunteerError if invalid.
-    """
-    import re
-    if not re.match(r'^\+[1-9]\d{1,14}$', number):
-        raise VolunteerError("Invalid phone number format")
+    """Validate a phone number using E.164 format. Raise CLIValidationError if invalid."""
 
-# End of core/validators.py
+    if not re.match(r"^\+[1-9]\d{1,14}$", number):
+        raise CLIValidationError("Invalid phone number format")

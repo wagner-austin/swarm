@@ -1,10 +1,55 @@
 """
 parsers/__init__.py
 -------------------
-Parsers package for the Signal bot. Provides message parsing utilities for extracting
-key information from incoming messages.
+Parsers package for the personal Discord bot. Provides message parsing utilities for extracting key information from incoming messages.
 """
 
-__all__ = ["message_parser"]
+from pydantic import BaseModel
+import warnings
+from ._helpers import split_args, parse_key_value_args, parse_message
 
-# End of parsers/__init__.py
+__all__: list[str] = [
+    "split_args",
+    "parse_key_value_args",
+    "parse_message",
+    "message_parser",
+    "SkillQueryModel",
+    "SkillListModel",
+]
+
+
+class SkillQueryModel(BaseModel):
+    """Used for searching by skills."""
+
+    skills: list[str]
+
+
+class SkillListModel(BaseModel):
+    """Used to add multiple skills."""
+
+    skills: list[str]
+
+
+# Deprecation aliases for backward compatibility
+class _VolunteerFindModel(SkillQueryModel):
+    def __new__(cls, *args: object, **kwargs: object) -> "_VolunteerFindModel":
+        warnings.warn(
+            "VolunteerFindModel is deprecated; use SkillQueryModel instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return super().__new__(cls)
+
+
+class _VolunteerAddSkillsModel(SkillListModel):
+    def __new__(cls, *args: object, **kwargs: object) -> "_VolunteerAddSkillsModel":
+        warnings.warn(
+            "VolunteerAddSkillsModel is deprecated; use SkillListModel instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return super().__new__(cls)
+
+
+VolunteerFindModel = _VolunteerFindModel
+VolunteerAddSkillsModel = _VolunteerAddSkillsModel

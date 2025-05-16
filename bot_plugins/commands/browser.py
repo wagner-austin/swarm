@@ -1,7 +1,7 @@
 import logging
 from discord.ext import commands
 from bot_core.api.browser_service import BrowserService, default_browser_service
-from bot_core.settings import settings
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -16,63 +16,69 @@ USAGE = (
 
 
 class Browser(commands.Cog):
-    def __init__(self, bot, browser_service: BrowserService | None = None):
+    def __init__(
+        self, bot: commands.Bot, browser_service: BrowserService | None = None
+    ) -> None:
         self.bot = bot
-        self.browser = browser_service or default_browser_service
-
-        # ---- test helper -------------------------------------------------
-        # If the cog is instantiated manually (as in the unit-tests) the
-        # Command objects defined at *class* level never get their ``cog``
-        # attribute.  Bind them here so direct calls like
-        # ``await Browser.open(ctx, ....)`` work.
-        for attr in dir(self.__class__):
-            maybe_cmd = getattr(self.__class__, attr, None)
-            if isinstance(maybe_cmd, commands.Command) and getattr(maybe_cmd, 'cog', None) is None:
-                maybe_cmd.cog = self
+        self._browser: BrowserService | None = (
+            browser_service or default_browser_service
+        )
+        self.__cog_name__ = "Browser"
+        # ---------- unit-test friendliness ----------
+        # In the test-suite the cog instance is *not* added to a Bot,
+        # yet the tests call `await browser_cog.start(ctx)` directly.
+        # That works only when every `commands.Command` object on the
+        # instance has its `.cog` attribute pointing back to `self`.
+        for name in dir(self):
+            try:
+                attr = getattr(self, name)
+            except AttributeError:  # pragma: no cover
+                continue
+            if isinstance(attr, commands.Command):
+                attr.cog = self
 
     @commands.group(name="browser", invoke_without_command=True)
     @commands.is_owner()
-    async def browser(self, ctx):
+    async def browser(self, ctx: commands.Context[Any]) -> None:
         # If no subcommand is given, print usage
         await ctx.send(USAGE)
 
-    @browser.command(name="start")
-    async def start(self, ctx, url: str = None):
-        msg = await self.browser.start(url=url)
-        if hasattr(ctx, "send"):
-            await ctx.send(msg)
-        return msg
+    @commands.command(name="start", parent=browser)
+    async def start(self, ctx: commands.Context[Any], url: str | None = None) -> None:
+        assert self._browser is not None, "Browser service is not initialized."
+        msg = await self._browser.start(url=url)
+        await ctx.send(msg)
 
-    @browser.command(name="open")
-    async def open(self, ctx, url: str = None):
+    @commands.command(name="open", parent=browser)
+    async def open(self, ctx: commands.Context[Any], url: str | None = None) -> None:
+        assert self._browser is not None, "Browser service is not initialized."
         if not url:
             await ctx.send(USAGE)
             return
-        msg = await self.browser.open(url)
-        if hasattr(ctx, "send"):
-            await ctx.send(msg)
-        return msg
+        msg = await self._browser.open(url)
+        await ctx.send(msg)
 
-    @browser.command(name="screenshot")
-    async def screenshot(self, ctx):
-        msg = await self.browser.screenshot()
-        if hasattr(ctx, "send"):
-            await ctx.send(msg)
-        return msg
+    @commands.command(name="screenshot", parent=browser)
+    async def screenshot(self, ctx: commands.Context[Any]) -> None:
+        assert self._browser is not None, "Browser service is not initialized."
+        msg = await self._browser.screenshot()
+        await ctx.send(msg)
 
-    @browser.command(name="stop")
-    async def stop(self, ctx):
-        msg = await self.browser.stop()
-        if hasattr(ctx, "send"):
-            await ctx.send(msg)
-        return msg
+    @commands.command(name="stop", parent=browser)
+    async def stop(self, ctx: commands.Context[Any]) -> None:
+        assert self._browser is not None, "Browser service is not initialized."
+        msg = await self._browser.stop()
+        await ctx.send(msg)
 
-    @browser.command(name="status")
-    async def status(self, ctx):
-        msg = self.browser.status()
-        if hasattr(ctx, "send"):
-            await ctx.send(msg)
-        return msg
+    @commands.command(name="status", parent=browser)
+    async def status(self, ctx: commands.Context[Any]) -> None:
+        assert self._browser is not None, "Browser service is not initialized."
+        msg = self._browser.status()
+        await ctx.send(msg)
 
-async def setup(bot):
+
+async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Browser(bot))
+
+
+__all__ = ["Browser"]
