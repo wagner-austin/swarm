@@ -1,37 +1,38 @@
 import pytest
 from discord.ext.commands import Bot
+from discord import Intents
 from bot_plugins.commands.browser import Browser
 from bot_core.api.browser_service import BrowserService
+from tests.helpers.mocks import MockCtx
+from typing import Any
 
-class DummyUser: id = 123
-class DummyCtx:
-    author = DummyUser()
-    def __init__(self):
-        self.sent = []
-    async def send(self, msg):
-        self.sent.append(msg)
+
+class DummyUser:
+    id = 123
 
 
 @pytest.mark.asyncio
-async def test_browser_command_flow(async_db, monkeypatch, tmp_path):
+async def test_browser_command_flow(
+    async_db: Any, monkeypatch: Any, tmp_path: Any
+) -> None:
     # patch download dir
     monkeypatch.setattr("bot_core.settings.settings.browser_download_dir", tmp_path)
 
-    service = BrowserService()
-    from discord import Intents
-    dummy_bot = Bot(command_prefix="!", intents=Intents.default())
-    browser_cog = Browser(bot=dummy_bot, browser_service=service)
-    ctx = DummyCtx()
+    service: BrowserService = BrowserService()
+
+    dummy_bot: Bot = Bot(command_prefix="!", intents=Intents.default())
+    browser_cog: Browser = Browser(bot=dummy_bot, browser_service=service)
+    ctx: MockCtx = MockCtx()
 
     # start
-    await browser_cog.start.callback(browser_cog, ctx, url=None)
+    await browser_cog.start(ctx)  # type: ignore[arg-type]
     # open (no URL error)
-    await browser_cog.open.callback(browser_cog, ctx, url=None)
+    await browser_cog.open(ctx, url=None)  # type: ignore[arg-type]
     # open good
-    await browser_cog.open.callback(browser_cog, ctx, url="https://example.com")
+    await browser_cog.open(ctx, url="https://example.com")  # type: ignore[arg-type]
     # screenshot
-    await browser_cog.screenshot.callback(browser_cog, ctx)
+    await browser_cog.screenshot(ctx)  # type: ignore[arg-type]
     # status
-    await browser_cog.status.callback(browser_cog, ctx)
+    await browser_cog.status(ctx)  # type: ignore[arg-type]
     # stop
-    await browser_cog.stop.callback(browser_cog, ctx)
+    await browser_cog.stop(ctx)  # type: ignore[arg-type]

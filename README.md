@@ -27,43 +27,39 @@ The bot will respond to commands that start with `!` or when mentioned:
 ---
 
 Installation:
-1. Install Java:
-   Download Java (JDK 17 or later) from Adoptium.net.
-   Verify installation with: java -version
+1. Install Python:
+   Download Python (3.9 or later) from python.org.
+   Verify installation with: python --version
 
-2. Install signal-cli:
-   Download the latest signal-cli release (e.g., signal-cli-0.13.13.tar.gz).
-   Extract the file to a directory (for example, C:\Users\YourName\Projects\signal-cli).
-   Rename the extracted folder to "signal-cli" for clarity.
-   Add the folder C:\Users\YourName\Projects\signal-cli\bin to your system PATH.
+2. Install discord.py:
+   Download the latest discord.py release (e.g., discord.py-2.0.1.tar.gz).
+   Extract the file to a directory (for example, C:\Users\YourName\Projects\discord.py).
+   Rename the extracted folder to "discord.py" for clarity.
+   Add the folder C:\Users\YourName\Projects\discord.py\bin to your system PATH.
 
-3. Verify signal-cli installation:
+3. Verify discord.py installation:
    Open PowerShell and run:
-   signal-cli.bat --version
+   python -m discord --version
 
 Registration and Verification:
-1. Register your Signal Bot using your Google Voice number.
-   In PowerShell, run:
-   signal-cli.bat -u YOUR_SIGNAL_NUMBER register
+1. Create a Discord bot account:
+   Go to the Discord Developer Portal and create a new bot.
+   Copy the bot token.
 
-2. Complete CAPTCHA verification:
-   Open the CAPTCHA link provided in the registration output in your browser.
-   Copy the CAPTCHA token link.
-   Run the register command again with the token:
-   signal-cli.bat -u YOUR_SIGNAL_NUMBER register --captcha "PASTE-LINK-HERE"
+2. Configure your bot:
+   Create a `.env` file in your project root with your bot token.
 
 3. Verify your bot:
-   When you receive the verification code via SMS, run:
-   signal-cli.bat -u YOUR_SIGNAL_NUMBER verify CODE
+   Start the bot and test its functionality.
 
 4. Test sending a message:
-   signal-cli.bat -u YOUR_SIGNAL_NUMBER send RECIPIENT_NUMBER -m "Signal bot successfully verified!"
+   Use the `!help` command to see available commands.
 
 Next Steps:
 1. Set your bot's profile name:
-   signal-cli.bat -u YOUR_SIGNAL_NUMBER updateProfile --name "Your Bot Name"
+   discord.py.bat -u YOUR_SIGNAL_NUMBER updateProfile --name "Your Bot Name"
 2. To read incoming messages, run:
-   signal-cli.bat -u YOUR_SIGNAL_NUMBER receive
+   discord.py.bat -u YOUR_SIGNAL_NUMBER receive
 
 Replace YOUR_SIGNAL_NUMBER with your actual Signal Bot number.
 
@@ -77,6 +73,10 @@ The following environment variables can be set to control the browser session:
 - `CHROME_PROFILE_NAME`: Name of the Chrome profile to use (default: Profile 1).
 - `CHROMEDRIVER_PATH`: Path to the ChromeDriver executable.
 - `BROWSER_DOWNLOAD_DIR`: Directory for browser downloads and screenshots.
+- `BROWSER_HEADLESS`: Launch Chrome in headless mode (default: true). Set to `false` to show the browser window.
+- `BROWSER_DISABLE_GPU`: Disable GPU hardware acceleration (default: true).
+- `BROWSER_WINDOW_SIZE`: Window size for the browser, e.g., `1920,1080` (default: `1920,1080`).
+- `BROWSER_NO_SANDBOX`: Disable Chrome's sandbox (default: true; required for some CI environments).
 
 Example usage:
 

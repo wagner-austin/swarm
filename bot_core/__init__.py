@@ -11,9 +11,12 @@ from typing import List
 
 # ----- public re-exports -----
 # 1) create the symbol table *first*
-__all__: List[str] = ["settings"]
+__all__: List[str] = []
 
-# 2) pull settings in so `import bot_core.settings` works
+# ---------------------------------------------------------------------------+
+# Export the *instance* so `from bot_core import settings` works at runtime  #
+# and for Mypy.                                                              #
+# ---------------------------------------------------------------------------+
 
 # expose extras and freeze public surface
 for _name in ["parsers", "logger_setup"]:

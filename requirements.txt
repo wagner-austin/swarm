@@ -1,4 +1,4 @@
-# requirements.txt - List of Python dependencies for the Signal Bot project.
+# requirements.txt - List of Python dependencies for the personal Discord bot project.
 # This file contains the external packages required for running the bot and its tests.
 
 cryptography

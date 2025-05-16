@@ -1,10 +1,11 @@
-import os
 import pytest
-import asyncio
 from bot_core.api.browser_service import BrowserService
 
+from typing import Any
+
+
 @pytest.mark.asyncio
-async def test_start_stop_status(tmp_path, monkeypatch):
+async def test_start_stop_status(tmp_path: Any, monkeypatch: Any) -> None:
     # patch download dir so the test never writes outside tmp
     monkeypatch.setattr("bot_core.settings.settings.browser_download_dir", tmp_path)
 
@@ -16,7 +17,10 @@ async def test_start_stop_status(tmp_path, monkeypatch):
 
     # Screenshot (path exists, returns absolute path)
     dest = svc._session.screenshot(str(tmp_path / "shot.png"))
-    assert os.path.isabs(dest) and dest.endswith(".png")
+    from pathlib import Path
+
+    dest_path = Path(dest)
+    assert dest_path.is_absolute() and dest_path.suffix == ".png"
 
     # Stop
     assert (await svc.stop()).startswith("Browser session stopped")

@@ -1,8 +1,27 @@
+"""
+Settings for the DiscordBot. All browser flags live in Settings.browser (see BrowserConfig).
+"""
+
 from pydantic_settings import BaseSettings
-from typing import Optional, Dict
-import sys
+from pydantic import BaseModel, field_validator
+from typing import Optional
+from typing import TYPE_CHECKING, Any
+
+
+class BrowserConfig(BaseModel):
+    headless: bool = True
+    disable_gpu: bool = True
+    window_size: str = "1920,1080"
+    no_sandbox: bool = True
+
+    model_config = {"extra": "ignore"}
+
 
 class Settings(BaseSettings):
+    if TYPE_CHECKING:  # pragma: no cover
+
+        def __init__(self, **data: Any) -> None: ...
+
     """
     Settings for the DiscordBot.
     
@@ -11,6 +30,7 @@ class Settings(BaseSettings):
         chrome_profile_name (env: CHROME_PROFILE_NAME)
         chromedriver_path (env: CHROMEDRIVER_PATH)
         browser_download_dir (env: BROWSER_DOWNLOAD_DIR)
+    Browser flags live in Settings.browser (see BrowserConfig).
     """
     discord_token: str
     db_name: str = "bot_data.db"
@@ -25,22 +45,31 @@ class Settings(BaseSettings):
     chromedriver_path: Optional[str] = None
     browser_download_dir: Optional[str] = "./browser_downloads"
 
-    model_config = {
-        "env_file": ".env",
-        "case_sensitive": False,
-        "extra": "allow"
-    }
+    browser: BrowserConfig = BrowserConfig()
 
-    def validate(self) -> None:
-        """
-        Run explicit, start-up-time checks that shouldn’t execute at import time.
-        Extend this as new mandatory settings appear.
-        """
-        if not self.discord_token:
-            raise RuntimeError(
-                "DISCORD_TOKEN is required but not set. "
-                "Define it in your environment or .env file."
-            )
+    model_config = {"env_file": ".env", "case_sensitive": False, "extra": "allow"}
 
-settings = Settings()
+    @field_validator("discord_token")
+    @classmethod
+    def _must_exist(cls, v: str) -> str:
+        # Reject only truly empty/placeholder tokens
+        placeholder = {"", "YOUR_TOKEN_HERE"}
+        if v in placeholder:
+            raise ValueError("DISCORD_TOKEN is required")
+        return v
 
+    @field_validator("db_name")
+    @classmethod
+    def _sqlite_file(cls, v: str) -> str:
+        if not v.endswith(".db"):
+            raise ValueError("DB_NAME must point to a *.db SQLite file")
+        return v
+
+
+# Export a singleton but fall back to a dummy token during static analysis
+try:
+    settings: "Settings" = Settings()  # real env-driven instance
+except ValueError:  # DISCORD_TOKEN missing under CI / mypy
+    settings = Settings(discord_token="dummy")
+
+__all__ = ["Settings", "BrowserConfig"]

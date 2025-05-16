@@ -9,20 +9,26 @@ Changes:
  - Updated restore_backup to check for truncated backups (≤ 16 bytes) and log as invalid/corrupted.
 """
 
-import os
+from typing import Optional
+from pathlib import Path
 import shutil
 from datetime import datetime
 import asyncio
 import logging
-from bot_core.settings import settings, Settings
+from bot_core.settings import settings  # fully typed alias
+from bot_core.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 
-def _generate_backup_filename(backup_dir: str) -> str:
-    """
-    Generates a unique backup filename using the current date-time second.
-    If multiple backups occur in the same second, appends a numeric suffix.
+def _generate_backup_filename(backup_dir: Path) -> str:
+    """Generate a unique backup filename in the backup directory.
+
+    Args:
+        backup_dir: Path to the backup directory.
+
+    Returns:
+        str: Unique backup filename (not full path).
     """
     base_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     suffix = 0
@@ -31,101 +37,118 @@ def _generate_backup_filename(backup_dir: str) -> str:
         if suffix:
             filename += f"_{suffix}"
         filename += ".db"
-        fullpath = os.path.join(backup_dir, filename)
-        if not os.path.exists(fullpath):
+        fullpath = backup_dir / filename
+        if not fullpath.exists():
             return filename
         suffix += 1
 
-def create_backup(cfg: Settings = None) -> str:
-    """
-    Create a backup of the current database.
+
+def create_backup(cfg: Optional[Settings] = None) -> Path | None:
+    """Create a backup of the current database.
+
+    Args:
+        cfg: Settings object to use (optional).
 
     Returns:
-        str: The file path of the created backup, or an empty string if creation failed.
+        Path: The file path of the created backup, or None if creation failed.
     """
     cfg = cfg or settings
-    backup_dir = os.path.join(os.path.dirname(cfg.db_name), "backups")
+    db_path = Path(cfg.db_name)
+    backup_dir = db_path.parent / "backups"
     try:
-        if not os.path.exists(backup_dir):
-            os.makedirs(backup_dir)
+        backup_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         logger.warning(f"Failed to create backup directory '{backup_dir}'. Error: {e}")
-        return ""
-    
+        return None
+
     backup_filename = _generate_backup_filename(backup_dir)
-    backup_path = os.path.join(backup_dir, backup_filename)
+    backup_path = backup_dir / backup_filename
 
     try:
-        shutil.copyfile(cfg.db_name, backup_path)
+        shutil.copyfile(str(db_path), str(backup_path))
         logger.info(f"Backup created at: {backup_path}")
         return backup_path
     except Exception as e:
         logger.warning(f"Failed to create backup file at '{backup_path}'. Error: {e}")
-        return ""
+        return None
 
-def list_backups(cfg: Settings = None) -> list:
-    """
-    List all backup files in the backup directory.
 
-    Returns:
-        list: A sorted list of backup file names.
-    """
-    cfg = cfg or settings
-    backup_dir = os.path.join(os.path.dirname(cfg.db_name), "backups")
-    if not os.path.exists(backup_dir):
-        return []
-    backups = [f for f in os.listdir(backup_dir) if f.endswith(".db")]
-    backups.sort()
-    return backups
-
-def restore_backup(backup_filename: str, cfg: Settings = None) -> bool:
-    """
-    Restore the database from a specified backup file.
+def list_backups(cfg: Optional[Settings] = None) -> list[Path]:
+    """List all backup files in the backup directory.
 
     Args:
-        backup_filename (str): The name of the backup file (found in the backups folder).
+        cfg: Settings object to use (optional).
+
+    Returns:
+        list[Path]: A sorted list of backup file Paths.
+    """
+    cfg = cfg or settings
+    db_path = Path(cfg.db_name)
+    backup_dir = db_path.parent / "backups"
+    if not backup_dir.exists():
+        return []
+    backups = sorted(
+        [f for f in backup_dir.iterdir() if f.suffix == ".db" and f.is_file()]
+    )
+    return backups
+
+
+def restore_backup(backup_filename: str, cfg: Optional[Settings] = None) -> bool:
+    """Restore the database from a specified backup file.
+
+    Args:
+        backup_filename: The name of the backup file (found in the backups folder).
+        cfg: Settings object to use (optional).
 
     Returns:
         bool: True if restoration is successful, False otherwise.
     """
     cfg = cfg or settings
-    backup_dir = os.path.join(os.path.dirname(cfg.db_name), "backups")
-    backup_path = os.path.join(backup_dir, backup_filename)
-    if not os.path.exists(backup_path):
+    db_path = Path(cfg.db_name)
+    backup_dir = db_path.parent / "backups"
+    backup_path = backup_dir / backup_filename
+    if not backup_path.exists():
         return False
 
     try:
-        shutil.copyfile(backup_path, cfg.db_name)
+        shutil.copyfile(str(backup_path), str(db_path))
     except Exception as e:
-        logger.warning(f"Failed to restore backup '{backup_filename}' to '{cfg.db_name}'. Error: {e}")
+        logger.warning(
+            f"Failed to restore backup '{backup_filename}' to '{cfg.db_name}'. Error: {e}"
+        )
         return False
 
     return True
 
-def _prune_backups(max_backups: int | None = None, cfg: Settings = None):
-    """
-    Delete oldest backups if number of backups exceeds max_backups.
+
+def _prune_backups(
+    max_backups: int | None = None, cfg: Optional[Settings] = None
+) -> None:
+    """Delete oldest backups if number of backups exceeds max_backups.
+
+    Args:
+        max_backups: Maximum number of backups to retain.
+        cfg: Settings object to use (optional).
     """
     if not max_backups or max_backups < 1:
         return
     backups = list_backups(cfg=cfg)
-    cfg = cfg or settings
-    backup_dir = os.path.join(os.path.dirname(cfg.db_name), "backups")
     if len(backups) > max_backups:
-        # Remove oldest backups
         for old in backups[:-max_backups]:
             try:
-                os.remove(os.path.join(backup_dir, old))
+                old.unlink()
                 logger.info(f"Deleted old backup: {old}")
             except Exception as e:
                 logger.warning(f"Failed to delete old backup '{old}': {e}")
 
-async def start_periodic_backups(cfg: Settings = None) -> None:
-    """
+
+async def start_periodic_backups(cfg: Optional[Settings] = None) -> None:
+    """Start periodic backups.
+
     Schedule periodic backups at the specified interval.
 
     Args:
-        cfg (Settings): The settings to use for the backup interval.
+        cfg: Settings object.
     """
     cfg = cfg or settings
     interval_seconds = cfg.backup_interval
@@ -137,5 +160,3 @@ async def start_periodic_backups(cfg: Settings = None) -> None:
         except Exception as e:
             logger.warning(f"Periodic backup failed: {e}")
         await asyncio.sleep(interval_seconds)
-
-# End of db/backup.py

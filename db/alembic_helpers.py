@@ -5,13 +5,17 @@ Shared helpers for running Alembic migrations programmatically.
 Moving them here removes duplication between production code
 (migrations/env.py) and the test-suite.
 """
+
 from __future__ import annotations
-import asyncio
 import os
-from typing import Callable
+import logging
+from typing import Callable, Any
 
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import pool
+
+logger = logging.getLogger(__name__)
+
 
 # --------------------------------------------------------------------- #
 # Public helpers                                                        #
@@ -24,7 +28,7 @@ def get_url() -> str:
     )
 
 
-async def run_async_migrations(do_run_migrations: Callable) -> None:
+async def run_async_migrations(do_run_migrations: Callable[..., Any]) -> None:
     """
     Execute *do_run_migrations* using an async SQLAlchemy engine.
     """
@@ -34,11 +38,12 @@ async def run_async_migrations(do_run_migrations: Callable) -> None:
     await engine.dispose()
 
 
-def do_run_migrations(sync_connection) -> None:   # noqa: D401
+def do_run_migrations(sync_connection: Any) -> None:  # noqa: D401
     """
     Configure Alembic’s context and run migrations with a sync connection.
     """
-    from alembic import context as alembic_context   # local import on purpose
+    from alembic import context as alembic_context  # local import on purpose
+
     alembic_context.configure(
         connection=sync_connection,
         target_metadata=None,

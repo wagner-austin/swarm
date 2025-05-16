@@ -5,23 +5,17 @@ tests/test_main.py – Test for bot_core/main.py: Verifies both --test flag and 
 
 import sys
 import subprocess
+from pathlib import Path
 import os
 
-import sys
-import subprocess
-import os
 
-def test_main_bootstrap_exits_zero():
+def test_main_bootstrap_exits_zero() -> None:
     env = os.environ.copy()
     # Ensure PYTHONPATH includes the project root for subprocess
-    env["PYTHONPATH"] = os.path.abspath(os.path.dirname(__file__) + "/..") + os.pathsep + env.get("PYTHONPATH", "")
+    project_root = Path(__file__).parent.parent.resolve()
+    env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
     env["FAST_EXIT_FOR_TESTS"] = "1"
     result = subprocess.run(
-        [sys.executable, "-m", "bot_core.main"],
-        capture_output=True,
-        text=True,
-        env=env
+        [sys.executable, "-m", "bot_core.main"], capture_output=True, text=True, env=env
     )
     assert result.returncode == 0
-
-# End of tests/test_main.py

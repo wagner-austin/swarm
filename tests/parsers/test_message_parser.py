@@ -2,21 +2,26 @@
 tests/parsers/test_message_parser.py - Tests for message parsing functionalities.
 """
 
-from bot_core.parsers.message_parser import parse_message
+from typing import Any
+from bot_core.parsers import parse_message
 
 import pytest
+
+
 @pytest.mark.asyncio
-async def test_message_parsing():
+async def test_message_parsing() -> None:
     class Author:
         id = 42
+
     class Channel:
         id = 99
+
     class MockMessage:
-        def __init__(self, content):
+        def __init__(self, content: str) -> None:
             self.content = content
             self.author = Author()
             self.channel = Channel()
-            self.attachments = []
+            self.attachments: list[Any] = []
 
     msg = MockMessage("help arg1 arg2")
     parsed = parse_message(msg)
@@ -26,5 +31,3 @@ async def test_message_parsing():
     assert parsed.attachments == []
     assert parsed.command == "help"
     assert parsed.args == "arg1 arg2"
-
-# End of tests/parsers/test_message_parser.py

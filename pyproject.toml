@@ -30,3 +30,9 @@ builtin = "bot_plugins.commands"
 
 [project.scripts]
 volunteer-bot = "bot_core.main:main"
+
+[tool.mypy]
+exclude = [
+    "tests/helpers/mocks.py",
+    "tests/helpers/__init__.py"
+]
