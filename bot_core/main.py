@@ -55,7 +55,11 @@ async def _start_bot() -> None:
     intents.message_content = True
 
     # Create bot instance
-    bot = commands.Bot(command_prefix=commands.when_mentioned_or("!"), intents=intents)
+    bot = commands.Bot(
+        command_prefix=commands.when_mentioned_or("!"),
+        intents=intents,
+        case_insensitive=True,
+    )
 
     # Remove the built-in help command before loading our custom one
     bot.remove_command("help")
