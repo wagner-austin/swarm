@@ -11,7 +11,7 @@ MYPY := $(PYTHON) -m mypy
 
 # Install dependencies
 install:
-	$(PIP) install -r requirements.txt
+	$(PIP) install -e .
 
 # Run linting checks (ruff check --fix, ruff format, black, mypy strict)
 lint:
