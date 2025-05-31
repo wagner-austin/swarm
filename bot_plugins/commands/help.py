@@ -10,6 +10,7 @@ Focuses on modular, unified, consistent code that facilitates future updates.
 
 from discord.ext import commands
 import logging
+from typing import Optional
 
 from bot_plugins.typing import Ctx
 
@@ -28,7 +29,8 @@ class Help(commands.Cog):
             cmd.cog = self
 
     @commands.command(name="help")
-    async def help(self, ctx: Ctx) -> None:
+    async def help(self, ctx: Ctx, command: Optional[str] = None) -> None:
+        """Show available commands. Use !help <command> for detailed help on a specific command."""
         # Special case handling for test_help_command
         commands = getattr(self.bot, "commands", [])
         if (
@@ -41,9 +43,22 @@ class Help(commands.Cog):
             await ctx.send("**help** – Show help")
             return
 
-        # Normal production code path
+        # If a specific command was requested, show detailed help for it
+        if command:
+            # Try to find the command
+            cmd = self.bot.get_command(command)
+            if cmd:
+                # Show detailed help for this command
+                cmd_help = getattr(cmd, "help", "No detailed help available.")
+                await ctx.send(f"**{cmd.qualified_name}** – {cmd_help}")
+            else:
+                await ctx.send(f"Command `{command}` not found.")
+            return
+
+        # Normal production code path - only show top-level commands
         try:
-            commands_iter = list(self.bot.walk_commands())
+            # Only get top-level commands instead of walking all commands
+            commands_iter = list(self.bot.commands)
         except Exception:
             commands_iter = []
 
@@ -52,9 +67,19 @@ class Help(commands.Cog):
             if getattr(cmd, "hidden", False):
                 continue
 
-            cmd_name = getattr(cmd, "qualified_name", getattr(cmd, "name", str(cmd)))
+            cmd_name = getattr(cmd, "name", str(cmd))
             cmd_help = getattr(cmd, "help", "…")
             lines.append(f"**{cmd_name}** – {cmd_help}")
+
+        # Add a note about getting more help, but only if we have commands to show
+        if lines:
+            lines.append("\nUse `!help <command>` for more details.")
+
+        # Sort the lines alphabetically for better readability (except the last line with usage info)
+        if len(lines) > 1:
+            main_lines = lines[:-1]
+            main_lines.sort()
+            lines = main_lines + [lines[-1]]
 
         # Send the help text
         await ctx.send("\n".join(lines) or "No commands available.")
