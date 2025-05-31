@@ -37,6 +37,6 @@ async def test_init_db_creates_tables(async_db: Any) -> None:
     row = await db_api.fetch_one(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='SchemaVersion'"
     )
-    assert row == {"name": "SchemaVersion"}, (
-        f"SchemaVersion table not created or row incorrect: {row}"
-    )
+    assert row == {
+        "name": "SchemaVersion"
+    }, f"SchemaVersion table not created or row incorrect: {row}"
