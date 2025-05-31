@@ -1,6 +1,6 @@
 from discord.ext import commands
 from bot_core.settings import settings  # fully typed alias
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional as Opt, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from typing import (
@@ -8,6 +8,7 @@ if TYPE_CHECKING:
         Any as GeminiPart,
         Any as GeminiGenerateContentConfig,
     )
+    from google import genai
 
     # The following stubs shadow the google-genai types to avoid mypy errors.
     class types:
@@ -23,8 +24,17 @@ INTERNAL_ERROR = "An internal error occurred. Please try again later."
 class Chat(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self._client: "Opt[genai.Client]" = None
         for cmd in self.get_commands():
             cmd.cog = self
+
+    async def cog_unload(self) -> None:
+        """Clean up resources when the cog is unloaded."""
+        # Close the Gemini client if it exists
+        if self._client is not None:
+            # The Client doesn't have a close method, but we'll add this for future-proofing
+            if hasattr(self._client, "close"):
+                self._client.close()
 
     @commands.command(name="chat", help="Chat with the Gemini API.")
     async def chat(
@@ -48,7 +58,7 @@ class Chat(commands.Cog):
             prompt = "Hello!"
 
         try:
-            client = genai.Client(api_key=GEMINI_API_KEY)
+            self._client = genai.Client(api_key=GEMINI_API_KEY)
             model = "gemini-2.5-flash-preview-04-17"
             contents = [
                 types.Content(
@@ -61,7 +71,7 @@ class Chat(commands.Cog):
             )
             # Stream and collect the response with handling to prevent blocking Discord's heartbeat
             response_text = ""
-            stream = client.models.generate_content_stream(
+            stream = self._client.models.generate_content_stream(
                 model=model,
                 contents=contents,
                 config=generate_content_config,
