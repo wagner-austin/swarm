@@ -22,7 +22,7 @@ class PluginManager(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @commands.group(name="plugins", invoke_without_command=True)
+    @commands.group(name="plugins", aliases=["plugin"], invoke_without_command=True, case_insensitive=True)
     @commands.is_owner()
     async def plugins(self, ctx: Ctx) -> None:
         await ctx.send(USAGE_PLUGINS)
