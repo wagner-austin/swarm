@@ -49,27 +49,58 @@ def _discover_extensions() -> list[str]:
 
 
 async def _start_bot() -> None:
+    # Configure intents
     intents = Intents.default()
+    # Add message content intent to ensure commands work properly
+    intents.message_content = True
+
+    # Create bot instance
     bot = commands.Bot(command_prefix=commands.when_mentioned_or("!"), intents=intents)
 
+    # Remove the built-in help command before loading our custom one
+    bot.remove_command("help")
+
+    # Load extensions
     for ext in _discover_extensions():
         try:
             await bot.load_extension(ext)
         except Exception:
             logger.exception("Failed to load %s", ext)
 
-    await bot.start(settings.discord_token)
+    # Setup clean close handler
+    @bot.event
+    async def on_disconnect() -> None:
+        logger.info("Bot disconnected from Discord")
+
+    # Start the bot
+    try:
+        await bot.start(settings.discord_token)
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
+    finally:
+        if not bot.is_closed():
+            await bot.close()
+            logger.info("Bot connection closed")
 
 
 async def main() -> None:
     """Main entry point to prepare the database, create a backup, and start the bot."""
     setup_logging()  # new – configure logging once
-    await _prep_db()
-    backup_path = create_backup()
-    logger.info("Startup backup at %s", backup_path)
-    if os.environ.get("FAST_EXIT_FOR_TESTS") == "1":
-        return
-    await _start_bot()  # replaces the import-bot indirection
+    try:
+        await _prep_db()
+        backup_path = create_backup()
+        logger.info("Startup backup at %s", backup_path)
+        if os.environ.get("FAST_EXIT_FOR_TESTS") == "1":
+            return
+        await _start_bot()  # replaces the import-bot indirection
+    except KeyboardInterrupt:
+        logger.info("Bot shutting down gracefully (KeyboardInterrupt received)")
+    except Exception as e:
+        logger.exception("Unexpected error: %s", str(e))
+    finally:
+        # Ensure proper cleanup here
+        logger.info("Bot has been shut down")
+        # Additional cleanup code can be added here if needed
 
 
 # End of main.py

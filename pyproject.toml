@@ -23,7 +23,7 @@ discord = ["discord.py[voice]>=2.3"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.4"]
 
 [tool.setuptools]
-packages = { find = { where = [ "." ], include = ["bot_core*", "bot_plugins*"] } }
+packages = { find = { where = [ "." ], include = ["bot_core*", "bot_plugins*", "db*", "migrations*"] } }
 
 [project.entry-points."bot_plugins"]
 builtin = "bot_plugins.commands"

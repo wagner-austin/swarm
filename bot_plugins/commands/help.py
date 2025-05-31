@@ -62,4 +62,6 @@ class Help(commands.Cog):
 
 
 async def setup(bot: commands.Bot) -> None:
+    # Ensure built-in help command is removed
+    bot.remove_command('help')
     await bot.add_cog(Help(bot))
