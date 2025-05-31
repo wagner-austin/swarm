@@ -47,6 +47,35 @@ class BrowserSession:
             import undetected_chromedriver as uc
         else:
             import undetected_chromedriver as uc
+
+            # Only patch Chrome.__del__ if it exists and we're not in a test environment
+            try:
+                if hasattr(uc.Chrome, "__del__"):
+                    original_del = uc.Chrome.__del__
+
+                    def safe_del(self):
+                        try:
+                            # Only call original if driver is still active
+                            if (
+                                hasattr(self, "service")
+                                and self.service
+                                and hasattr(self.service, "process")
+                                and self.service.process
+                            ):
+                                original_del(self)
+                        except Exception as e:
+                            logger.info(
+                                f"[BrowserSession] Suppressed error in Chrome.__del__: {e}"
+                            )
+
+                    # Apply the patch
+                    uc.Chrome.__del__ = safe_del
+                    logger.info(
+                        "[BrowserSession] Applied Chrome.__del__ patch to prevent invalid handle errors"
+                    )
+            except Exception as e:
+                logger.info(f"[BrowserSession] Could not patch Chrome.__del__: {e}")
+
         chrome_options = uc.ChromeOptions()
         # Defensive fallback for download dir
         download_dir = str(
@@ -59,20 +88,28 @@ class BrowserSession:
         }
         chrome_options.add_experimental_option("prefs", prefs)
         profile_dir = self.profile or settings.chrome_profile_name or "Profile 1"
-        user_data_dir = str(
-            settings.chrome_profile_dir or (Path.home() / ".config" / "google-chrome")
-        )
+
+        # Prioritize using the local ChromeProfiles directory in the project
+        local_chrome_profiles = Path.cwd() / "ChromeProfiles"
+        user_data_dir = str(settings.chrome_profile_dir or local_chrome_profiles)
+
+        # Create the profile directory if it doesn't exist
         full_profile_path = Path(user_data_dir) / profile_dir
-        if full_profile_path.exists():
-            chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-            chrome_options.add_argument(f"--profile-directory={profile_dir}")
-            logger.info(
-                f"[BrowserSession] Using Chrome profile from '{full_profile_path}'."
-            )
-        else:
-            logger.warning(
-                f"[BrowserSession] Profile '{full_profile_path}' does not exist; using default profile."
-            )
+        if not full_profile_path.exists():
+            try:
+                full_profile_path.mkdir(parents=True, exist_ok=True)
+                logger.info(
+                    f"[BrowserSession] Created Chrome profile directory at '{full_profile_path}'"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[BrowserSession] Failed to create profile directory: {e}"
+                )
+
+        # Always use the profile directory - it now exists or we'll use it empty
+        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+        chrome_options.add_argument(f"--profile-directory={profile_dir}")
+        logger.info(f"[BrowserSession] Using Chrome profile from '{full_profile_path}'")
         # --------- browser flags ---------
         headless = (
             self._headless if self._headless is not None else settings.browser.headless
@@ -87,12 +124,15 @@ class BrowserSession:
         # --------- end browser flags -----
         driver_path = settings.chromedriver_path
         try:
+            # Explicitly use Chrome version 136 to match the installed browser
             if driver_path:
                 self.driver = uc.Chrome(
-                    driver_executable_path=driver_path, options=chrome_options
+                    driver_executable_path=driver_path,
+                    options=chrome_options,
+                    version_main=136,
                 )
             else:
-                self.driver = uc.Chrome(options=chrome_options)
+                self.driver = uc.Chrome(options=chrome_options, version_main=136)
         except Exception as e:
             logger.error(f"[BrowserSession] Failed to launch Chrome: {e}")
             raise
@@ -104,6 +144,12 @@ class BrowserSession:
 
         if self.driver is None:
             raise RuntimeError("No browser driver available.")
+
+        # Ensure URL has proper protocol prefix
+        if not url.startswith(("http://", "https://", "file://", "data:", "about:")):
+            logger.info(f"[BrowserSession] Adding https:// prefix to URL: {url}")
+            url = f"https://{url}"
+
         await asyncio.to_thread(self.driver.get, url)
         self._state_transition(State.IDLE)
 
@@ -140,11 +186,49 @@ class BrowserSession:
         await asyncio.sleep(duration)
         self._state_transition(State.IDLE)
 
+    def get_current_url(self) -> str:
+        """Get the current URL from the browser.
+
+        Returns:
+            The current URL as a string, or empty string if not available.
+        """
+        try:
+            if self.driver and hasattr(self.driver, "current_url"):
+                return self.driver.current_url
+        except Exception as e:
+            logger.info(f"[BrowserSession] Error getting current URL: {e}")
+        return ""
+
     def close(self) -> None:
         self._state_transition(State.CLOSING)
+
+        # Graceful driver shutdown to prevent invalid handle errors
         if self.driver:
             try:
+                # First close all windows/tabs
+                try:
+                    if (
+                        hasattr(self.driver, "window_handles")
+                        and self.driver.window_handles
+                    ):
+                        for window in self.driver.window_handles[1:]:
+                            self.driver.switch_to.window(window)
+                            self.driver.close()
+                        if self.driver.window_handles:
+                            self.driver.switch_to.window(self.driver.window_handles[0])
+                except Exception as e:
+                    logger.info(f"[BrowserSession] Error closing windows: {e}")
+
+                # Then quit the driver
                 self.driver.quit()
+                # Set to None to prevent further access attempts
+                self.driver = None
             except Exception as e:
                 logger.info(f"[BrowserSession] Error quitting driver: {e}")
+                # Force cleanup to avoid garbage collection issues
+                try:
+                    self.driver = None
+                except Exception:
+                    pass
+
         self._state_transition(State.COMPLETED)

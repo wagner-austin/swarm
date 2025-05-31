@@ -22,7 +22,12 @@ class PluginManager(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @commands.group(name="plugins", aliases=["plugin"], invoke_without_command=True, case_insensitive=True)
+    @commands.group(
+        name="plugins",
+        aliases=["plugin"],
+        invoke_without_command=True,
+        case_insensitive=True,
+    )
     @commands.is_owner()
     async def plugins(self, ctx: Ctx) -> None:
         await ctx.send(USAGE_PLUGINS)
@@ -35,9 +40,37 @@ class PluginManager(commands.Cog):
         if not loaded:
             await ctx.send("No extensions loaded.")
             return
-        else:
-            await ctx.send("Loaded extensions:\n" + "\n".join(loaded))
-            return
+
+        # Group plugins by category for better organization
+        categories: dict[str, list[str]] = {}
+        for ext in loaded:
+            # Split by dots and get the second-to-last part (e.g., 'commands' from 'bot_plugins.commands.browser')
+            parts = ext.split(".")
+            if len(parts) >= 3:
+                category = parts[-2]  # e.g., 'commands'
+                if category not in categories:
+                    categories[category] = []
+                categories[category].append(parts[-1])  # Add the plugin name
+            else:
+                # Handle plugins that don't fit the expected pattern
+                if "other" not in categories:
+                    categories["other"] = []
+                categories["other"].append(ext)
+
+        # Format the output with Discord markdown
+        output = "**Loaded Extensions:**\n```"
+        for category, plugins in sorted(categories.items()):
+            # Convert category to title case for better readability
+            formatted_category = category.replace("_", " ").title()
+            output += f"\n{formatted_category}:\n"
+
+            # Sort plugins alphabetically within each category
+            for plugin in sorted(plugins):
+                output += f"  • {plugin}\n"
+
+        output += "```"
+        await ctx.send(output)
+        return
 
     @plugins.command(name="enable")  # type: ignore[arg-type]
     async def enable_plugin(self, ctx: Ctx, extension: str) -> None:
