@@ -9,6 +9,7 @@ import subprocess
 from discord import Intents
 from discord.ext import commands
 from pathlib import Path
+from typing import Any
 from bot_core.logger_setup import setup_logging
 from bot_core.settings import settings  # fully typed alias
 from db.backup import create_backup
@@ -75,6 +76,29 @@ async def _start_bot() -> None:
     @bot.event
     async def on_disconnect() -> None:
         logger.info("Bot disconnected from Discord")
+
+    # Add command error handler
+    @bot.event
+    async def on_command_error(
+        ctx: commands.Context[Any], error: commands.CommandError
+    ) -> None:
+        if isinstance(error, commands.CommandNotFound):
+            # Extract the attempted command from the message
+            message_content = ctx.message.content.strip()
+            attempted_command = (
+                message_content.split()[0][1:]
+                if message_content.startswith("!")
+                else message_content
+            )
+
+            # Provide helpful feedback
+            await ctx.send(
+                f"Command `{attempted_command}` not found. Type `!help` to see available commands."
+            )
+        else:
+            # Log other errors for debugging
+            logger.error(f"Command error: {error}")
+            # Don't handle other errors here - they're logged in the default handler
 
     # Start the bot
     try:

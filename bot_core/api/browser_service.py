@@ -44,10 +44,29 @@ class BrowserService:
         """
         if self._session:
             return "Browser session already started."
+
         self._session = BrowserSession(profile=profile, headless=headless)
-        if url:
-            await self._session.navigate(url)
-        return "Browser session started."
+
+        if not url:
+            return "Browser session started."
+
+        # If URL is provided, navigate to it and provide feedback
+        actual_url = url
+        if not url.startswith(("http://", "https://", "file://", "data:", "about:")):
+            actual_url = f"https://{url}"
+
+        try:
+            # Navigate to the URL
+            await self._session.navigate(actual_url)
+
+            # Get the current URL to show where we navigated to (might be different due to redirects)
+            current_url = (
+                self._session.get_current_url() if self._session else actual_url
+            )
+
+            return f"Browser session started. Navigated to: {current_url}"
+        except Exception as e:
+            return f"Browser session started, but navigation error: {str(e)}"
 
     async def stop(self) -> str:
         if not self._session:
@@ -63,14 +82,47 @@ class BrowserService:
 
     # ---------- actions --------------------------------------------------
     async def open(self, url: str) -> str:
-        if not self._session:
-            return "No active session. Use 'start' first."
-        await self._session.navigate(url)
-        return "Navigating…"
+        """Navigate to a URL and provide feedback on completion.
 
-    async def screenshot(self, dest: str | None = None) -> str:
+        Args:
+            url: The URL to navigate to
+
+        Returns:
+            A message indicating navigation status
+        """
         if not self._session:
             return "No active session. Use 'start' first."
+
+        # First send a status that we're navigating
+        actual_url = url
+        if not url.startswith(("http://", "https://", "file://", "data:", "about:")):
+            actual_url = f"https://{url}"
+
+        try:
+            # Start navigation
+            await self._session.navigate(actual_url)
+
+            # Get the current URL to show where we navigated to (might be different due to redirects)
+            current_url = (
+                self._session.get_current_url() if self._session else actual_url
+            )
+
+            return f"Navigation complete: {current_url}"
+        except Exception as e:
+            return f"Navigation error: {str(e)}"
+
+    async def screenshot(self, dest: str | None = None) -> tuple[str, str]:
+        """Take a screenshot of the current browser view.
+
+        Args:
+            dest: Optional destination path for the screenshot.
+
+        Returns:
+            A tuple of (file_path, message) where file_path is the full path to the screenshot
+            and message is a status message to display.
+        """
+        if not self._session:
+            return "", "No active session. Use 'start' first."
         if dest is None:
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             fname = f"screenshot_{ts}.png"
@@ -84,7 +136,7 @@ class BrowserService:
             dest_str = dest
         assert self._session is not None
         path_str = self._session.screenshot(dest_str)
-        return f"Screenshot saved to {path_str}"
+        return path_str, f"Screenshot saved to {path_str}"
 
 
 # a default instance for prod code that doesn’t care about DI
