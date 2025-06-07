@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "volunteer-bot"
+name = "discord_bot"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
@@ -20,11 +20,9 @@ dependencies = [
   "undetected_chromedriver>=3",
   "discord.py>=2.3",
   "selenium>=4",
-  "requests>=2",
 
   # --- proxy and websocket support ---
   "mitmproxy>=10.0.0,<11.0.0",      # MITM TLS proxy, BSD-licensed
-  "websockets>=13"       # async WebSocket client/server
 ]
 
 [project.optional-dependencies]
@@ -32,13 +30,13 @@ discord = ["discord.py[voice]>=2.3"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.4", "black>=24.1", "mypy>=1.9"]
 
 [tool.setuptools]
-packages = { find = { where = [ "src" ], include = ["bot_core*", "bot_plugins*", "db*", "migrations*", "utils*"] } }
+packages = { find = { where = [ "src" ], include = ["bot_core*", "bot_plugins*", "db*", "migrations*", "utils*", "tankpit*", "discord_bot*"] } }
 
 [project.entry-points."bot_plugins"]
 builtin = "bot_plugins.commands"
 
 [project.scripts]
-volunteer-bot = "bot_core.main:main"
+discord_bot = "bot_core.main:main"
 
 [tool.pytest.ini_options]
 python_paths = ["src"]
