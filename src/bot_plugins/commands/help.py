@@ -12,7 +12,7 @@ from discord.ext import commands
 import logging
 from typing import Optional
 
-from bot_plugins.typing import Ctx
+from src.bot_plugins.typing import Ctx
 
 HELP_USAGE = "Usage: !help"
 INTERNAL_ERROR = "An internal error occurred. Please try again later."

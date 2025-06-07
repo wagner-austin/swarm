@@ -8,7 +8,7 @@ retention counts, and also checks behavior when .env is missing or values are in
 import os
 from unittest.mock import patch
 import pytest
-from bot_core.settings import settings  # fully typed alias
+from src.bot_core.settings import settings  # fully typed alias
 
 
 @pytest.mark.usefixtures("reset_user_state")
@@ -45,7 +45,7 @@ class TestCoreConfig:
     @pytest.mark.asyncio
     async def test_missing_env_file(self) -> None:
         # Should fall back to defaults if .env is missing, but DISCORD_TOKEN is required
-        from bot_core.settings import Settings
+        from src.bot_core.settings import Settings
 
         s = Settings(_env_file=None, discord_token="dummy")
         assert s.db_name.endswith(".db")

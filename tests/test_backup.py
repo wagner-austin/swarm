@@ -1,7 +1,7 @@
 from pathlib import Path
 import tempfile
-from bot_core.settings import Settings
-from db.backup import create_backup, list_backups
+from src.bot_core.settings import Settings
+from src.db.backup import create_backup, list_backups
 
 
 def test_create_backup_happy_path() -> None:
@@ -19,9 +19,9 @@ def test_create_backup_happy_path() -> None:
         assert backup_path.exists(), f"Backup file should exist: {backup_path}"
         # It should appear in list_backups
         backups = list_backups(cfg)
-        assert any(
-            backup_path.name == b.name for b in backups
-        ), "Backup should be listed by list_backups()"
+        assert any(backup_path.name == b.name for b in backups), (
+            "Backup should be listed by list_backups()"
+        )
         # Optionally: check backup file content matches (not strictly required)
         with backup_path.open("rb") as f:
             data = f.read()

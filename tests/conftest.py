@@ -1,25 +1,27 @@
+#!/usr/bin/env python
+# Add the src directory to the Python path for all tests
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
+
+# Now import other modules
 import types
 import pytest
 import pytest_asyncio
-from pathlib import Path
 from alembic.config import Config
 from alembic import command
-from bot_core.api import db_api
-from bot_core.storage import acquire
 import tempfile
 import pathlib
 import os
 from typing import Any, Generator, AsyncGenerator
+from src.bot_core.api import db_api
+from src.bot_core.storage import acquire
 
-#!/usr/bin/env python
 """
 tests/conftest.py - Consolidated test fixtures and common setup for database isolation, CLI simulation, and plugin registration.
 This module overrides DB_NAME for test isolation, clears key database tables, and provides common fixtures including a unified CLI runner.
 """
-
-# Insert the project root (one directory above tests) into sys.path to ensure modules like 'managers' are discoverable.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 
 # --- Robust file-based test DB setup ---
@@ -39,7 +41,7 @@ def apply_migrations(test_db_file: Path) -> Generator[None, None, None]:
     alembic_ini = pathlib.Path(__file__).parents[1] / "alembic.ini"
     alembic_cfg = Config(str(alembic_ini))
     alembic_cfg.set_main_option("sqlalchemy.url", os.environ["DB_URL"])
-    alembic_cfg.set_main_option("script_location", "migrations")
+    alembic_cfg.set_main_option("script_location", "src/migrations")
     command.upgrade(alembic_cfg, "head")
     yield
 

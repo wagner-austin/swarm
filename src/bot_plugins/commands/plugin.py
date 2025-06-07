@@ -8,7 +8,7 @@ Usage:
 """
 
 from discord.ext import commands
-from bot_plugins.typing import Ctx
+from src.bot_plugins.typing import Ctx
 import logging
 
 logger = logging.getLogger(__name__)

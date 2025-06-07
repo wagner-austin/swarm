@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Tuple, List, Union
 from collections.abc import Mapping
 
 # from db.repository import BaseRepository  # Removed: use direct aiosqlite/SQLAlchemy queries instead
-from bot_core.storage import acquire
+from src.bot_core.storage import acquire
 import aiosqlite  # Ensure this is imported
 
 

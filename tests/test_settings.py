@@ -2,7 +2,7 @@ import tempfile
 from pathlib import Path
 import pytest
 from pydantic import ValidationError
-from bot_core.settings import Settings
+from src.bot_core.settings import Settings
 
 from typing import Any
 

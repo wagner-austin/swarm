@@ -1,5 +1,5 @@
 import pytest
-from bot_core.api.browser_service import BrowserService
+from src.bot_core.api.browser_service import BrowserService
 
 from typing import Any
 

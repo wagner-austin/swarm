@@ -3,7 +3,7 @@ import asyncio
 import logging
 from enum import Enum, auto
 from typing import Optional, TYPE_CHECKING
-from bot_core.settings import settings
+from src.bot_core.settings import settings
 
 """
 bot_core/api/browser_session_api.py

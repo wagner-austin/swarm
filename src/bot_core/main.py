@@ -10,7 +10,7 @@ from discord import Intents
 from discord.ext import commands
 from pathlib import Path
 from typing import Any
-from bot_core.logger_setup import setup_logging
+from .logger_setup import setup_logging
 from bot_core.settings import settings  # fully typed alias
 from db.backup import create_backup
 import os

@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 import aiosqlite
-from bot_core.settings import settings
+from src.bot_core.settings import settings
 from typing import AsyncGenerator
 
 

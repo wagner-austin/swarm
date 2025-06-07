@@ -17,7 +17,6 @@ install:
 lint:
 	$(RUFF) check --fix .
 	$(RUFF) format .
-	$(PYTHON) -m black .
 	$(MYPY) --strict .
 
 # Format code
@@ -40,7 +39,7 @@ clean:
 
 # Run the bot
 run:
-	$(PYTHON) bot.py
+	$(PYTHON) -m src.bot
 
 # Generate documentation (update this if you use a specific doc generator)
 docs:
