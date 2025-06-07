@@ -1,8 +1,8 @@
 import pytest
 from discord.ext.commands import Bot
 from discord import Intents
-from bot_plugins.commands.browser import Browser
-from bot_core.api.browser_service import BrowserService
+from src.bot_plugins.commands.browser import Browser
+from src.bot_core.api.browser_service import BrowserService
 from tests.helpers.mocks import MockCtx
 from typing import Any
 

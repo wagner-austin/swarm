@@ -1,7 +1,7 @@
 from discord.ext import commands, tasks
 import logging
 from db.backup import create_backup, _prune_backups
-from bot_core.settings import settings  # fully typed alias
+from src.bot_core.settings import settings  # fully typed alias
 
 logger = logging.getLogger(__name__)
 

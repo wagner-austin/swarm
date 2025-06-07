@@ -16,9 +16,9 @@ import types
 import logging
 from unittest.mock import AsyncMock
 from discord.ext import commands
-from bot_plugins.commands.help import Help
-from bot_plugins.commands.info import Info
-from bot_plugins.commands.chat import Chat
+from src.bot_plugins.commands.help import Help
+from src.bot_plugins.commands.info import Info
+from src.bot_plugins.commands.chat import Chat
 from tests.helpers.mocks import MockCtx
 
 logger = logging.getLogger(__name__)

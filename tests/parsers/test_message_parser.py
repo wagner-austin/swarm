@@ -3,7 +3,7 @@ tests/parsers/test_message_parser.py - Tests for message parsing functionalities
 """
 
 from typing import Any
-from bot_core.parsers import parse_message
+from src.bot_core.parsers import parse_message
 
 import pytest
 

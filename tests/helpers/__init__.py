@@ -12,7 +12,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Tuple, Any, Dict, AsyncGenerator
 
-from bot_core.storage import acquire
+from src.bot_core.storage import acquire
 
 # ------------------------------------------------------------------ #
 # Async sleep scaler ------------------------------------------------ #

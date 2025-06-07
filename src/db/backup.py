@@ -15,8 +15,8 @@ import shutil
 from datetime import datetime
 import asyncio
 import logging
-from bot_core.settings import settings  # fully typed alias
-from bot_core.settings import Settings
+from src.bot_core.settings import settings  # fully typed alias
+from src.bot_core.settings import Settings
 
 logger = logging.getLogger(__name__)
 

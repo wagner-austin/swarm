@@ -13,7 +13,8 @@ def test_main_bootstrap_exits_zero() -> None:
     env = os.environ.copy()
     # Ensure PYTHONPATH includes the project root for subprocess
     project_root = Path(__file__).parent.parent.resolve()
-    env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
+    src_dir = project_root / "src"
+    env["PYTHONPATH"] = str(src_dir) + os.pathsep + env.get("PYTHONPATH", "")
     env["FAST_EXIT_FOR_TESTS"] = "1"
     result = subprocess.run(
         [sys.executable, "-m", "bot_core.main"], capture_output=True, text=True, env=env

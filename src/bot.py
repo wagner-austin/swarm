@@ -3,7 +3,7 @@ Thin launcher kept for backward compatibility.
 Real startup logic now lives in bot_core.main.
 """
 
-from bot_core.main import main as _main
+from .bot_core.main import main as _main
 
 
 async def run() -> None:  # keeps the original public symbol alive

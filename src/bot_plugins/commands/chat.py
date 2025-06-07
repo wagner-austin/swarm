@@ -1,5 +1,5 @@
 from discord.ext import commands
-from bot_core.settings import settings  # fully typed alias
+from src.bot_core.settings import settings  # fully typed alias
 from typing import Any, Optional as Opt, TYPE_CHECKING
 
 if TYPE_CHECKING:

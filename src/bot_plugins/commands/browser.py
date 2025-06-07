@@ -1,6 +1,6 @@
 import logging
 from discord.ext import commands
-from bot_core.api.browser_service import BrowserService, default_browser_service
+from src.bot_core.api.browser_service import BrowserService, default_browser_service
 from typing import Any
 
 logger = logging.getLogger(__name__)
