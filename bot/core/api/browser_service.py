@@ -57,15 +57,29 @@ class BrowserService:
         if self._session:
             return "Browser session already started."
 
-        # infer desired mode
+        # Determine the effective headless mode
         if headless is None:
-            headless = self._last_headless
+            # If no mode is specified by the caller, use the global default setting
+            effective_headless = self._settings.browser.headless
+            logger.info(
+                f"[BrowserService.start] headless param is None. Using global settings.browser.headless: {self._settings.browser.headless}. effective_headless set to: {effective_headless}"
+            )
         else:
-            self._last_headless = headless
+            # If a mode is specified, use that
+            effective_headless = headless
+            logger.info(
+                f"[BrowserService.start] headless param explicitly set to: {headless}. effective_headless set to: {effective_headless}"
+            )
+
+        # Update the last known headless state to what we're actually using
+        self._last_headless = effective_headless
+        logger.info(
+            f"[BrowserService.start] _last_headless updated to: {self._last_headless}. BrowserSession will be initialized with headless={effective_headless}"
+        )
 
         self._session = BrowserSession(
             profile=profile,
-            headless=headless,
+            headless=effective_headless,
             timeout=timeout,
         )
         await self._session.initialize()  # awaits the async initialization
@@ -163,15 +177,23 @@ class BrowserService:
         return self._session is not None and self._session.is_alive()
 
     def status(self) -> str:
-        mode = "headless" if self._last_headless else "visible"
+        # Default mode from settings, used when no session or session is dead
+        default_mode_from_settings = (
+            "headless" if self._settings.browser.headless else "visible"
+        )
+
         if not self._session:
-            return f"No active session (preferred mode: {mode})."
+            return f"No active session (default mode: {default_mode_from_settings})."
+
+        # Mode for an active or last-active session
+        current_session_mode = "headless" if self._last_headless else "visible"
+
         if not self._session.is_alive():
             return (
                 f"Session DEAD (Chrome window closed). "
-                f"Preferred mode on restart: {mode}."
+                f"Default mode on restart: {default_mode_from_settings}."
             )
-        return f"Current state: {self._session.state.name} ({mode})."
+        return f"Current state: {self._session.state.name} (running as: {current_session_mode})."
 
     # ---------- actions --------------------------------------------------
     async def open(self, url: str) -> str:

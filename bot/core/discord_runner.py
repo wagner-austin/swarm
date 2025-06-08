@@ -30,7 +30,7 @@ def _discover_extensions() -> list[str]:
     commands_path = base_path / "plugins" / "commands"
     extensions = []
 
-    KEEP = {"chat", "help"}
+    KEEP = {"chat", "help", "shutdown", "status", "metrics_tracker"}
 
     if commands_path.exists() and commands_path.is_dir():
         for p in commands_path.glob("*.py"):
@@ -219,3 +219,18 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
             logger.info("Bot connection closed.")
         else:
             logger.info("Bot was already closed or not started.")
+
+        # ------------------------------------------------------------------+
+        # Extra: close the hidden aiohttp.ClientSession to avoid           |
+        # “Unclosed client session / connector” warnings on shutdown.      |
+        # ------------------------------------------------------------------+
+        try:
+            http = getattr(bot, "http", None)
+            session = getattr(
+                http, "_HTTPClient__session", None
+            )  # discord.py internals
+            if session and not session.closed:
+                await session.close()
+                logger.debug("Closed aiohttp ClientSession cleanly.")
+        except Exception as e:  # pragma: no cover – best-effort
+            logger.debug(f"Ignoring aiohttp close error: {e}")
