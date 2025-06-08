@@ -7,15 +7,30 @@ from __future__ import annotations
 
 import importlib
 import logging
-from pathlib import Path
+from selenium.common.exceptions import SessionNotCreatedException
+import shutil
+import pathlib
 import tempfile
-from types import ModuleType
-from typing import Optional, TYPE_CHECKING
+from pathlib import Path
+from types import ModuleType  # ✔ real home of ModuleType
+from typing import TYPE_CHECKING, Any
 
 from bot.core.settings import settings
 
+# lazy-load helper already handles the real import
 if TYPE_CHECKING:
     import undetected_chromedriver as uc
+
+import socket
+
+
+def _proxy_alive(host: str = "127.0.0.1", port: int = 9000) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +53,11 @@ def _patch_uc_chrome_del() -> None:
     if _chrome_del_patched:
         return
 
-    uc = _get_uc()  # NEW
+    uc = _get_uc()
     try:
         if hasattr(uc.Chrome, "__del__"):
             original_del = uc.Chrome.__del__
 
-            # Use a broad type here to avoid a
-            # “Name 'uc.Chrome' is not defined” mypy error.  The
-            # concrete type isn’t important for this runtime-only hook.
             def safe_del(self_chrome_instance: object) -> None:
                 try:
                     if (
@@ -70,107 +82,208 @@ def _patch_uc_chrome_del() -> None:
 
 
 def create_uc_driver(
-    profile_name: Optional[str] = None,
+    profile_name: str | None = None,
     headless_mode: bool | None = None,
-    version_main: int = 136,  # Default to a known working version
+    version_main: int | None = settings.browser_version_main,
+    proxy_config: dict[str, Any] | None = None,
+    user_data_dir_base: str | None = None,
+    timeout: int = 60,  # Add timeout parameter
 ) -> "uc.Chrome":
     """Creates and configures an undetected_chromedriver instance."""
-    uc = _get_uc()  # NEW
+    uc = _get_uc()
     _patch_uc_chrome_del()
 
     chrome_options = uc.ChromeOptions()
 
-    if settings.proxy_enabled:
-        proxy_port: int = settings.proxy_port or 9000
-        # Use 127.0.0.1 instead of “localhost” to dodge IPv6 ↔ IPv4 mismatches.
-        chrome_options.add_argument(f"--proxy-server=http://127.0.0.1:{proxy_port}")
-        chrome_options.add_argument("--ignore-certificate-errors")
-        logger.info(f"[BrowserDriver] Using proxy server http://127.0.0.1:{proxy_port}")
-    else:
-        logger.info("[BrowserDriver] Proxy not enabled or not configured in settings.")
+    # Add flags to prevent "restore pages" popup and other notification bars
+    chrome_options.add_argument("--restore-last-session=false")
+    chrome_options.add_argument("--no-first-run")
+    chrome_options.add_argument("--disable-infobars")
+    chrome_options.add_argument("--disable-session-crashed-bubble")
 
-    if settings.browser_download_dir:
+    _actual_proxy_port_for_check = settings.proxy_port or 9000
+    if settings.proxy_enabled and _proxy_alive(
+        "127.0.0.1", _actual_proxy_port_for_check
+    ):
+        proxy_argument_port = settings.proxy_port or 9000
+        chrome_options.add_argument(
+            f"--proxy-server=http://127.0.0.1:{proxy_argument_port}"
+        )
+        chrome_options.add_argument("--ignore-certificate-errors")
+        # Prevent DevTools port loop-back dead-lock
+        chrome_options.add_argument(
+            "--proxy-bypass-list=<-loopback>;localhost;127.0.0.1"
+        )
+        logger.info(
+            f"[BrowserDriver] Using proxy server http://127.0.0.1:{proxy_argument_port}"
+        )
+    else:
+        logger.info("[BrowserDriver] Proxy not running - launching Chrome without it.")
+
+    if settings.browser_download_dir is not None:
         download_dir_path = Path(settings.browser_download_dir)
     else:
-        # Use a dedicated folder in the system's temp directory
         download_dir_path = (
             Path(tempfile.gettempdir()) / "discord_bot_downloads" / "browser_default"
         )
 
     download_dir = str(download_dir_path.resolve())
-    Path(download_dir).mkdir(parents=True, exist_ok=True)  # Ensure download dir exists
+    Path(download_dir).mkdir(parents=True, exist_ok=True)
 
     prefs = {
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
         "download.default_directory": download_dir,
-        "profile.default_content_setting_values.cookies": 1,  # Allow cookies
-        "profile.block_third_party_cookies": False,  # Don't block third-party cookies
+        "profile.default_content_setting_values.cookies": 1,
+        "profile.block_third_party_cookies": False,
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
-    # Profile configuration
-    actual_profile_name = (
-        profile_name or settings.chrome_profile_name or "Default"
-    )  # Changed from "Profile 1" to "Default"
+    actual_profile_name = profile_name or settings.chrome_profile_name or "Default"
 
-    # Prefer local project directory for profiles
     default_user_data_dir_root = Path.cwd() / "ChromeProfiles"
     user_data_dir_root = settings.chrome_profile_dir or default_user_data_dir_root
 
     user_data_dir = Path(user_data_dir_root).resolve()
 
-    # Ensure the root user data directory exists
     user_data_dir.mkdir(parents=True, exist_ok=True)
-    # Profile specific directory will be created by Chrome if it doesn't exist, when using user-data-dir and profile-directory args
-
     chrome_options.add_argument(f"--user-data-dir={str(user_data_dir)}")
     chrome_options.add_argument(f"--profile-directory={actual_profile_name}")
     logger.info(f"[BrowserDriver] Using user data dir: {user_data_dir}")
     logger.info(f"[BrowserDriver] Using profile directory: {actual_profile_name}")
 
-    # Headless mode
-    # If headless_mode is explicitly passed, it takes precedence.
-    # Otherwise, use settings.headless_mode (which defaults to True).
-    is_headless = (
-        headless_mode if headless_mode is not None else settings.browser.headless
-    )
-    logger.info(f"[BrowserDriver] Headless mode: {is_headless}")
-
-    # Suppress welcome screen and default browser check
     chrome_options.add_argument("--no-first-run")
     chrome_options.add_argument("--no-default-browser-check")
 
-    # Common options for stability / compatibility
     chrome_options.add_argument("--disable-infobars")
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-popup-blocking")
-    chrome_options.add_argument("--start-maximized")  # May help with element visibility
-    # chrome_options.add_argument("--kiosk-printing") # If direct printing is ever needed
+    chrome_options.add_argument("--start-maximized")
+    chrome_options.add_argument("--log-level=3")
 
     try:
+        # Log more details about the initialization attempt for debugging
         logger.info(
-            f"[BrowserDriver] Initializing Chrome driver version_main={version_main}, headless={is_headless}"
+            f"[BrowserDriver] Initializing Chrome with settings:\n"
+            f"  - Headless mode: {headless_mode}\n"
+            f"  - Version main: {version_main}\n"
+            f"  - User data dir: {user_data_dir}\n"
+            f"  - Profile: {actual_profile_name}"
         )
-        driver = uc.Chrome(
-            options=chrome_options,
-            headless=is_headless,
-            version_main=version_main,
-            user_data_dir=str(
-                user_data_dir
-            ),  # Pass explicitly here too, as per uc docs for consistency
+
+        import concurrent.futures
+        import time
+
+        # Use a thread executor with timeout to avoid hanging indefinitely
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            try:
+                # Start timer for performance tracking
+                start_time = time.time()
+                logger.debug(
+                    f"[BrowserDriver] Attempting uc.Chrome driver creation with timeout={timeout}s"
+                )
+
+                # Submit the driver creation task to the executor
+                future = executor.submit(
+                    lambda: uc.Chrome(
+                        options=chrome_options,
+                        headless=headless_mode,
+                        version_main=None,  # Use None to allow auto-detection
+                        user_data_dir=str(user_data_dir),
+                        use_subprocess=True,  # Use subprocess for better isolation
+                    )
+                )
+
+                # Wait for the driver with a timeout
+                driver = future.result(timeout=timeout)
+
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"[BrowserDriver] Chrome driver initialized successfully in {elapsed:.2f}s"
+                )
+                return driver
+
+            except concurrent.futures.TimeoutError:
+                logger.error(
+                    f"[BrowserDriver] Chrome driver initialization timed out after {timeout}s"
+                )
+                raise RuntimeError(
+                    f"Chrome driver initialization timed out after {timeout} seconds. "
+                    "This might be due to Chrome hanging during startup."
+                ) from None
+
+            except TypeError as e:
+                logger.warning(
+                    f"[BrowserDriver] TypeError during uc.Chrome initialization: {e}. "
+                    "Attempting with minimal options."
+                )
+
+                # Try again with minimal options
+                future = executor.submit(
+                    lambda: uc.Chrome(
+                        options=chrome_options,
+                        headless=headless_mode,
+                        version_main=None,
+                    )
+                )
+
+                driver = future.result(timeout=timeout)
+                logger.info(
+                    "[BrowserDriver] Chrome driver initialized successfully with minimal options"
+                )
+                return driver
+    except SessionNotCreatedException as e:
+        if version_main is None:
+            logger.error(
+                "[BrowserDriver] SessionNotCreatedException even after auto-detect retry: %s",
+                e,
+                exc_info=True,
+            )
+            raise
+
+        logger.warning(
+            f"[BrowserDriver] SessionNotCreatedException with version_main='{version_main}': {e}. "
+            f"Assuming driver/browser version mismatch. Clearing cache and retrying with auto-detect."
         )
-        logger.info("[BrowserDriver] Chrome driver initialized successfully.")
-        return driver
+        module_file_path = uc.__file__
+        if module_file_path is None:
+            logger.error(
+                "[BrowserDriver] uc module's __file__ attribute is None. Cannot determine cache path. "
+                "Skipping cache clear and re-raising original error. This is unexpected if the "
+                "SessionNotCreatedException originated from the real undetected_chromedriver."
+            )
+            raise  # Re-raise the original SessionNotCreatedException
+
+        # module_file_path is now confirmed to be a str
+        uc_driver_cache_dir = pathlib.Path(module_file_path).resolve().parent / "driver"
+
+        if uc_driver_cache_dir.is_dir():
+            logger.info(
+                f"[BrowserDriver] Attempting to remove uc cache directory: {uc_driver_cache_dir}"
+            )
+            shutil.rmtree(uc_driver_cache_dir, ignore_errors=True)
+            logger.info(
+                f"[BrowserDriver] Removed uc cache directory (or operation ignored errors): {uc_driver_cache_dir}"
+            )
+        else:
+            logger.warning(
+                f"[BrowserDriver] uc cache path {uc_driver_cache_dir} not found or not a directory. Skipping cache clear."
+            )
+
+        logger.info(
+            "[BrowserDriver] Retrying create_uc_driver with version_main=None (auto-detect)."
+        )
+        return create_uc_driver(
+            profile_name=profile_name,
+            headless_mode=headless_mode,
+            version_main=None,
+            proxy_config=proxy_config,
+            user_data_dir_base=user_data_dir_base,
+        )
     except Exception as e:
-        logger.error(f"[BrowserDriver] Failed to launch Chrome: {e}", exc_info=True)
-        # Attempt to provide more specific advice for common issues
-        if "chrome_driver_executable" in str(e).lower():
-            logger.error(
-                "[BrowserDriver] Ensure ChromeDriver is installed and in your PATH, or specify its location."
-            )
-        elif "failed to get version_full" in str(e).lower():
-            logger.error(
-                "[BrowserDriver] uc failed to auto-detect Chrome version. Try specifying 'version_main' explicitly based on your installed Chrome."
-            )
+        logger.error(
+            "[BrowserDriver] Failed to launch Chrome (outer exception): %s",
+            e,
+            exc_info=True,
+        )
         raise

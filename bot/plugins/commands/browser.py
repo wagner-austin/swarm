@@ -6,14 +6,24 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-USAGE = (
-    "Usage:\n"
-    "  !browser start [<url>] [visible]\n"
-    "  !browser open <url>\n"
-    "  !browser screenshot\n"
-    "  !browser stop\n"
-    "  !browser status"
-)
+# Define command names as constants to ensure consistency
+CMD_BROWSER = "browser"
+CMD_START = "start"
+CMD_OPEN = "open"
+CMD_CLOSE = "close"
+CMD_SCREENSHOT = "screenshot"
+CMD_STATUS = "status"
+
+# Using f-strings with the constants ensures consistency between code and docs
+USAGE = f"""A browser automation toolkit.
+
+Available subcommands:
+  `{CMD_START} <url> [visible]` : Start browser, optionally navigate and make visible.
+  `{CMD_OPEN} <url>`            : Navigate to a new URL.
+  `{CMD_CLOSE}`                 : Close the browser session.
+  `{CMD_SCREENSHOT} [filename]`  : Take a screenshot, optionally save to file.
+  `{CMD_STATUS}`                : Check if the browser is running.
+"""
 
 
 class Browser(BaseCog):
@@ -22,14 +32,44 @@ class Browser(BaseCog):
         self._browser: BrowserService = browser_service
         self.__cog_name__ = "Browser"  # Explicitly set cog name
 
-    @commands.group(name="browser", invoke_without_command=True)
+    async def cog_command_error(
+        self, ctx: commands.Context[Any], error: Exception
+    ) -> None:
+        """Handle command errors specific to this cog."""
+        if isinstance(error, commands.CommandNotFound):
+            # Extract the attempted command from the message
+            message_content = ctx.message.content
+            command_parts = message_content.split()
+
+            if len(command_parts) >= 2 and command_parts[0].startswith("!"):
+                attempted_cmd = command_parts[1]
+                await ctx.send(
+                    f"⚠️ Unknown browser command: `{attempted_cmd}`.\nUse `!browser` to see available commands."
+                )
+            else:
+                await ctx.send(USAGE)
+            return
+
+        # For other errors, log them
+        logger.error(f"[Browser] Command error: {error}", exc_info=True)
+        await ctx.send(f"Error: {error}")
+
+    async def cog_unload(
+        self,
+    ) -> None:  # Should be async as per discord.py Cog superclass
+        if self._browser:
+            logger.info("Browser cog unloading, stopping browser service...")
+            await self._browser.stop()
+            logger.info("Browser service stopped during cog unload.")
+
+    @commands.group(name=CMD_BROWSER, invoke_without_command=True)
     @commands.is_owner()
     async def browser(self, ctx: commands.Context[Any]) -> None:
         """Control Chrome browser automation."""
         # If no subcommand is given, print usage
         await ctx.send(USAGE)
 
-    @commands.command(name="start", parent=browser)
+    @browser.command(name=CMD_START)  # type: ignore[arg-type]
     async def start(
         self,
         ctx: commands.Context[Any],
@@ -38,7 +78,11 @@ class Browser(BaseCog):
     ) -> None:
         """Start a browser session.
 
-        Use '!help browser start' for detailed usage information.
+        Usage: !browser start <url> [visible]
+        - <url>: Optional URL to navigate to after starting
+        - [visible]: If provided (any value), shows browser window instead of headless mode
+
+        Example: !browser start https://discord.com visible
         """
         assert self._browser is not None, "Browser service is not initialized."
 
@@ -48,12 +92,26 @@ class Browser(BaseCog):
         # Log whether we're running in headless mode or not
         logger.info(f"[Browser] Starting browser with headless={headless}")
 
-        msg = await self._browser.start(url=url, headless=headless)
-        await ctx.send(msg)
+        progress_message = await ctx.send("🟡 Launching Chrome …")
+        try:
+            msg = await self._browser.start(url=url, headless=headless)
+            await progress_message.edit(content="🟢 " + msg)
+        except Exception as e:
+            # Log the exception for server-side records
+            logger.exception(f"Browser start command failed: {e}")
+            await progress_message.edit(content=f"🔴 Browser failed: {e}")
+            # Re-raise to ensure it's caught by any global error handlers or logged by discord.py
+            raise
 
-    @commands.command(name="open", parent=browser)
+    @browser.command(name=CMD_OPEN)  # type: ignore[arg-type]
     async def open(self, ctx: commands.Context[Any], url: str | None = None) -> None:
-        """Navigate to a URL in the active browser session."""
+        """Navigate to a URL in the active browser session.
+
+        Usage: !browser open <url>
+        - <url>: URL to navigate to
+
+        Example: !browser open https://discord.com
+        """
         assert self._browser is not None, "Browser service is not initialized."
         if not url:
             await ctx.send(USAGE)
@@ -61,9 +119,14 @@ class Browser(BaseCog):
         msg = await self._browser.open(url)
         await ctx.send(msg)
 
-    @commands.command(name="screenshot", parent=browser)
+    @browser.command(name=CMD_SCREENSHOT)  # type: ignore[arg-type]
     async def screenshot(self, ctx: commands.Context[Any]) -> None:
-        """Take a screenshot of the current browser view and send it in the chat."""
+        """Take a screenshot of current browser view.
+
+        Takes a screenshot of the currently open page and sends it in the chat.
+
+        Usage: !browser screenshot
+        """
         assert self._browser is not None, "Browser service is not initialized."
 
         # Get screenshot path and message
@@ -102,22 +165,38 @@ class Browser(BaseCog):
             )
             await ctx.send(f"{msg} (File not available to send)")
 
-    @commands.command(name="stop", parent=browser)
-    async def stop(self, ctx: commands.Context[Any]) -> None:
-        """Stop the current browser session."""
+    @browser.command(name=CMD_CLOSE)  # type: ignore[arg-type]
+    async def close(self, ctx: commands.Context[Any]) -> None:
+        """Close the current browser session.
+
+        Shuts down the browser and cleans up resources.
+
+        Usage: !browser close
+        """
         assert self._browser is not None, "Browser service is not initialized."
-        msg = await self._browser.stop()
+        msg = (
+            await self._browser.stop()
+        )  # The method in BrowserService is still named stop()
         await ctx.send(msg)
 
-    @commands.command(name="status", parent=browser)
+    @browser.command(name=CMD_STATUS)  # type: ignore[arg-type]
     async def status(self, ctx: commands.Context[Any]) -> None:
-        """Check the current browser session status."""
+        """Check the current browser session status.
+
+        Reports if browser is running and the current URL if available.
+
+        Usage: !browser status
+        """
         assert self._browser is not None, "Browser service is not initialized."
         msg = self._browser.status()
         await ctx.send(msg)
 
 
 async def setup(bot: commands.Bot, browser_service_instance: BrowserService) -> None:
+    """Setup function for the browser plugin.
+
+    This is called by the bot when loading the extension.
+    """
     await bot.add_cog(Browser(bot, browser_service_instance))
 
 

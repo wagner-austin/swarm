@@ -38,26 +38,5 @@ async def startup() -> ProxyService | None:
             "A critical error occurred during startup or bot operation: %s", str(e)
         )
         return None  # Ensure we return None on exception before finally
-    finally:
-        if proxy_service_instance:
-            is_running_attr = getattr(proxy_service_instance, "is_running", None)
-            stop_attr = getattr(proxy_service_instance, "stop", None)
 
-            if callable(is_running_attr) and callable(stop_attr):
-                if proxy_service_instance.is_running():
-                    logger.info("Stopping ProxyService...")
-                    await proxy_service_instance.stop()
-                    logger.info("ProxyService stopped.")
-                else:
-                    logger.info("ProxyService was not running or already stopped.")
-            else:
-                logger.warning(
-                    "ProxyService instance does not have standard is_running/stop methods."
-                )
-        else:
-            logger.info(
-                "ProxyService was not instantiated (e.g., due to FAST_EXIT_FOR_TESTS)."
-            )
-
-        logger.info("Startup sequence finished and resources cleaned up if necessary.")
     return proxy_service_instance

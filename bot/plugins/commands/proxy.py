@@ -9,30 +9,63 @@ USAGE = "`!proxy start|stop|status`"
 
 
 class ProxyCog(BaseCog):
-    """Cog for managing the TankPit proxy service."""
+    """Manage the TankPit proxy service.
+
+    Commands to control the proxy service that routes game traffic.
+    """
 
     def __init__(self, bot: commands.Bot, svc: ProxyService) -> None:
         super().__init__(bot)
         self.svc = svc
 
-    # group definition
     @commands.group(name="proxy", invoke_without_command=True)
     @commands.is_owner()
     async def _grp(self, ctx: commands.Context[Any]) -> None:
+        """Manage the TankPit proxy service.
+
+        The proxy service routes game traffic through a controlled pathway.
+
+        Subcommands:
+          start   - Start the proxy service
+          stop    - Stop the proxy service
+          status  - Check if the proxy is running
+        """
         await ctx.send(USAGE)
 
     @_grp.command(name="start")  # type: ignore[arg-type]
     async def _start(self, ctx: commands.Context[Any]) -> None:
+        """Start the proxy service.
+
+        Starts routing game traffic through the proxy.
+
+        Usage: !proxy start
+        """
         await ctx.send(await self.svc.start())
 
     @_grp.command(name="stop")  # type: ignore[arg-type]
     async def _stop(self, ctx: commands.Context[Any]) -> None:
+        """Stop the proxy service.
+
+        Stops routing game traffic through the proxy.
+
+        Usage: !proxy stop
+        """
         await ctx.send(await self.svc.stop())
 
     @_grp.command(name="status")  # type: ignore[arg-type]
     async def _status(self, ctx: commands.Context[Any]) -> None:
+        """Check if the proxy service is running.
+
+        Reports current status of the proxy service.
+
+        Usage: !proxy status
+        """
         await ctx.send("running" if self.svc.is_running() else "stopped")
 
 
 async def setup(bot: commands.Bot, proxy_service: ProxyService) -> None:
+    """Setup function for the proxy plugin.
+
+    Called by Discord.py when loading the extension.
+    """
     await bot.add_cog(ProxyCog(bot, proxy_service))

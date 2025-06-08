@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     chrome_profile_name: Optional[str] = "Profile 1"
     chromedriver_path: Optional[str] = None
     browser_download_dir: Optional[str] = None
+    browser_version_main: Optional[int] = (
+        None  # Allow overriding Chrome major version (None = auto-detect)
+    )
 
     browser: BrowserConfig = BrowserConfig()
 

@@ -42,26 +42,49 @@ class State(Enum):
 
 
 class BrowserSession:
-    def __init__(self, profile: Optional[str] = None, headless: bool | None = None):
+    def __init__(
+        self,
+        profile: Optional[str] = None,
+        headless: bool | None = None,
+        timeout: int = 60,
+    ):
         self.driver: Optional[uc.Chrome] = None
         self.state = State.INITIAL
         self.profile_name = profile
         self.headless_mode = headless
-        self._initialize_driver()
+        self.timeout = timeout
 
-    def _initialize_driver(self) -> None:
+    async def initialize(self) -> None:
         self._state_transition(State.CREATING_DRIVER)
         try:
-            self.driver = create_uc_driver(
-                profile_name=self.profile_name, headless_mode=self.headless_mode
+            # Create driver with timeout parameter
+            logger.info(
+                f"[BrowserSession] Starting Chrome initialization with timeout={self.timeout}s"
             )
+            self.driver = await asyncio.to_thread(
+                create_uc_driver,
+                profile_name=self.profile_name,
+                headless_mode=self.headless_mode,
+                timeout=self.timeout,
+            )
+            logger.info("[BrowserSession] Chrome driver successfully initialized")
             self._state_transition(State.IDLE)
+        except TimeoutError as e:
+            logger.error(f"[BrowserSession] Timeout during driver initialization: {e}")
+            self._state_transition(State.FAILED)
+            raise RuntimeError(
+                f"Browser initialization timed out after {self.timeout} seconds"
+            ) from e
         except Exception as e:
             logger.error(
-                f"[BrowserSession] Failed to initialize driver: {e}", exc_info=True
+                f"[BrowserSession] Failed to initialize driver: {type(e).__name__}: {e}",
+                exc_info=True,
             )
             self._state_transition(State.FAILED)
-            # self.driver will remain None
+            # Add more context to the error to make debugging easier
+            raise RuntimeError(
+                f"Browser initialization failed: {type(e).__name__}: {e}"
+            ) from e
 
     def _state_transition(self, new_state: State) -> None:
         previous_state = self.state
@@ -85,12 +108,12 @@ class BrowserSession:
         try:
             await asyncio.to_thread(self.driver.get, actual_url)
             self._state_transition(State.IDLE)
-        except Exception as e:
-            logger.error(f"[BrowserSession] Navigation failed: {e}", exc_info=True)
+        except Exception:
+            logger.exception("[BrowserSession] Navigation failed:")
             self._state_transition(State.FAILED)
             raise
 
-    def screenshot(self, path: str) -> str:
+    async def screenshot(self, path: str) -> str:
         if self.state in [State.CLOSING, State.CLOSED, State.FAILED] or not self.driver:
             logger.warning(
                 f"[BrowserSession] Cannot take screenshot in state {self.state.name} or no driver."
@@ -103,7 +126,7 @@ class BrowserSession:
         path_obj = Path(path)
         try:
             path_obj.parent.mkdir(parents=True, exist_ok=True)
-            self.driver.save_screenshot(str(path_obj))
+            await asyncio.to_thread(self.driver.save_screenshot, str(path_obj))
             logger.info(f"[BrowserSession] Screenshot saved to {path_obj.resolve()}")
             self._state_transition(State.IDLE)
             return str(path_obj.resolve())
@@ -112,7 +135,7 @@ class BrowserSession:
             self._state_transition(State.FAILED)
             raise
 
-    def download_asset(self, url: str, path: str) -> str:
+    async def download_asset(self, url: str, path: str) -> str:
         if self.state in [State.CLOSING, State.CLOSED, State.FAILED]:
             logger.warning(
                 f"[BrowserSession] Cannot download in state {self.state.name}."
@@ -121,7 +144,8 @@ class BrowserSession:
 
         self._state_transition(State.DOWNLOADING)
         path_obj = Path(path)
-        try:
+
+        def _blocking_download() -> str:
             path_obj.parent.mkdir(parents=True, exist_ok=True)
             # Using requests for simplicity and robustness in downloading
             with requests.get(url, stream=True) as resp:
@@ -129,9 +153,13 @@ class BrowserSession:
                 with path_obj.open("wb") as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         f.write(chunk)
-            logger.info(f"[BrowserSession] Asset downloaded to {path_obj.resolve()}")
-            self._state_transition(State.IDLE)
             return str(path_obj.resolve())
+
+        try:
+            result_path = await asyncio.to_thread(_blocking_download)
+            logger.info(f"[BrowserSession] Asset downloaded to {result_path}")
+            self._state_transition(State.IDLE)
+            return result_path
         except Exception as e:
             logger.error(
                 f"[BrowserSession] Failed to download asset: {e}", exc_info=True
@@ -164,7 +192,7 @@ class BrowserSession:
             logger.info(f"[BrowserSession] Error getting current URL: {e}")
             return ""
 
-    def close(self) -> None:
+    async def close(self) -> None:
         if self.state == State.CLOSING or self.state == State.CLOSED:
             logger.info("[BrowserSession] Already closing or closed.")
             return
@@ -181,7 +209,7 @@ class BrowserSession:
                 #         self.driver.close()
                 #     if self.driver.window_handles: # Switch back to the first tab before quitting
                 #         self.driver.switch_to.window(self.driver.window_handles[0])
-                self.driver.quit()
+                await asyncio.to_thread(self.driver.quit)
                 logger.info("[BrowserSession] Driver quit successfully.")
             except Exception as e:
                 logger.error(
@@ -194,8 +222,12 @@ class BrowserSession:
 
     def __del__(self: "BrowserSession") -> None:
         # Ensure cleanup on garbage collection if close() wasn't explicitly called
-        if self.state not in [State.CLOSING, State.CLOSED]:
-            logger.info(
-                f"[BrowserSession] __del__ called in state {self.state.name}. Attempting cleanup."
+        if self.driver is not None and self.state not in [State.CLOSING, State.CLOSED]:
+            logger.warning(
+                f"[BrowserSession] __del__ called on an active session (state: {self.state.name}). "
+                f"The browser may not be properly closed. Ensure 'await session.close()' is called."
             )
-            self.close()
+            # Directly calling self.close() here is problematic as it's a coroutine.
+            # For robust cleanup, users must explicitly call 'await session.close()'.
+            # If we want to attempt a best-effort sync cleanup, it's complex and risky.
+            # For now, we log a warning.

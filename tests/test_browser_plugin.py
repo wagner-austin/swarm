@@ -35,5 +35,5 @@ async def test_browser_command_flow(monkeypatch: Any, tmp_path: Any) -> None:
     await browser_cog.screenshot(ctx)
     # status
     await browser_cog.status(ctx)
-    # stop
-    await browser_cog.stop(ctx)
+    # close (was previously named stop)
+    await browser_cog.close(ctx)
