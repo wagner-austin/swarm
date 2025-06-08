@@ -5,7 +5,20 @@ from ..base import BaseCog
 from bot.core.api.proxy_service import ProxyService
 
 log = logging.getLogger(__name__)
-USAGE = "`!proxy start|stop|status`"
+
+_ENTRY_CMD = "proxy"
+CMD_START = "start"
+CMD_STOP = "stop"
+CMD_STATUS = "status"
+
+USAGE = f"""
+Manage the TankPit proxy service.
+
+Sub-commands
+  {CMD_START}   – start proxy
+  {CMD_STOP}    – stop proxy
+  {CMD_STATUS}  – show current state
+"""
 
 
 class ProxyCog(BaseCog):
@@ -18,7 +31,7 @@ class ProxyCog(BaseCog):
         super().__init__(bot)
         self.svc = svc
 
-    @commands.group(name="proxy", invoke_without_command=True)
+    @commands.group(name=_ENTRY_CMD, invoke_without_command=True)
     @commands.is_owner()
     async def _grp(self, ctx: commands.Context[Any]) -> None:
         """Manage the TankPit proxy service.

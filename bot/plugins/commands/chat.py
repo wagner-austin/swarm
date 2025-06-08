@@ -18,7 +18,21 @@ if TYPE_CHECKING:
         GenerateContentConfig = GeminiGenerateContentConfig
 
 
-CHAT_USAGE = "Usage: !chat <prompt>"
+_ENTRY_CMD = "chat"
+
+USAGE = f"""
+Chat with the Gemini AI model.
+
+Usage: !{_ENTRY_CMD} <prompt>
+
+Send a prompt to Gemini and get a response directly in Discord.
+If no prompt is provided, a default greeting is used.
+
+Examples:
+  !{_ENTRY_CMD} Hello there, how are you?
+  !{_ENTRY_CMD} Write a short poem about programming.
+"""
+
 INTERNAL_ERROR = "An internal error occurred. Please try again later."
 
 
@@ -35,7 +49,7 @@ class Chat(BaseCog):
             if hasattr(self._client, "close"):
                 self._client.close()
 
-    @commands.command(name="chat")
+    @commands.command(name=_ENTRY_CMD)
     async def chat(
         self, ctx: commands.Context[Any], *, prompt: str | None = None
     ) -> None:

@@ -2,7 +2,7 @@ import unittest
 import re
 from bot.plugins.commands.browser import (
     USAGE,
-    CMD_BROWSER,
+    _ENTRY_CMD as CMD_BROWSER,
     CMD_START,
     CMD_OPEN,
     CMD_CLOSE,

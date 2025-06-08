@@ -1,13 +1,15 @@
 import logging
+from typing import Annotated
 from discord.ext import commands
 from ..base import BaseCog
 from bot.core.api.browser_service import BrowserService
 from typing import Any
 
+__all__ = ["Browser"]  # still exported but after refactor _ENTRY_CMD rules apply
+
 logger = logging.getLogger(__name__)
 
-# Define command names as constants to ensure consistency
-CMD_BROWSER = "browser"
+_ENTRY_CMD = "browser"
 CMD_START = "start"
 CMD_OPEN = "open"
 CMD_CLOSE = "close"
@@ -15,17 +17,16 @@ CMD_SCREENSHOT = "screenshot"
 CMD_RESTART = "restart"
 CMD_STATUS = "status"
 
-# Using f-strings with the constants ensures consistency between code and docs
-USAGE = f"""A browser automation toolkit.
+USAGE = f"""
+Browser automation toolkit.
 
-Available subcommands:
-  `{CMD_START} <url> [visible]` : Start browser, optionally navigate and make visible.
-  `{CMD_OPEN} <url>`            : Navigate to a new URL.
-  `{CMD_OPEN} <url> [visible]`  : Same as above but force window if 'visible' given.
-  `{CMD_CLOSE}`                 : Close the browser session.
-  `{CMD_SCREENSHOT} [filename]`  : Take a screenshot, optionally save to file.
-  `{CMD_RESTART} [visible]`     : Drop session and relaunch; optional 'visible'.
-  `{CMD_STATUS}`                : Check if the browser is running.
+Sub-commands
+  `{CMD_START}`      [--visible] [url]  – launch Chrome, optionally at URL
+  `{CMD_OPEN}`       [--visible] <url>  – navigate current session
+  `{CMD_RESTART}`    [--visible]        – drop & relaunch session
+  `{CMD_SCREENSHOT}`                    – send a screenshot
+  `{CMD_CLOSE}`                          – terminate session
+  `{CMD_STATUS}`                         – report state
 """
 
 
@@ -65,7 +66,7 @@ class Browser(BaseCog):
             await self._browser.stop()
             logger.info("Browser service stopped during cog unload.")
 
-    @commands.group(name=CMD_BROWSER, invoke_without_command=True)
+    @commands.group(name=_ENTRY_CMD, invoke_without_command=True)
     @commands.is_owner()
     async def browser(self, ctx: commands.Context[Any]) -> None:
         """Control Chrome browser automation."""
@@ -77,7 +78,8 @@ class Browser(BaseCog):
         self,
         ctx: commands.Context[Any],
         url: str | None = None,
-        visible: str | None = None,
+        *,
+        visible: Annotated[bool, commands.Flag(default=False)] = False,
     ) -> None:
         """Start a browser session.
 
@@ -93,7 +95,7 @@ class Browser(BaseCog):
         # If 'visible' is provided by the user, we want headless to be False.
         # If 'visible' is NOT provided, we pass None to the service, so it uses its default.
         service_headless_param: bool | None
-        if visible is not None:
+        if visible:
             service_headless_param = False  # User explicitly asked for visible
             logger.info("[Browser] Starting browser explicitly in visible mode.")
         else:
@@ -122,7 +124,8 @@ class Browser(BaseCog):
         self,
         ctx: commands.Context[Any],
         url: str | None = None,
-        visible: str | None = None,
+        *,
+        visible: Annotated[bool, commands.Flag(default=False)] = False,
     ) -> None:
         """Navigate to a URL in the active browser session.
 
@@ -136,7 +139,7 @@ class Browser(BaseCog):
             await ctx.send(USAGE)
             return
         # if the caller explicitly said "visible" remember that preference
-        if visible is not None:
+        if visible:
             self._browser.set_preferred_headless(False)
 
         msg = await self._browser.open(url)
@@ -146,7 +149,8 @@ class Browser(BaseCog):
     async def restart(
         self,
         ctx: commands.Context[Any],
-        visible: str | None = None,
+        *,
+        visible: Annotated[bool, commands.Flag(default=False)] = False,
     ) -> None:
         """Force the session to restart.
 
@@ -154,7 +158,7 @@ class Browser(BaseCog):
         """
         assert self._browser is not None, "Browser service is not initialized."
 
-        headless = visible is None
+        headless = not visible
         self._browser.set_preferred_headless(headless)
 
         await ctx.send(await self._browser.stop())

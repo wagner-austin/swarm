@@ -11,9 +11,17 @@ from discord.ext import commands
 from ..base import BaseCog
 from bot.plugins.typing import Ctx
 
+_ENTRY_CMD = "shutdown"
+
+USAGE = f"""
+Cleanly shut the bot down (owner-only).
+
+Usage: !{_ENTRY_CMD}
+"""
+
 
 class Shutdown(BaseCog):
-    @commands.command(name="shutdown")
+    @commands.command(name=_ENTRY_CMD)
     @commands.is_owner()
     async def shutdown(self, ctx: Ctx) -> None:
         """Cleanly shut the bot down (owner-only)."""
