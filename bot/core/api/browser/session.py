@@ -188,6 +188,7 @@ class BrowserSession:
         if self.state in {State.CLOSED, State.CLOSING, State.FAILED} or not self.driver:
             return False
         from selenium.common.exceptions import WebDriverException
+
         try:
             _ = self.driver.title  # fast, no network
             return True
