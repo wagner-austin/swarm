@@ -58,14 +58,20 @@ class Help(BaseCog):
         except Exception:
             commands_iter = []
 
-        lines = []
+        lines: list[str] = []
         for cmd in commands_iter:
             if getattr(cmd, "hidden", False):
                 continue
 
-            cmd_name = getattr(cmd, "name", str(cmd))
-            cmd_help = getattr(cmd, "help", "…")
-            lines.append(f"**{cmd_name}** – {cmd_help}")
+            cmd_name: str = getattr(cmd, "name", str(cmd))
+            # cmd.help can be None → coerce to empty string first
+            raw_help_obj = getattr(cmd, "help", "") or ""
+            raw_help: str = str(raw_help_obj).strip()
+            # show only the first non-blank line
+            first_line = next(
+                (ln.strip() for ln in raw_help.splitlines() if ln.strip()), "…"
+            )
+            lines.append(f"**{cmd_name}** – {first_line}")
 
         # Add a note about getting more help, but only if we have commands to show
         if lines:

@@ -57,4 +57,6 @@ async def test_start_stop_status(tmp_path: Any, monkeypatch: Any) -> None:
     # Stop
     assert (await svc.stop()).startswith("Browser session stopped")
     assert svc._session is None
-    assert svc.status() == "No active session (preferred mode: headless)."
+    assert (
+        svc.status() == "No active session (default mode: visible)."
+    )  # Updated to reflect new default

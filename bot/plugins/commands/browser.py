@@ -89,15 +89,24 @@ class Browser(BaseCog):
         """
         assert self._browser is not None, "Browser service is not initialized."
 
-        # If visible is True, we want headless to be False (inverse relationship)
-        headless = visible is None
-
-        # Log whether we're running in headless mode or not
-        logger.info(f"[Browser] Starting browser with headless={headless}")
+        # Determine the headless value to pass to the service
+        # If 'visible' is provided by the user, we want headless to be False.
+        # If 'visible' is NOT provided, we pass None to the service, so it uses its default.
+        service_headless_param: bool | None
+        if visible is not None:
+            service_headless_param = False  # User explicitly asked for visible
+            logger.info("[Browser] Starting browser explicitly in visible mode.")
+        else:
+            service_headless_param = (
+                None  # Let BrowserService decide based on its defaults
+            )
+            logger.info(
+                "[Browser] Starting browser, allowing service to use default mode."
+            )
 
         progress_message = await ctx.send("🟡 Launching Chrome …")
         try:
-            msg = await self._browser.start(url=url, headless=headless)
+            msg = await self._browser.start(url=url, headless=service_headless_param)
             await progress_message.edit(content="🟢 " + msg)
         except ValueError as e:  # ← our new validation
             await progress_message.edit(content=f"🔴 {e}")

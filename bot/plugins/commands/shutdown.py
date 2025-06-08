@@ -16,6 +16,7 @@ class Shutdown(BaseCog):
     @commands.command(name="shutdown")
     @commands.is_owner()
     async def shutdown(self, ctx: Ctx) -> None:
+        """Cleanly shut the bot down (owner-only)."""
         await ctx.send("Bot is shutting down…")
         await ctx.bot.close()
 

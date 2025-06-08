@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 
 class BrowserConfig(BaseModel):
-    headless: bool = True
+    headless: bool = False
     disable_gpu: bool = True
     window_size: str = "1920,1080"
     no_sandbox: bool = True
