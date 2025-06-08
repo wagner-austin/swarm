@@ -6,12 +6,13 @@ This file now carries full type hints so it passes `mypy --strict`.
 
 from __future__ import annotations
 import time
-from typing import Any, Dict
+from typing import Dict
 
-process_start_time = time.time()
-messages_sent = 0
-discord_messages_processed = 0
-_patched_discord_send = False
+process_start_time: float = time.time()
+# incremented by the MetricsTracker cog (outbound socket payloads)
+messages_sent: int = 0
+# incremented by the MetricsTracker cog (on_message listener)
+discord_messages_processed: int = 0
 
 
 def increment_discord_message_count() -> None:
@@ -44,36 +45,17 @@ def get_uptime() -> float:
     return time.time() - process_start_time
 
 
-# ---------------------------------------------------------------------------+
-# Public helpers                                                             +
-# ---------------------------------------------------------------------------+
+# Convenience formatter for HH:MM:SS
+def format_hms(seconds: float) -> str:  # noqa: D401 – utility
+    h = int(seconds) // 3600
+    m = (int(seconds) % 3600) // 60
+    s = int(seconds) % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def patch_discord_context_send() -> None:
-    """
-    Monkey-patch ``discord.ext.commands.Context.send`` once so that
-    *every* outbound message increases ``messages_sent`` automatically.
-    The patch is idempotent and safe to call multiple times.
-    """
-    global _patched_discord_send
-    if _patched_discord_send:
-        return
-
-    from discord.ext import commands
-
-    original_send = commands.Context.send
-
-    async def _counting_send(  # noqa: D401 – simple function
-        self: "commands.Context[Any]",
-        *args: Any,
-        **kwargs: Any,
-    ) -> Any:
-        increment_message_count()
-        return await original_send(self, *args, **kwargs)
-
-    # mismatched signature on purpose → ignore the “method-assign” error
-    commands.Context.send = _counting_send  # type: ignore[method-assign]
-    _patched_discord_send = True
+# ------------------------------------------------------------+
+#  Public helpers – zero monkey-patches, plain counters only   |
+# ------------------------------------------------------------+
 
 
 def get_stats() -> Dict[str, float | int]:

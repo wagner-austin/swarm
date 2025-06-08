@@ -8,22 +8,13 @@ __all__ = ["Browser"]
 
 logger = logging.getLogger(__name__)
 
-USAGE = "Automate an on-device Chrome browser."
+USAGE: str = "Automate an on-device Chrome browser."
 
-
-# ---------------------------------------------------------------------------+
-# Legacy constants – keep until external tests are updated                   +
-# ---------------------------------------------------------------------------+
+# The group name is hard-wired below; no separate constants required.
 _ENTRY_CMD = "browser"
-CMD_START = "start"
-CMD_OPEN = "open"
-CMD_CLOSE = "close"
-CMD_SCREENSHOT = "screenshot"
-CMD_STATUS = "status"
-CMD_RESTART = "restart"
 
 
-class Browser(commands.GroupCog, group_name=_ENTRY_CMD, group_description=USAGE):
+class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
     def __init__(self, bot: commands.Bot, browser_service: BrowserService) -> None:
         super().__init__()
         self.bot = bot

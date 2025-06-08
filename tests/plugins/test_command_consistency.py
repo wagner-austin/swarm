@@ -1,15 +1,18 @@
 import unittest
 import re
-from bot.plugins.commands.browser import (
-    USAGE,
-    _ENTRY_CMD as CMD_BROWSER,
-    CMD_START,
-    CMD_OPEN,
-    CMD_CLOSE,
-    CMD_SCREENSHOT,
-    CMD_STATUS,
-    CMD_RESTART,
-)
+
+from bot.plugins.commands.browser import USAGE, _ENTRY_CMD as CMD_BROWSER
+
+# Single source-of-truth for the six sub-command names.
+# (Matches the explicit `@app_commands.command(name="…")` decorators in browser.py.)
+_BROWSER_SUBCOMMANDS: set[str] = {
+    "start",
+    "open",
+    "close",
+    "screenshot",
+    "status",
+    "restart",
+}
 
 
 class TestCommandConsistency(unittest.TestCase):
@@ -25,15 +28,8 @@ class TestCommandConsistency(unittest.TestCase):
             if match:
                 usage_commands.add(match.group(1))
 
-        # Get the defined command constants
-        actual_commands = {
-            CMD_START,
-            CMD_OPEN,
-            CMD_CLOSE,
-            CMD_SCREENSHOT,
-            CMD_STATUS,
-            CMD_RESTART,
-        }
+        # Implemented commands taken straight from `_BROWSER_SUBCOMMANDS`
+        actual_commands = _BROWSER_SUBCOMMANDS
 
         # ------------------------------------------------------------+
         # 1)  Docs → Code: every command mentioned in USAGE must be

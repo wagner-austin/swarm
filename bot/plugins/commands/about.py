@@ -20,12 +20,10 @@ class About(commands.Cog):
         if self.bot.user.avatar:
             embed.set_thumbnail(url=self.bot.user.avatar.url)
 
-        embed.add_field(
-            name="Developer", value="Your Name/Organization Here", inline=False
-        )
+        embed.add_field(name="Developer", value="Austin Wagner", inline=False)
         embed.add_field(
             name="Source Code",
-            value="[Link to your bot's source code](https://github.com/your/repo)",
+            value="[Link to your bot's source code](https://github.com/wagner-austin/DiscordBot)",
             inline=False,
         )
 
