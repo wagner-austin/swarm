@@ -12,6 +12,7 @@ CMD_START = "start"
 CMD_OPEN = "open"
 CMD_CLOSE = "close"
 CMD_SCREENSHOT = "screenshot"
+CMD_RESTART = "restart"
 CMD_STATUS = "status"
 
 # Using f-strings with the constants ensures consistency between code and docs
@@ -20,8 +21,10 @@ USAGE = f"""A browser automation toolkit.
 Available subcommands:
   `{CMD_START} <url> [visible]` : Start browser, optionally navigate and make visible.
   `{CMD_OPEN} <url>`            : Navigate to a new URL.
+  `{CMD_OPEN} <url> [visible]`  : Same as above but force window if 'visible' given.
   `{CMD_CLOSE}`                 : Close the browser session.
   `{CMD_SCREENSHOT} [filename]`  : Take a screenshot, optionally save to file.
+  `{CMD_RESTART} [visible]`     : Drop session and relaunch; optional 'visible'.
   `{CMD_STATUS}`                : Check if the browser is running.
 """
 
@@ -106,7 +109,12 @@ class Browser(BaseCog):
             raise
 
     @browser.command(name=CMD_OPEN)  # type: ignore[arg-type]
-    async def open(self, ctx: commands.Context[Any], url: str | None = None) -> None:
+    async def open(
+        self,
+        ctx: commands.Context[Any],
+        url: str | None = None,
+        visible: str | None = None,
+    ) -> None:
         """Navigate to a URL in the active browser session.
 
         Usage: !browser open <url>
@@ -118,7 +126,30 @@ class Browser(BaseCog):
         if not url:
             await ctx.send(USAGE)
             return
+        # if the caller explicitly said "visible" remember that preference
+        if visible is not None:
+            self._browser.set_preferred_headless(False)
+
         msg = await self._browser.open(url)
+        await ctx.send(msg)
+
+    @browser.command(name=CMD_RESTART)  # type: ignore[arg-type]
+    async def restart(
+        self,
+        ctx: commands.Context[Any],
+        visible: str | None = None,
+    ) -> None:
+        """Force the session to restart.
+
+        Usage: !browser restart [visible]
+        """
+        assert self._browser is not None, "Browser service is not initialized."
+
+        headless = visible is None
+        self._browser.set_preferred_headless(headless)
+
+        await ctx.send(await self._browser.stop())
+        msg = await self._browser.start(headless=headless)
         await ctx.send(msg)
 
     @browser.command(name=CMD_SCREENSHOT)  # type: ignore[arg-type]
@@ -190,7 +221,10 @@ class Browser(BaseCog):
         Usage: !browser status
         """
         assert self._browser is not None, "Browser service is not initialized."
+        did_restart = await self._browser._ensure_alive()
         msg = self._browser.status()
+        if did_restart:
+            msg = "🔁 Auto-restarted dead session.\n" + msg
         await ctx.send(msg)
 
 
