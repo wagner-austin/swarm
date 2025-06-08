@@ -1,51 +1,64 @@
-# type: ignore
 """
-Integration-level plugin test for command registry.
-
-This module ensures that the overall plugin registry is loading commands as expected
-and that each registered plugin function returns a valid response.
-
-Note:
-    Plugin-specific tests have been moved to their own test_<plugin_name>.py files.
-    This file no longer tests individual plugin commands in detail; see per-plugin test files.
+Integration-level sanity check for *slash* cogs after prefix removal.
 """
 
-from typing import Any
-import pytest
+from __future__ import annotations
+
+from typing import Any, List, cast
 import types
-import logging
+import pytest
 from unittest.mock import AsyncMock
-from discord.ext import commands
-from bot.plugins.commands.help import Help
-from bot.plugins.commands.chat import Chat
-from tests.helpers.mocks import MockCtx
 
-logger = logging.getLogger(__name__)
+import discord
+from discord.ext import commands
+
+from bot.plugins.commands.about import About
+from bot.plugins.commands.chat import Chat
+
+# ---------------------------------------------------------------------------+
+# Minimal Interaction stub                                                   +
+# ---------------------------------------------------------------------------+
+
+
+class StubInteraction(AsyncMock):
+    """Just enough of discord.Interaction for our slash handlers."""
+
+    def __init__(self, *, bot: commands.Bot):
+        super().__init__(spec=discord.Interaction)
+        self.client = bot  # alias used by commands
+        self.user = AsyncMock()  # needed for owner checks
+
+        # response & followup each expose .send_message / .send
+        self.response = AsyncMock()
+        self.response.defer = AsyncMock()
+        self.response.send_message = AsyncMock()
+
+        self.followup = AsyncMock()
+        self.followup.send = AsyncMock()
+
+
+# ---------------------------------------------------------------------------+
+# Tests                                                                      +
+# ---------------------------------------------------------------------------+
 
 
 @pytest.mark.asyncio
-async def test_help_command() -> None:
+async def test_about_command() -> None:
+    """/about should send an embed without raising."""
     bot = AsyncMock(spec=commands.Bot)
-    bot.commands = [types.SimpleNamespace(name="help", help="Show help", hidden=False)]
-    cog = Help(bot)
-    ctx = MockCtx()
-    await cog.help(ctx)
+    cog = About(bot)
 
-    logger.info("[test_help_command] ctx.sent: %s", ctx.sent)
-    logger.info(
-        "[test_help_command] bot.commands[0]: %s dir: %s",
-        bot.commands[0],
-        dir(bot.commands[0]),
-    )
-    assert "help" in ctx.sent[0].lower() if ctx.sent else True
+    ix = StubInteraction(bot=bot)
+    # mypy: 'callback' is dynamically bound; treat as Any
+    await cast(Any, cog.about.callback)(cog, ix)
+
+    ix.response.send_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_chat_command(monkeypatch: Any) -> None:
-    bot = AsyncMock(spec=commands.Bot)
-    cog = Chat(bot)
-    ctx = MockCtx()
-    # Patch out google.genai
+    """Slash version of Chat responds with streamed text."""
+    # ---- patch google.genai so no network happens -------------------------
     monkeypatch.setitem(
         __import__("sys").modules,
         "google",
@@ -72,6 +85,19 @@ async def test_chat_command(monkeypatch: Any) -> None:
             )
         ),
     )
-    await cog.chat(ctx, prompt="hi")
-    logger.info("[test_chat_command] ctx.sent: %s", ctx.sent)
-    assert any("hi!" in m.lower() for m in ctx.sent)
+
+    # ----------------------------------------------------------------------
+    bot = AsyncMock(spec=commands.Bot)
+    bot.is_owner = AsyncMock(return_value=True)
+
+    cog = Chat(bot)
+    ix = StubInteraction(bot=bot)
+
+    await cast(Any, cog.chat.callback)(cog, ix, "hi")
+
+    # we expect at least one follow-up send with "Hi!"
+    sends: List[str] = [
+        call.kwargs.get("content", "") or call.args[0]
+        for call in ix.followup.send.await_args_list
+    ]
+    assert any("hi" in s.lower() for s in sends)

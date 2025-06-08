@@ -1,8 +1,7 @@
 from discord.ext import commands
-from .commands.conventions import CommandSpecMixin
 
 
-class BaseCog(CommandSpecMixin, commands.Cog):
+class BaseCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         super().__init__()
         self.bot = bot

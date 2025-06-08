@@ -1,32 +1,35 @@
-#!/usr/bin/env python
-"""
-plugins/commands/shutdown.py
-----------------------------
-Summary: Shutdown command plugin. Shuts down the bot.
-Usage:
-  @bot shutdown
-"""
-
+import discord
+from discord import app_commands
 from discord.ext import commands
-from ..base import BaseCog
-from bot.plugins.typing import Ctx
-
-_ENTRY_CMD = "shutdown"
-
-USAGE = f"""
-Cleanly shut the bot down (owner-only).
-
-Usage: !{_ENTRY_CMD}
-"""
+from typing import Callable, Awaitable, TypeVar, cast
 
 
-class Shutdown(BaseCog):
-    @commands.command(name=_ENTRY_CMD)
-    @commands.is_owner()
-    async def shutdown(self, ctx: Ctx) -> None:
+T = TypeVar("T", bound=Callable[..., Awaitable[None]])
+
+
+def owner_check() -> Callable[[T], T]:
+    """Slash-safe equivalent of @commands.is_owner()."""
+
+    async def predicate(interaction: discord.Interaction) -> bool:  # noqa: D401
+        bot = cast(commands.Bot, interaction.client)
+        return bool(await bot.is_owner(interaction.user))
+
+    return app_commands.check(predicate)
+
+
+class Shutdown(commands.Cog):
+    def __init__(self, bot: commands.Bot) -> None:
+        super().__init__()
+        self.bot = bot
+
+    @app_commands.command(
+        name="shutdown", description="Cleanly shuts the bot down (owner only)"
+    )
+    @owner_check()
+    async def shutdown(self, interaction: discord.Interaction) -> None:
         """Cleanly shut the bot down (owner-only)."""
-        await ctx.send("Bot is shutting down…")
-        await ctx.bot.close()
+        await interaction.response.send_message("Bot is shutting down…", ephemeral=True)
+        await interaction.client.close()
 
 
 async def setup(bot: commands.Bot) -> None:

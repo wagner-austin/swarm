@@ -1,5 +1,10 @@
-__all__: list[str] = ["MockCtx", "MockMessage"]
-from typing import Any
+__all__: list[str] = ["MockCtx", "MockMessage", "StubInteraction"]
+
+from typing import Any, List
+import types
+from unittest.mock import AsyncMock
+import discord
+from discord.ext.commands import Bot
 
 
 class MockMessage:
@@ -60,3 +65,44 @@ class MockCtx:
         return MockMessage(
             content=content, **kwargs
         )  # Return an instance of MockMessage
+
+
+# ---------------------------------------------------------------------------+
+# New helper: minimal slash Interaction stub                                 +
+# ---------------------------------------------------------------------------+
+
+
+class StubInteraction(AsyncMock):
+    """
+    A *very* small substitute for `discord.Interaction` used by unit tests.
+
+    Implements:
+      • .client       – the Bot instance
+      • .user         – dummy user (allows owner checks)
+      • .response.defer()
+      • .followup.send()
+    """
+
+    def __init__(self, *, bot: Bot):
+        super().__init__(spec=discord.Interaction)
+        self.client = bot
+        # minimal user stub: discord.py slash checks only need `.id`
+        self.user = types.SimpleNamespace(id=42, mention="@tester")
+
+        # response / follow-up mocks
+        self.response = AsyncMock()
+        self.response.defer = AsyncMock()
+
+        self.followup = AsyncMock()
+        self.followup.send = AsyncMock()
+
+        # Convenience for assertions
+        self.sent_messages: List[str] = []
+
+        # Capture content of follow-ups
+        async def _capture(*_args: Any, **kw: Any) -> None:
+            content = kw.get("content") or (_args[1] if len(_args) > 1 else "")
+            if isinstance(content, str):
+                self.sent_messages.append(content)
+
+        self.followup.send.side_effect = _capture

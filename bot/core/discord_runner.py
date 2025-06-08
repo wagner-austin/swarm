@@ -30,7 +30,7 @@ def _discover_extensions() -> list[str]:
     commands_path = base_path / "plugins" / "commands"
     extensions = []
 
-    KEEP = {"chat", "help", "shutdown", "status", "metrics_tracker"}
+    KEEP = {"chat", "about", "shutdown", "status", "metrics_tracker"}
 
     if commands_path.exists() and commands_path.is_dir():
         for p in commands_path.glob("*.py"):
@@ -55,15 +55,8 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
         return
 
     intents = Intents.default()
-    intents.message_content = True
-
-    bot = MyBot(
-        command_prefix=commands.when_mentioned_or("!"),
-        intents=intents,
-        case_insensitive=True,
-    )
-
-    bot.remove_command("help")
+    # prefix is ignored but must exist → mention-only
+    bot = MyBot(command_prefix=commands.when_mentioned, intents=intents)
     if proxy_service:
         bot.proxy_service = proxy_service  # Store the proxy service instance on the bot
 
@@ -123,25 +116,46 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
         logger.error(
             "Failed to import 'bot.plugins.commands.browser' or 'BrowserService'. Ensure they exist and are importable."
         )
-    except AttributeError:
+    except AttributeError as e:
         logger.error(
-            "'setup' function not found in 'bot.plugins.commands.browser' or BrowserService init issue."
+            f"'setup' function not found in 'bot.plugins.commands.browser' or BrowserService init failed: {e}"
         )
     except Exception as e:
         logger.exception(
             "Failed to manually load 'bot.plugins.commands.browser'", exc_info=e
         )
 
+    # ------------------------------------------------------------
+    # Event Handlers                                               #
+    # ------------------------------------------------------------+
+    # Event Handlers                                              +
+    # ------------------------------------------------------------+
     @bot.event
     async def on_ready() -> None:
-        logger.info(f"Bot '{bot.user}' has connected to Discord and is ready!")
-        if bot.proxy_service:
+        logger.info(f"Bot '{bot.user}' connected – syncing slash commands…")
+
+        # 1️⃣ GLOBAL → needed for DM availability everywhere
+        await bot.tree.sync()
+
+        # 2️⃣ GUILD  → instant updates in your dev server (optional)
+        guild_id = os.getenv("DEV_GUILD")
+        if guild_id:
+            guild = discord.Object(id=int(guild_id))
+            bot.tree.copy_global_to(guild=guild)  # sync helper
+            await bot.tree.sync(guild=guild)
+
+        logger.info("Slash commands synced.")
+        # Start the proxy service if it's available and configured
+        if (
+            hasattr(bot, "proxy_service")
+            and bot.proxy_service
+            and bot.proxy_service.port > 0
+        ):
             try:
                 logger.info(
                     f"Attempting to start ProxyService on port {bot.proxy_service.port}..."
                 )
                 await bot.proxy_service.start()
-                logger.info(f"ProxyService started on port {bot.proxy_service.port}.")
             except Exception as e:
                 logger.exception(
                     f"Proxy failed to start in on_ready: {e}; shutting bot down"
@@ -156,32 +170,17 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
     async def on_disconnect() -> None:
         logger.info(f"Bot '{bot.user if bot.user else ''}' disconnected from Discord.")
 
-    @bot.event
-    async def on_command_error(
-        ctx: commands.Context[Any], error: commands.CommandError
+    # Prefix handler gone → replace with slash error listener
+    @bot.tree.error
+    async def on_app_command_error(
+        interaction: discord.Interaction, error: discord.app_commands.AppCommandError
     ) -> None:
-        if isinstance(error, commands.CommandNotFound):
-            command_name = ctx.invoked_with
-            await ctx.send(
-                f"Sorry, I don't recognize the command `{command_name}`. Type `!help` for a list of commands."
+        if isinstance(error, discord.app_commands.CommandOnCooldown):
+            await interaction.response.send_message(
+                f"⏱️ Cooldown – try again in {error.retry_after:.1f}s", ephemeral=True
             )
-        elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(
-                f"You're missing a required argument for the command `{ctx.command}`. Usage: `!help {ctx.command}`"
-            )
-        elif isinstance(error, commands.CommandOnCooldown):
-            await ctx.send(
-                f"This command is on cooldown. Please try again in {error.retry_after:.2f} seconds."
-            )
-        elif isinstance(error, commands.CheckFailure):
-            await ctx.send(
-                "You do not have permission to use this command or a check failed."
-            )
-        else:
-            logger.error(
-                f"An unhandled command error occurred for command '{ctx.command}': {type(error).__name__} - {error}",
-                exc_info=error,
-            )
+            return
+        raise error
 
     try:
         logger.info("Attempting to connect the bot to Discord...")
