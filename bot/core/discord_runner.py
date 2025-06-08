@@ -143,7 +143,10 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
                 await bot.proxy_service.start()
                 logger.info(f"ProxyService started on port {bot.proxy_service.port}.")
             except Exception as e:
-                logger.exception(f"Failed to start ProxyService in on_ready: {e}")
+                logger.exception(
+                    f"Proxy failed to start in on_ready: {e}; shutting bot down"
+                )
+                await bot.close()
         else:
             logger.info(
                 "ProxyService not available or not configured, skipping start in on_ready."

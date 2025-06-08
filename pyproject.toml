@@ -19,6 +19,8 @@ dependencies = [
 
   # --- proxy and websocket support ---
   "mitmproxy>=10.0.0,<11.0.0",      # MITM TLS proxy, BSD-licensed
+  "aiohttp>=3.12.11",
+  "aiohappyeyeballs>=2.6.1",
 ]
 
 [project.optional-dependencies]

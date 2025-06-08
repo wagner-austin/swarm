@@ -13,10 +13,13 @@ them directly.
 
 from __future__ import annotations
 import tempfile
+import logging
 from typing import Optional
 from bot.core.settings import settings  # fully typed alias
 from bot.core.settings import Settings
 from .browser import BrowserSession, _normalise_url
+
+logger = logging.getLogger(__name__)
 
 
 class BrowserService:
@@ -31,6 +34,7 @@ class BrowserService:
         *,
         headless: bool | None = None,
         profile: str | None = None,
+        timeout: int = 60,
     ) -> str:
         """
         Start a browser session.
@@ -44,7 +48,10 @@ class BrowserService:
         if self._session:
             return "Browser session already started."
 
-        self._session = BrowserSession(profile=profile, headless=headless)
+        self._session = BrowserSession(
+            profile=profile, headless=headless, timeout=timeout
+        )
+        await self._session.initialize()  # awaits the async initialization
 
         if not url:
             return "Browser session started."
@@ -63,12 +70,19 @@ class BrowserService:
 
             return f"Browser session started. Navigated to: {current_url}"
         except Exception as e:
-            return f"Browser session started, but navigation error: {str(e)}"
+            logger.exception(
+                f"[BrowserService] Failed to start browser session or navigate to '{actual_url}'."
+            )
+            await self.stop()  # Ensure cleanup if start fails critically
+            # Bubble up a more descriptive error, including the original exception type
+            raise RuntimeError(
+                f"Chrome driver/launch error – {e.__class__.__name__}: {e}"
+            ) from e
 
     async def stop(self) -> str:
         if not self._session:
             return "No active session."
-        self._session.close()
+        await self._session.close()
         self._session = None
         return "Browser session stopped."
 
@@ -129,7 +143,7 @@ class BrowserService:
             dest_str = dest
 
         assert self._session is not None
-        path_str = self._session.screenshot(dest_str)
+        path_str = await self._session.screenshot(dest_str)
 
         if dest is None:
             message = f"Screenshot saved to temporary file {path_str}. This file should be deleted after use."

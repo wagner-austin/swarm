@@ -35,10 +35,21 @@ class Chat(BaseCog):
             if hasattr(self._client, "close"):
                 self._client.close()
 
-    @commands.command(name="chat", help="Chat with the Gemini API.")
+    @commands.command(name="chat")
     async def chat(
         self, ctx: commands.Context[Any], *, prompt: str | None = None
     ) -> None:
+        """Chat with the Gemini AI model.
+
+        Send a prompt to Gemini and get a response directly in Discord.
+        If no prompt is provided, a default greeting is used.
+
+        Usage: !chat <prompt>
+
+        Examples:
+          !chat Hello there, how are you?
+          !chat Write a short poem about programming.
+        """
         GEMINI_API_KEY = settings.gemini_api_key
         if not GEMINI_API_KEY:
             await ctx.send("GEMINI_API_KEY is not configured.")
