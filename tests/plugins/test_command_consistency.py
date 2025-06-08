@@ -8,6 +8,7 @@ from bot.plugins.commands.browser import (
     CMD_CLOSE,
     CMD_SCREENSHOT,
     CMD_STATUS,
+    CMD_RESTART,
 )
 
 
@@ -25,7 +26,14 @@ class TestCommandConsistency(unittest.TestCase):
                 usage_commands.add(match.group(1))
 
         # Get the defined command constants
-        actual_commands = {CMD_START, CMD_OPEN, CMD_CLOSE, CMD_SCREENSHOT, CMD_STATUS}
+        actual_commands = {
+            CMD_START,
+            CMD_OPEN,
+            CMD_CLOSE,
+            CMD_SCREENSHOT,
+            CMD_STATUS,
+            CMD_RESTART,
+        }
 
         # Verify all documented commands exist in actual commands
         for cmd in usage_commands:

@@ -14,6 +14,7 @@ them directly.
 from __future__ import annotations
 import tempfile
 import logging
+import asyncio
 from typing import Optional
 from bot.core.settings import settings  # fully typed alias
 from bot.core.settings import Settings
@@ -24,9 +25,16 @@ logger = logging.getLogger(__name__)
 
 
 class BrowserService:
+    _restart_lock: asyncio.Lock = asyncio.Lock()  # for _ensure_alive
+
     def __init__(self, cfg: Settings = settings) -> None:
         self._settings = cfg
         self._session: Optional[BrowserSession] = None
+        # remember the most recent user preference so automatic restarts
+        # stay consistent with what the user last asked for
+        self._last_headless: bool = True
+        # track the last good page so we can restore it
+        self._last_url: str | None = None
 
     # ---------- lifecycle ------------------------------------------------
     async def start(
@@ -49,8 +57,16 @@ class BrowserService:
         if self._session:
             return "Browser session already started."
 
+        # infer desired mode
+        if headless is None:
+            headless = self._last_headless
+        else:
+            self._last_headless = headless
+
         self._session = BrowserSession(
-            profile=profile, headless=headless, timeout=timeout
+            profile=profile,
+            headless=headless,
+            timeout=timeout,
         )
         await self._session.initialize()  # awaits the async initialization
 
@@ -76,7 +92,7 @@ class BrowserService:
             current_url = (
                 self._session.get_current_url() if self._session else actual_url
             )
-
+            self._last_url = current_url
             return f"Browser session started. Navigated to: {current_url}"
         except Exception as e:
             logger.exception(
@@ -95,25 +111,67 @@ class BrowserService:
         self._session = None
         return "Browser session stopped."
 
-    async def _ensure_alive(self) -> None:
+    async def _ensure_alive(self) -> bool:
         """
-        If the driver died (user closed the window, crash, …) we tear down the
-        broken session and start a fresh one so the next command works.
+        Guarantee a living session.
+        Returns True if a restart was required.
         """
-        if self._session and not self._session.is_alive():
-            await self.stop()  # cleanup old artefacts
-            await self.start(headless=True)  # brand-new headless session
+        if not self._session or self._session.is_alive():
+            return False
+
+        async with self._restart_lock:  # avoid duplicated work
+            # Re-check condition inside the lock in case another coroutine fixed it
+            if self._session and self._session.is_alive():
+                return False
+
+            logger.warning("[Browser] Session dead – auto-restarting…")
+            saved_url = self._last_url
+            headless = self._last_headless
+
+            await self.stop()
+            # Note: self.start() can raise, e.g., if Chrome itself is broken.
+            # The caller of _ensure_alive() should be prepared for this.
+            await self.start(headless=headless)  # self._last_url is reset by start()
+
+            if (
+                saved_url and self._session
+            ):  # self._session might be None if start() failed
+                try:
+                    logger.info(f"[Browser] Attempting to restore URL: {saved_url}")
+                    await self._session.navigate(saved_url)
+                    self._last_url = saved_url  # Restore _last_url if navigate succeeds
+                    logger.info(f"[Browser] Restored {saved_url}")
+                except Exception as e:
+                    logger.error(f"[Browser] Could not restore {saved_url}: {e}")
+                    # _last_url remains None or whatever start() set it to if navigation fails
+            elif saved_url:
+                logger.warning(
+                    f"[Browser] Session not available after restart, cannot restore {saved_url}"
+                )
+
+        return True
+
+    # ------------------------------------------------------------------+
+    # Public helper                                                     |
+    # ------------------------------------------------------------------+
+    def set_preferred_headless(self, headless: bool) -> None:
+        """Record the user’s preference so the *next* restart honours it."""
+        self._last_headless = headless
 
     # public, used by status
     def alive(self) -> bool:
         return self._session is not None and self._session.is_alive()
 
     def status(self) -> str:
+        mode = "headless" if self._last_headless else "visible"
         if not self._session:
-            return "No active session."
+            return f"No active session (preferred mode: {mode})."
         if not self._session.is_alive():
-            return "Session DEAD (Chrome window closed). Next command will restart."
-        return f"Current state: {self._session.state.name}."
+            return (
+                f"Session DEAD (Chrome window closed). "
+                f"Preferred mode on restart: {mode}."
+            )
+        return f"Current state: {self._session.state.name} ({mode})."
 
     # ---------- actions --------------------------------------------------
     async def open(self, url: str) -> str:
@@ -125,7 +183,7 @@ class BrowserService:
         Returns:
             A message indicating navigation status
         """
-        await self._ensure_alive()
+        restarted = await self._ensure_alive()
         if not self._session:
             return "Browser was dead – started a fresh session. Try again 🙂"
 
@@ -156,7 +214,9 @@ class BrowserService:
                 return f"Navigation error: {e}"
 
         current_url = self._session.get_current_url() if self._session else actual_url
-        return f"Navigation complete: {current_url}"
+        self._last_url = current_url  # Store after successful navigation
+        note = "🔁 (browser had crashed – auto-restarted) " if restarted else ""
+        return note + f"Navigation complete: {current_url}"
 
     async def screenshot(self, dest: str | None = None) -> tuple[str, str]:
         """Take a screenshot of the current browser view.
@@ -168,7 +228,7 @@ class BrowserService:
             A tuple of (file_path, message) where file_path is the full path to the screenshot
             and message is a status message to display.
         """
-        await self._ensure_alive()
+        restarted = await self._ensure_alive()
         if not self._session:
             return "", "Browser was dead – started a fresh session. Try again 🙂"
         if dest is None:
@@ -188,4 +248,6 @@ class BrowserService:
             message = f"Screenshot saved to temporary file {path_str}. This file should be deleted after use."
         else:
             message = f"Screenshot saved to {path_str}"
-        return path_str, message
+
+        note = "🔁 (browser had crashed – auto-restarted) " if restarted else ""
+        return path_str, note + message
