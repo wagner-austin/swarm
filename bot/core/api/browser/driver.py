@@ -99,7 +99,7 @@ def create_uc_driver(
     chrome_options.add_argument("--no-first-run")
     chrome_options.add_argument("--disable-infobars")
     chrome_options.add_argument("--disable-session-crashed-bubble")
-    chrome_options.add_argument("--hide-crash-restore-bubble")   # Chrome ≥115
+    chrome_options.add_argument("--hide-crash-restore-bubble")  # Chrome ≥115
 
     _actual_proxy_port_for_check = settings.proxy_port or 9000
     if settings.proxy_enabled and _proxy_alive(
