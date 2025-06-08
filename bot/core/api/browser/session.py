@@ -180,6 +180,20 @@ class BrowserSession:
         ):  # Ensure state hasn't changed (e.g. closed during wait)
             self._state_transition(State.IDLE)
 
+    def is_alive(self) -> bool:
+        """
+        Try a *cheap* WebDriver call to prove the session is still valid.
+        Any WebDriverException (invalid / closed session) → False.
+        """
+        if self.state in {State.CLOSED, State.CLOSING, State.FAILED} or not self.driver:
+            return False
+        from selenium.common.exceptions import WebDriverException
+        try:
+            _ = self.driver.title  # fast, no network
+            return True
+        except WebDriverException:
+            return False
+
     def get_current_url(self) -> str:
         if self.state in [State.CLOSING, State.CLOSED, State.FAILED] or not self.driver:
             logger.debug(

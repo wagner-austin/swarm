@@ -17,6 +17,7 @@ import logging
 from typing import Optional
 from bot.core.settings import settings  # fully typed alias
 from bot.core.settings import Settings
+from selenium.common.exceptions import WebDriverException
 from .browser import BrowserSession, _normalise_url
 from bot.core.validation import looks_like_web_url
 
@@ -95,9 +96,24 @@ class BrowserService:
         self._session = None
         return "Browser session stopped."
 
+    async def _ensure_alive(self) -> None:
+        """
+        If the driver died (user closed the window, crash, …) we tear down the
+        broken session and start a fresh one so the next command works.
+        """
+        if self._session and not self._session.is_alive():
+            await self.stop()                     # cleanup old artefacts
+            await self.start(headless=True)       # brand-new headless session
+
+    # public, used by status
+    def alive(self) -> bool:
+        return self._session is not None and self._session.is_alive()
+
     def status(self) -> str:
         if not self._session:
             return "No active session."
+        if not self._session.is_alive():
+            return "Session DEAD (Chrome window closed). Next command will restart."
         return f"Current state: {self._session.state.name}."
 
     # ---------- actions --------------------------------------------------
@@ -110,8 +126,9 @@ class BrowserService:
         Returns:
             A message indicating navigation status
         """
+        await self._ensure_alive()
         if not self._session:
-            return "No active session. Use 'start' first."
+            return "Browser was dead – started a fresh session. Try again 🙂"
 
         if not looks_like_web_url(url):
             return f"Invalid URL: '{url}'"
@@ -142,8 +159,9 @@ class BrowserService:
             A tuple of (file_path, message) where file_path is the full path to the screenshot
             and message is a status message to display.
         """
+        await self._ensure_alive()
         if not self._session:
-            return "", "No active session. Use 'start' first."
+            return "", "Browser was dead – started a fresh session. Try again 🙂"
         if dest is None:
             # Create a temporary file for the screenshot.
             # The file will not be deleted automatically on close (delete=False),
