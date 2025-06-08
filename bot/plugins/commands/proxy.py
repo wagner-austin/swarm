@@ -54,13 +54,8 @@ class ProxyCog(BaseCog):
 
     @_grp.command(name="status")  # type: ignore[arg-type]
     async def _status(self, ctx: commands.Context[Any]) -> None:
-        """Check if the proxy service is running.
-
-        Reports current status of the proxy service.
-
-        Usage: !proxy status
-        """
-        await ctx.send("running" if self.svc.is_running() else "stopped")
+        """Show whether the proxy is running and on which port."""
+        await ctx.send(self.svc.describe())
 
 
 async def setup(bot: commands.Bot, proxy_service: ProxyService) -> None:
