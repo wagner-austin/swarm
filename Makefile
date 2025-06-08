@@ -15,6 +15,7 @@ install:
 
 # Run linting checks (ruff check --fix, ruff format, black, mypy strict)
 lint:
+	$(PIP) install types-requests
 	$(RUFF) check --fix .
 	$(RUFF) format .
 	$(MYPY) --strict .
@@ -39,7 +40,7 @@ clean:
 
 # Run the bot
 run:
-	$(PYTHON) -m src.bot
+	$(PYTHON) -m bot.core
 
 # Generate documentation (update this if you use a specific doc generator)
 docs:
@@ -49,7 +50,6 @@ docs:
 build:
 	$(PYTHON) -m build
 
-# Create a backup
-backup:
-	if not exist backups mkdir backups
-	tar -a -cf backups\backup-%date:~-4,4%%date:~-7,2%%date:~-10,2%-%time:~0,2%%time:~3,2%%time:~6,2%.zip --exclude=backups *
+# Use savecode to save files
+savecode:
+	savecode . --ext toml py

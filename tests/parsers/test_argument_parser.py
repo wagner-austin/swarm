@@ -5,7 +5,7 @@ Verifies that split_args and parse_key_value_args work as expected.
 """
 
 import pytest
-from src.bot_core.parsers import split_args, parse_key_value_args
+from bot.core.parsers import split_args, parse_key_value_args
 
 
 @pytest.mark.asyncio

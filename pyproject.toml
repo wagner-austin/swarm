@@ -3,15 +3,11 @@ requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "discord_bot"
+name = "bot"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
 
-  "aiosqlite>=0.20",
-  "PyNaCl>=1.5",
-  "SQLAlchemy>=2.0",
-  "alembic>=1.13",
   "google-genai>=0.4",
   "python-dotenv>=0.20",
   "pydantic>=2",
@@ -27,22 +23,25 @@ dependencies = [
 
 [project.optional-dependencies]
 discord = ["discord.py[voice]>=2.3"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.4", "black>=24.1", "mypy>=1.9"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.4", "black>=24.1", "mypy>=1.9", "types-requests"]
 
 [tool.setuptools]
-packages = { find = { where = [ "src" ], include = ["bot_core*", "bot_plugins*", "db*", "migrations*", "utils*", "tankpit*", "discord_bot*"] } }
+packages = { find = { where = [ "." ], include = ["bot*"] } }
+
+[tool.poetry.group.dev.dependencies]
+types-requests = "^2.32.0.20250602"
 
 [project.entry-points."bot_plugins"]
-builtin = "bot_plugins.commands"
+builtin = "bot.plugins.commands"
 
 [project.scripts]
-discord_bot = "bot_core.main:main"
+discord_bot = "bot.core.main:main"
 
 [tool.pytest.ini_options]
-python_paths = ["src"]
+python_paths = ["."]
 
 [tool.mypy]
-mypy_path = "src"
+mypy_path = "."
 exclude = [
     "tests/helpers/mocks.py",
     "tests/helpers/__init__.py"

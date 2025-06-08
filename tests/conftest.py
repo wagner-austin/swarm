@@ -1,76 +1,36 @@
 #!/usr/bin/env python
 # Add the src directory to the Python path for all tests
 import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 # Now import other modules
 import types
 import pytest
-import pytest_asyncio
-from alembic.config import Config
-from alembic import command
-import tempfile
-import pathlib
+import warnings
 import os
-from typing import Any, Generator, AsyncGenerator
-from src.bot_core.api import db_api
-from src.bot_core.storage import acquire
+from typing import Any, Generator
+
+# Silence noisy third-party deprecations we can’t fix locally.
+warnings.filterwarnings(
+    "ignore",
+    message=r"(?i).*tagMap is deprecated.*",
+    category=DeprecationWarning,
+    module=r"pyasn1\.",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"(?i).*typeMap is deprecated.*",
+    category=DeprecationWarning,
+    module=r"pyasn1\.",
+)
 
 """
-tests/conftest.py - Consolidated test fixtures and common setup for database isolation, CLI simulation, and plugin registration.
-This module overrides DB_NAME for test isolation, clears key database tables, and provides common fixtures including a unified CLI runner.
+tests/conftest.py – test harness bootstrap.
+Provides UC/selenium stubs and a CLI-runner; no DB fixtures remain.
 """
 
 
 # --- Robust file-based test DB setup ---
-@pytest.fixture(scope="session", autouse=True)
-def test_db_file() -> Generator[pathlib.Path, None, None]:
-    db_fd, db_path = tempfile.mkstemp(suffix=".db")
-    os.close(db_fd)
-    db_path_obj = pathlib.Path(db_path)
-    db_url = f"sqlite+aiosqlite:///{db_path_obj.as_posix()}"
-    os.environ["DB_URL"] = db_url
-    yield db_path_obj
-    db_path_obj.unlink()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def apply_migrations(test_db_file: Path) -> Generator[None, None, None]:
-    alembic_ini = pathlib.Path(__file__).parents[1] / "alembic.ini"
-    alembic_cfg = Config(str(alembic_ini))
-    alembic_cfg.set_main_option("sqlalchemy.url", os.environ["DB_URL"])
-    alembic_cfg.set_main_option("script_location", "src/migrations")
-    command.upgrade(alembic_cfg, "head")
-    yield
-
-
-@pytest_asyncio.fixture(scope="function")
-async def async_db() -> AsyncGenerator[Any, None]:
-    """
-    Async fixture to yield an aiosqlite connection with in-memory DB.
-    """
-    async with acquire() as conn:
-        yield conn
-
-
-@pytest_asyncio.fixture(scope="function", autouse=True)
-async def reset_user_state() -> AsyncGenerator[None, None]:
-    """
-    Clear UserStates table between tests. Alembic migrations are already applied session-wide.
-    """
-
-    async def clear_user_states() -> None:
-        row = await db_api.fetch_one(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='UserStates'"
-        )
-        if row is not None:
-            await db_api.execute_query("DELETE FROM UserStates", commit=True)
-
-    await clear_user_states()
-    yield
-    await clear_user_states()
+# (fixture removed – no database)
 
 
 @pytest.fixture(autouse=True)  # default = function scope
@@ -79,7 +39,6 @@ def patch_uc(monkeypatch: pytest.MonkeyPatch) -> None:
     Always stub undetected_chromedriver and the selenium import tree for tests.
     The dummy driver is only activated if BROWSER_HEADLESS is unset or truthy (mirrors production startup).
     """
-    import os
 
     def get_func(*a: Any, **k: Any) -> None:
         return None

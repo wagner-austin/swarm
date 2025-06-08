@@ -1,4 +1,4 @@
-from src.bot_core.logger_setup import setup_logging
+from bot.core.logger_setup import setup_logging
 
 
 def test_setup_logging_smoke() -> None:

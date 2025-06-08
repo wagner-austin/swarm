@@ -1,5 +1,5 @@
 import pytest
-from src.bot_core.api.browser_service import BrowserService
+from bot.core.api.browser_service import BrowserService
 
 from typing import Any
 
@@ -7,7 +7,7 @@ from typing import Any
 @pytest.mark.asyncio
 async def test_start_stop_status(tmp_path: Any, monkeypatch: Any) -> None:
     # patch download dir so the test never writes outside tmp
-    monkeypatch.setattr("bot_core.settings.settings.browser_download_dir", tmp_path)
+    monkeypatch.setattr("bot.core.settings.settings.browser_download_dir", tmp_path)
 
     svc = BrowserService()
     # Start
