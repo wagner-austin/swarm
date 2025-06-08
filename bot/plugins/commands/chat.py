@@ -1,5 +1,6 @@
-from discord.ext import commands
-from ..base import BaseCog
+import discord
+from discord import app_commands
+from discord.ext import commands  # For commands.Bot, commands.Cog
 from bot.core.settings import settings  # fully typed alias
 from typing import Any, Optional as Opt, TYPE_CHECKING, cast
 
@@ -18,27 +19,13 @@ if TYPE_CHECKING:
         GenerateContentConfig = GeminiGenerateContentConfig
 
 
-_ENTRY_CMD = "chat"
-
-USAGE = f"""
-Chat with the Gemini AI model.
-
-Usage: !{_ENTRY_CMD} <prompt>
-
-Send a prompt to Gemini and get a response directly in Discord.
-If no prompt is provided, a default greeting is used.
-
-Examples:
-  !{_ENTRY_CMD} Hello there, how are you?
-  !{_ENTRY_CMD} Write a short poem about programming.
-"""
-
 INTERNAL_ERROR = "An internal error occurred. Please try again later."
 
 
-class Chat(BaseCog):
+class Chat(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
-        super().__init__(bot)
+        super().__init__()  # <-- no args
+        self.bot = bot  # keep ref for future use
         self._client: "Opt[genai.Client]" = None
 
     async def cog_unload(self) -> None:
@@ -49,32 +36,25 @@ class Chat(BaseCog):
             if hasattr(self._client, "close"):
                 self._client.close()
 
-    @commands.command(name=_ENTRY_CMD)
+    @app_commands.command(name="chat", description="Chat with Google Gemini")
+    @app_commands.describe(prompt="What should I ask Gemini?")
     async def chat(
-        self, ctx: commands.Context[Any], *, prompt: str | None = None
+        self, interaction: discord.Interaction, prompt: str | None = None
     ) -> None:
-        """Chat with the Gemini AI model.
-
-        Send a prompt to Gemini and get a response directly in Discord.
-        If no prompt is provided, a default greeting is used.
-
-        Usage: !chat <prompt>
-
-        Examples:
-          !chat Hello there, how are you?
-          !chat Write a short poem about programming.
-        """
         GEMINI_API_KEY = settings.gemini_api_key
         if not GEMINI_API_KEY:
-            await ctx.send("GEMINI_API_KEY is not configured.")
+            await interaction.response.send_message(
+                "GEMINI_API_KEY is not configured.", ephemeral=True
+            )
             return None
 
         try:
             from google import genai
             from google.genai import types
         except ImportError:
-            await ctx.send(
-                "google-genai package is not installed. Please run: pip install google-genai"
+            await interaction.response.send_message(
+                "google-genai package is not installed. Please run: pip install google-genai",
+                ephemeral=True,
             )
             return None
 
@@ -103,7 +83,10 @@ class Chat(BaseCog):
             )
 
             # Add progress indicator for long-running responses
-            progress_msg = await ctx.send("*Thinking...*")
+            await interaction.response.defer(thinking=True)
+            progress_msg = cast(
+                discord.Message, await interaction.followup.send("*Thinking...")
+            )
 
             try:
                 if hasattr(stream, "__aiter__"):  # real API
@@ -153,12 +136,14 @@ class Chat(BaseCog):
                         )
                 except Exception:
                     # Fallback to a regular message if edit fails
-                    await ctx.send(f"*Error while generating response: {e}*")
+                    await interaction.followup.send(
+                        f"*Error while generating response: {e}*"
+                    )
                 raise
 
             # Handle Discord's 2000 character limit by splitting response into chunks
             if not response_text:
-                await ctx.send("[No response from Gemini]")
+                await interaction.followup.send("[No response from Gemini]")
                 return
 
             # Discord has a 2000 character limit
@@ -166,7 +151,7 @@ class Chat(BaseCog):
 
             # If response is within limit, send it as a single message
             if len(response_text) <= DISCORD_CHAR_LIMIT:
-                await ctx.send(response_text)
+                await interaction.followup.send(response_text)
             else:
                 # Split into multiple messages
                 chunks = [
@@ -181,9 +166,9 @@ class Chat(BaseCog):
                         if len(prefix) + len(chunk) > DISCORD_CHAR_LIMIT:
                             chunk = chunk[: DISCORD_CHAR_LIMIT - len(prefix)]
                         chunk = prefix + chunk
-                    await ctx.send(chunk)
+                    await interaction.followup.send(chunk)
         except Exception as e:
-            await ctx.send(f"Gemini API error: {e}")
+            await interaction.followup.send(f"Gemini API error: {e}")
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -1,62 +1,33 @@
 import logging
-from typing import Annotated
-from discord.ext import commands
-from ..base import BaseCog
+import discord
+from discord import app_commands
+from discord.ext import commands  # For commands.Bot, commands.GroupCog
 from bot.core.api.browser_service import BrowserService
-from typing import Any
 
-__all__ = ["Browser"]  # still exported but after refactor _ENTRY_CMD rules apply
+__all__ = ["Browser"]
 
 logger = logging.getLogger(__name__)
 
+USAGE = "Automate an on-device Chrome browser."
+
+
+# ---------------------------------------------------------------------------+
+# Legacy constants – keep until external tests are updated                   +
+# ---------------------------------------------------------------------------+
 _ENTRY_CMD = "browser"
 CMD_START = "start"
 CMD_OPEN = "open"
 CMD_CLOSE = "close"
 CMD_SCREENSHOT = "screenshot"
-CMD_RESTART = "restart"
 CMD_STATUS = "status"
-
-USAGE = f"""
-Browser automation toolkit.
-
-Sub-commands
-  `{CMD_START}`      [--visible] [url]  – launch Chrome, optionally at URL
-  `{CMD_OPEN}`       [--visible] <url>  – navigate current session
-  `{CMD_RESTART}`    [--visible]        – drop & relaunch session
-  `{CMD_SCREENSHOT}`                    – send a screenshot
-  `{CMD_CLOSE}`                          – terminate session
-  `{CMD_STATUS}`                         – report state
-"""
+CMD_RESTART = "restart"
 
 
-class Browser(BaseCog):
+class Browser(commands.GroupCog, group_name=_ENTRY_CMD, group_description=USAGE):
     def __init__(self, bot: commands.Bot, browser_service: BrowserService) -> None:
-        super().__init__(bot)
-        self._browser: BrowserService = browser_service
-        self.__cog_name__ = "Browser"  # Explicitly set cog name
-
-    async def cog_command_error(
-        self, ctx: commands.Context[Any], error: Exception
-    ) -> None:
-        """Handle command errors specific to this cog."""
-        if isinstance(error, commands.CommandNotFound):
-            # Extract the attempted command from the message
-            message_content = ctx.message.content
-            command_parts = message_content.split()
-
-            if len(command_parts) >= 2 and command_parts[0].startswith("!"):
-                attempted_cmd = command_parts[1]
-                await ctx.send(
-                    f"⚠️ Unknown browser command: `{attempted_cmd}`.\nUse `!browser` to see available commands."
-                )
-            else:
-                await ctx.send(USAGE)
-            return
-
-        # For other errors, log them
-        logger.error(f"[Browser] Command error: {error}", exc_info=True)
-        await ctx.send(f"Error: {error}")
+        super().__init__()
+        self.bot = bot
+        self._browser = browser_service
 
     async def cog_unload(
         self,
@@ -66,136 +37,89 @@ class Browser(BaseCog):
             await self._browser.stop()
             logger.info("Browser service stopped during cog unload.")
 
-    @commands.group(name=_ENTRY_CMD, invoke_without_command=True)
-    @commands.is_owner()
-    async def browser(self, ctx: commands.Context[Any]) -> None:
-        """Control Chrome browser automation."""
-        # If no subcommand is given, print usage
-        await ctx.send(USAGE)
-
-    @browser.command(name=CMD_START)  # type: ignore[arg-type]
-    async def start(
+    # ------------------------------------------------------------------+
+    # /browser start
+    # ------------------------------------------------------------------+
+    @app_commands.command(name="start", description="Launch Chrome, optionally at URL")
+    @app_commands.describe(
+        url="URL to open (optional)", visible="Show window instead of headless"
+    )
+    async def start(  # noqa: D401 (imperative mood)
         self,
-        ctx: commands.Context[Any],
+        interaction: discord.Interaction,
         url: str | None = None,
-        *,
-        visible: Annotated[bool, commands.Flag(default=False)] = False,
+        visible: bool = False,
     ) -> None:
-        """Start a browser session.
-
-        Usage: !browser start <url> [visible]
-        - <url>: Optional URL to navigate to after starting
-        - [visible]: If provided (any value), shows browser window instead of headless mode
-
-        Example: !browser start https://discord.com visible
-        """
         assert self._browser is not None, "Browser service is not initialized."
+        await interaction.response.defer(thinking=True)
+        msg = await self._browser.start(url=url, headless=not visible)
+        await interaction.followup.send(msg)
 
-        # Determine the headless value to pass to the service
-        # If 'visible' is provided by the user, we want headless to be False.
-        # If 'visible' is NOT provided, we pass None to the service, so it uses its default.
-        service_headless_param: bool | None
-        if visible:
-            service_headless_param = False  # User explicitly asked for visible
-            logger.info("[Browser] Starting browser explicitly in visible mode.")
-        else:
-            service_headless_param = (
-                None  # Let BrowserService decide based on its defaults
-            )
-            logger.info(
-                "[Browser] Starting browser, allowing service to use default mode."
-            )
-
-        progress_message = await ctx.send("🟡 Launching Chrome …")
-        try:
-            msg = await self._browser.start(url=url, headless=service_headless_param)
-            await progress_message.edit(content="🟢 " + msg)
-        except ValueError as e:  # ← our new validation
-            await progress_message.edit(content=f"🔴 {e}")
-        except Exception as e:  # fallback
-            # Log the exception for server-side records
-            logger.exception(f"Browser start command failed: {e}")
-            await progress_message.edit(content=f"🔴 Browser failed: {e}")
-            # Re-raise to ensure it's caught by any global error handlers or logged by discord.py
-            raise
-
-    @browser.command(name=CMD_OPEN)  # type: ignore[arg-type]
+    # ------------------------------------------------------------------+
+    # /browser open
+    # ------------------------------------------------------------------+
+    @app_commands.command(
+        name="open", description="Navigate to a URL in the active session"
+    )
+    @app_commands.describe(
+        url="URL to navigate to",
+        visible="Show window instead of headless for this and future actions",
+    )
     async def open(
         self,
-        ctx: commands.Context[Any],
-        url: str | None = None,
-        *,
-        visible: Annotated[bool, commands.Flag(default=False)] = False,
+        interaction: discord.Interaction,
+        url: str,
+        visible: bool = False,
     ) -> None:
-        """Navigate to a URL in the active browser session.
-
-        Usage: !browser open <url>
-        - <url>: URL to navigate to
-
-        Example: !browser open https://discord.com
-        """
-        assert self._browser is not None, "Browser service is not initialized."
-        if not url:
-            await ctx.send(USAGE)
-            return
-        # if the caller explicitly said "visible" remember that preference
-        if visible:
+        if visible:  # remember GUI preference
             self._browser.set_preferred_headless(False)
-
+        assert self._browser is not None, "Browser service is not initialized."
+        await interaction.response.defer(thinking=True, ephemeral=True)
         msg = await self._browser.open(url)
-        await ctx.send(msg)
+        await interaction.followup.send(msg)
 
-    @browser.command(name=CMD_RESTART)  # type: ignore[arg-type]
+    # ------------------------------------------------------------------+
+    # /browser restart
+    # ------------------------------------------------------------------+
+    @app_commands.command(name="restart", description="Restart the browser session")
+    @app_commands.describe(visible="Show window instead of headless")
     async def restart(
         self,
-        ctx: commands.Context[Any],
-        *,
-        visible: Annotated[bool, commands.Flag(default=False)] = False,
+        interaction: discord.Interaction,
+        visible: bool = False,
     ) -> None:
-        """Force the session to restart.
-
-        Usage: !browser restart [visible]
-        """
         assert self._browser is not None, "Browser service is not initialized."
+        await interaction.response.defer(thinking=True)
+        headless_val = not visible
+        await self._browser.stop()  # Stop the current session
+        msg = await self._browser.start(headless=headless_val)  # Start a new one
+        await interaction.followup.send(msg)
 
-        headless = not visible
-        self._browser.set_preferred_headless(headless)
-
-        await ctx.send(await self._browser.stop())
-        msg = await self._browser.start(headless=headless)
-        await ctx.send(msg)
-
-    @browser.command(name=CMD_SCREENSHOT)  # type: ignore[arg-type]
-    async def screenshot(self, ctx: commands.Context[Any]) -> None:
-        """Take a screenshot of current browser view.
-
-        Takes a screenshot of the currently open page and sends it in the chat.
-
-        Usage: !browser screenshot
-        """
+    # ------------------------------------------------------------------+
+    # /browser screenshot
+    # ------------------------------------------------------------------+
+    @app_commands.command(
+        name="screenshot", description="Take a screenshot of the current view"
+    )
+    async def screenshot(self, interaction: discord.Interaction) -> None:
         assert self._browser is not None, "Browser service is not initialized."
+        await interaction.response.defer(thinking=True)
 
-        # Get screenshot path and message
         filepath, msg = await self._browser.screenshot()
 
-        if not filepath:  # No screenshot was taken
-            await ctx.send(msg)
+        if not filepath:
+            await interaction.followup.send(msg)
             return
 
-        # Check if the file exists before trying to send it
-        import os
+        import os  # Keep os import local to this method if only used here
 
         if os.path.exists(filepath):
-            # Create a Discord file object from the screenshot path
-            from discord import File
-
-            screenshot_file = File(filepath, filename="screenshot.png")
-
-            # Send both the file and the message
+            # discord.File needs to be imported if not already at top level
+            # from discord import File # Assuming discord is imported as 'discord'
+            screenshot_file = discord.File(filepath, filename="screenshot.png")
             try:
-                await ctx.send(file=screenshot_file, content=msg)
+                await interaction.followup.send(content=msg, file=screenshot_file)
             finally:
-                # Attempt to delete the temporary screenshot file
                 try:
                     os.remove(filepath)
                     logger.info(f"Temporary screenshot file deleted: {filepath}")
@@ -204,41 +128,28 @@ class Browser(BaseCog):
                         f"Error deleting temporary screenshot file {filepath}: {e}"
                     )
         else:
-            # In case the file doesn't exist (could happen in tests or if there's an error)
-            # This case implies the screenshot was temporary and might have been cleaned up unexpectedly or never created.
-            logger.warning(
-                f"Screenshot file not found to send or delete: {filepath}. Message: {msg}"
-            )
-            await ctx.send(f"{msg} (File not available to send)")
+            logger.warning(f"Screenshot file not found: {filepath}. Message: {msg}")
+            await interaction.followup.send(f"{msg} (File not available to send)")
 
-    @browser.command(name=CMD_CLOSE)  # type: ignore[arg-type]
-    async def close(self, ctx: commands.Context[Any]) -> None:
-        """Close the current browser session.
-
-        Shuts down the browser and cleans up resources.
-
-        Usage: !browser close
-        """
+    # ------------------------------------------------------------------+
+    # /browser close
+    # ------------------------------------------------------------------+
+    @app_commands.command(name="close", description="Close the browser session")
+    async def close(self, interaction: discord.Interaction) -> None:
         assert self._browser is not None, "Browser service is not initialized."
-        msg = (
-            await self._browser.stop()
-        )  # The method in BrowserService is still named stop()
-        await ctx.send(msg)
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        msg = await self._browser.stop()
+        await interaction.followup.send(msg)
 
-    @browser.command(name=CMD_STATUS)  # type: ignore[arg-type]
-    async def status(self, ctx: commands.Context[Any]) -> None:
-        """Check the current browser session status.
-
-        Reports if browser is running and the current URL if available.
-
-        Usage: !browser status
-        """
+    # ------------------------------------------------------------------+
+    # /browser status
+    # ------------------------------------------------------------------+
+    @app_commands.command(name="status", description="Report browser session status")
+    async def status(self, interaction: discord.Interaction) -> None:
         assert self._browser is not None, "Browser service is not initialized."
-        did_restart = await self._browser._ensure_alive()
-        msg = self._browser.status()
-        if did_restart:
-            msg = "🔁 Auto-restarted dead session.\n" + msg
-        await ctx.send(msg)
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        await self._browser._ensure_alive()
+        await interaction.followup.send(self._browser.status())
 
 
 async def setup(bot: commands.Bot, browser_service_instance: BrowserService) -> None:
