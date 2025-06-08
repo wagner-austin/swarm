@@ -96,7 +96,9 @@ class Browser(BaseCog):
         try:
             msg = await self._browser.start(url=url, headless=headless)
             await progress_message.edit(content="🟢 " + msg)
-        except Exception as e:
+        except ValueError as e:  # ← our new validation
+            await progress_message.edit(content=f"🔴 {e}")
+        except Exception as e:  # fallback
             # Log the exception for server-side records
             logger.exception(f"Browser start command failed: {e}")
             await progress_message.edit(content=f"🔴 Browser failed: {e}")

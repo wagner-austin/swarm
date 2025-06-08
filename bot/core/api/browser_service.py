@@ -18,6 +18,7 @@ from typing import Optional
 from bot.core.settings import settings  # fully typed alias
 from bot.core.settings import Settings
 from .browser import BrowserSession, _normalise_url
+from bot.core.validation import looks_like_web_url
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,14 @@ class BrowserService:
             profile=profile, headless=headless, timeout=timeout
         )
         await self._session.initialize()  # awaits the async initialization
+
+        # ── URL sanity-check BEFORE we touch Chrome ────────────────────────
+        if url and not looks_like_web_url(url):
+            await self.stop()  # tidy up the half-started session
+            raise ValueError(
+                f"'{url}' doesn't look like a valid web URL "
+                "(must be http(s)://example.com)."
+            )
 
         if not url:
             return "Browser session started."
@@ -103,6 +112,9 @@ class BrowserService:
         """
         if not self._session:
             return "No active session. Use 'start' first."
+
+        if not looks_like_web_url(url):
+            return f"Invalid URL: '{url}'"
 
         # First send a status that we're navigating
         actual_url = _normalise_url(url)

@@ -1,6 +1,6 @@
 import pytest
 from discord import Intents
-from discord.ext.commands import Bot, Context
+from discord.ext.commands import Bot
 from typing import Any, cast
 
 from bot.plugins.commands.browser import Browser
@@ -22,18 +22,35 @@ async def test_browser_command_flow(monkeypatch: Any, tmp_path: Any) -> None:
     dummy_bot: Bot = Bot(command_prefix="!", intents=Intents.default())
     browser_cog: Browser = Browser(bot=dummy_bot, browser_service=service)
 
-    # Tell mypy “yes, this is a Context” – runtime code doesn’t care.
-    ctx = cast(Context[Any], MockCtx())
+    # Treat ctx as Any so we can access the helper attribute “sent”.
+    ctx = cast(Any, MockCtx())
+
+    # The attributes `start`, `open`, … are `discord.ext.commands.Command`
+    # objects – we need their *coroutine* behind `.callback`.
+
+    # Helper that silences mypy by treating Command.callback as Any
+    async def invoke(command_obj: Any, *params: Any, **kw: Any) -> None:
+        await cast(Any, command_obj.callback)(*params, **kw)
 
     # start
-    await browser_cog.start(ctx)
-    # open (no URL error)
-    await browser_cog.open(ctx, url=None)
-    # open good
-    await browser_cog.open(ctx, url="https://example.com")
+    await invoke(browser_cog.start, browser_cog, ctx)
+
+    # open (no URL – should show usage)
+    await invoke(browser_cog.open, browser_cog, ctx, url=None)
+
+    # open valid
+    await invoke(browser_cog.open, browser_cog, ctx, url="https://example.com")
+
+    # open invalid → our new validation branch
+    await invoke(browser_cog.open, browser_cog, ctx, url="qwasd")
+    assert any("invalid url" in m.lower() for m in ctx.sent)
+    ctx.sent.clear()  # Clear sent messages for the next assertion
+
     # screenshot
-    await browser_cog.screenshot(ctx)
+    await invoke(browser_cog.screenshot, browser_cog, ctx)
+
     # status
-    await browser_cog.status(ctx)
-    # close (was previously named stop)
-    await browser_cog.close(ctx)
+    await invoke(browser_cog.status, browser_cog, ctx)
+
+    # close
+    await invoke(browser_cog.close, browser_cog, ctx)
