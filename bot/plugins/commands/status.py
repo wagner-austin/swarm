@@ -11,11 +11,19 @@ from discord.ext import commands
 from bot.core import metrics
 from ..base import BaseCog
 
+_ENTRY_CMD = "status"
+
+USAGE = f"""
+Show bot uptime and message counters.
+
+Usage: !{_ENTRY_CMD}
+"""
+
 READABLE = "{:.1f}"
 
 
 class Status(BaseCog):
-    @commands.command(name="status")
+    @commands.command(name=_ENTRY_CMD)
     @commands.is_owner()
     async def status(self, ctx: commands.Context[Any]) -> None:
         """

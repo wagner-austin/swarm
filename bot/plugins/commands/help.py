@@ -71,7 +71,13 @@ class Help(BaseCog):
             first_line = next(
                 (ln.strip() for ln in raw_help.splitlines() if ln.strip()), "…"
             )
-            lines.append(f"**{cmd_name}** – {first_line}")
+            # If the cog owns a USAGE block, include it after the summary
+            cog = getattr(cmd, "cog", None)
+            usage_extra = getattr(cog, "USAGE", "").strip()
+            if usage_extra:
+                lines.append(f"**{cmd_name}** – {first_line}\n{usage_extra}")
+            else:
+                lines.append(f"**{cmd_name}** – {first_line}")
 
         # Add a note about getting more help, but only if we have commands to show
         if lines:
