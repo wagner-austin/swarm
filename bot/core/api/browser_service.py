@@ -17,7 +17,6 @@ import logging
 from typing import Optional
 from bot.core.settings import settings  # fully typed alias
 from bot.core.settings import Settings
-from selenium.common.exceptions import WebDriverException
 from .browser import BrowserSession, _normalise_url
 from bot.core.validation import looks_like_web_url
 
@@ -102,8 +101,8 @@ class BrowserService:
         broken session and start a fresh one so the next command works.
         """
         if self._session and not self._session.is_alive():
-            await self.stop()                     # cleanup old artefacts
-            await self.start(headless=True)       # brand-new headless session
+            await self.stop()  # cleanup old artefacts
+            await self.start(headless=True)  # brand-new headless session
 
     # public, used by status
     def alive(self) -> bool:
