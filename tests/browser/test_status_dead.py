@@ -20,5 +20,5 @@ async def test_status_dead(monkeypatch: pytest.MonkeyPatch) -> None:
     assert svc._session is not None
     driver: Any = svc._session.driver
     assert driver is not None
-    driver._dead = True  # type: ignore[attr-defined]
+    driver._dead = True
     assert "DEAD" in svc.status()
