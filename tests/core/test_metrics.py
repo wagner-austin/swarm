@@ -3,7 +3,7 @@ tests/core/test_metrics.py - Tests for the metrics module.
 Ensures uptime and message counting functionality work as expected.
 """
 
-from src.bot_core import metrics
+import bot.core.metrics as metrics
 
 import pytest
 

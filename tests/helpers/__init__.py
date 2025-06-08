@@ -10,9 +10,8 @@ __all__: list[str] = []
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Tuple, Any, Dict, AsyncGenerator
+from typing import Any, AsyncGenerator
 
-from src.bot_core.storage import acquire
 
 # ------------------------------------------------------------------ #
 # Async sleep scaler ------------------------------------------------ #
@@ -40,30 +39,4 @@ async def override_async_sleep(
         monkeypatch.setattr(asyncio, "sleep", original_sleep)
 
 
-# ------------------------------------------------------------------ #
-# Simple DB helpers ------------------------------------------------- #
-# ------------------------------------------------------------------ #
-
-
-async def insert_record(query: str, params: Tuple[Any, ...]) -> int:
-    async with acquire() as conn:
-        cursor = await conn.execute(query, params)
-        lastrowid = cursor.lastrowid
-        if lastrowid is None:
-            raise ValueError("Expected DB insert to return an int id, got None")
-        return int(lastrowid)
-
-
-async def fetch_one(query: str, params: Tuple[Any, ...] = ()) -> Dict[str, Any] | None:
-    async with acquire() as conn:
-        cursor = await conn.execute(query, params)
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        return dict(row)
-
-
-async def cleanup_table(table_name: str) -> None:
-    async with acquire() as conn:
-        await conn.execute(f"DELETE FROM {table_name}")
-        await conn.commit()
+# Removed DB helpers – no persistent storage layer remains

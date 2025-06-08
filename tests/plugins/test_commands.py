@@ -16,9 +16,8 @@ import types
 import logging
 from unittest.mock import AsyncMock
 from discord.ext import commands
-from src.bot_plugins.commands.help import Help
-from src.bot_plugins.commands.info import Info
-from src.bot_plugins.commands.chat import Chat
+from bot.plugins.commands.help import Help
+from bot.plugins.commands.chat import Chat
 from tests.helpers.mocks import MockCtx
 
 logger = logging.getLogger(__name__)
@@ -39,15 +38,6 @@ async def test_help_command() -> None:
         dir(bot.commands[0]),
     )
     assert "help" in ctx.sent[0].lower() if ctx.sent else True
-
-
-@pytest.mark.asyncio
-async def test_info_command() -> None:
-    bot = AsyncMock(spec=commands.Bot)
-    cog = Info(bot)
-    ctx = MockCtx()
-    await cog.info(ctx)
-    assert any("personal Discord bot" in m for m in ctx.sent)
 
 
 @pytest.mark.asyncio
