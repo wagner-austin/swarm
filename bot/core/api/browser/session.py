@@ -189,10 +189,15 @@ class BrowserSession:
             return False
         from selenium.common.exceptions import WebDriverException
 
+        # Test stubs mark themselves with “_dead”
+        if getattr(self.driver, "_dead", False):
+            return False
+
+        # Some dummy drivers don’t implement .title — treat that as “still alive”
         try:
-            _ = self.driver.title  # fast, no network
+            _ = getattr(self.driver, "title", None)  # quick, never remote
             return True
-        except WebDriverException:
+        except (WebDriverException, AttributeError):
             return False
 
     def get_current_url(self) -> str:

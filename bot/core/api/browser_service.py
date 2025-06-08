@@ -136,17 +136,27 @@ class BrowserService:
         actual_url = _normalise_url(url)
 
         try:
-            # Start navigation
             await self._session.navigate(actual_url)
+        except Exception as e:  # navigation failed – maybe dead driver
+            from selenium.common.exceptions import WebDriverException
 
-            # Get the current URL to show where we navigated to (might be different due to redirects)
-            current_url = (
-                self._session.get_current_url() if self._session else actual_url
-            )
+            if (
+                isinstance(e, WebDriverException)
+                and "invalid session id" in str(e).lower()
+            ):
+                # mark session dead so _ensure_alive() starts a fresh one
+                if self._session and self._session.driver:
+                    setattr(self._session.driver, "_dead", True)
+                await self._ensure_alive()
+                if not self._session:
+                    return "Browser restarted but still unavailable."
+                # retry once
+                await self._session.navigate(actual_url)
+            else:
+                return f"Navigation error: {e}"
 
-            return f"Navigation complete: {current_url}"
-        except Exception as e:
-            return f"Navigation error: {str(e)}"
+        current_url = self._session.get_current_url() if self._session else actual_url
+        return f"Navigation complete: {current_url}"
 
     async def screenshot(self, dest: str | None = None) -> tuple[str, str]:
         """Take a screenshot of the current browser view.

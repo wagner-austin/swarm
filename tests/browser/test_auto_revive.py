@@ -10,17 +10,18 @@ from tests.helpers.dummy_dead_driver import DeadAfterOne
 async def test_auto_revive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "bot.core.api.browser.session.create_uc_driver",
-        lambda *_, **__: DeadAfterOne(),  # function now typed
+        lambda *args, **kw: DeadAfterOne(),
     )
     svc = BrowserService()
     await svc.start()  # alive
     assert svc.alive()
 
-    # first open works; driver dies internally
+    # 1️⃣ First navigation succeeds, driver still alive
     await svc.open("https://example.com")
-    assert svc.alive() is False  # now dead
+    assert svc.alive()  # still the original driver
 
-    # next open triggers auto-restart
+    # 2️⃣ Second navigation hits the “invalid session id”,
+    #    BrowserService auto-revives, and navigation completes.
     msg = await svc.open("https://example.com")
-    assert "fresh session" in msg.lower()
+    assert "navigation complete" in msg.lower()
     assert svc.alive()
