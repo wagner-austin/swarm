@@ -7,6 +7,7 @@ from bot.infra.tankpit.proxy.service import ProxyService
 
 # ── tiny in-house mitmproxy stub (same pattern as in test_restart_and_port_fallback) ──
 
+
 class _DummyAddons:
     def add(self, _addon: Any) -> None:
         return None
