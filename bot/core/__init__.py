@@ -19,7 +19,7 @@ __all__: List[str] = []
 # ---------------------------------------------------------------------------+
 
 # expose extras and freeze public surface
-for _name in ["parsers", "logger_setup"]:
+for _name in ["logger_setup"]:
     mod: ModuleType = import_module(f".{_name}", __name__)
     globals()[_name] = mod
     __all__.append(_name)

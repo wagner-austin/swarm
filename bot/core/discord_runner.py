@@ -25,16 +25,14 @@ class MyBot(commands.Bot):
 
 
 def _discover_extensions() -> list[str]:
-    """Discovers bot extensions (cogs) to be loaded using an allow-list."""
+    """Discover and load every commands-package cog residing in *bot/plugins/commands*."""
     base_path = Path(__file__).resolve().parent.parent  # bot/
     commands_path = base_path / "plugins" / "commands"
     extensions = []
 
-    KEEP = {"chat", "about", "shutdown", "status", "metrics_tracker"}
-
-    if commands_path.exists() and commands_path.is_dir():
+    if commands_path.is_dir():
         for p in commands_path.glob("*.py"):
-            if p.stem != "__init__" and p.stem in KEEP:
+            if p.stem != "__init__":
                 extensions.append(f"bot.plugins.commands.{p.stem}")
     else:
         logger.warning(
@@ -56,7 +54,8 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
 
     intents = Intents.default()
     # prefix is ignored but must exist → mention-only
-    bot = MyBot(command_prefix=commands.when_mentioned, intents=intents)
+    # No legacy prefixes – users interact via slash menu or @mention.
+    bot = MyBot(command_prefix=None, intents=intents)
     if proxy_service:
         bot.proxy_service = proxy_service  # Store the proxy service instance on the bot
 
@@ -181,6 +180,16 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
             )
             return
         raise error
+
+    @bot.event
+    async def on_message(message: discord.Message) -> None:  # noqa: D401
+        if message.author.bot:  # Ignore messages from other bots
+            return
+        if message.content.startswith(("!", ".")):  # common legacy prefixes
+            await message.channel.send(
+                "All commands are now **slash commands** – type `/` to browse available actions 🙂"
+            )
+        # Do not call await bot.process_commands(message) as we want to disable prefix commands
 
     try:
         logger.info("Attempting to connect the bot to Discord...")
