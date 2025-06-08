@@ -141,3 +141,25 @@ class ProxyService:
     # convenience helper for unit tests
     def is_running(self) -> bool:
         return self._dump is not None
+
+    # ------------------------------------------------------------------+
+    # Human-readable status string                                      |
+    # ------------------------------------------------------------------+
+
+    def describe(self) -> str:
+        """
+        Quick snapshot for Discord:
+
+        • state (running / stopped)
+        • bind address
+        • queue sizes – tells the user if frames are piling up
+        """
+        if not self.is_running():
+            return "stopped"
+
+        in_q_len: int = self.in_q.qsize()
+        out_q_len: int = self.out_q.qsize()
+        return (
+            f"running on http://127.0.0.1:{self.port} — "
+            f"{in_q_len} inbound / {out_q_len} outbound frames queued"
+        )
