@@ -10,6 +10,8 @@ Start/stop a TLS-MITM proxy on localhost:*port*.
 from __future__ import annotations
 import asyncio
 import logging
+import socket
+import contextlib
 from pathlib import Path
 from mitmproxy import options, proxy
 from typing import Any, cast
@@ -21,7 +23,8 @@ log = logging.getLogger(__name__)
 
 class ProxyService:
     def __init__(self, port: int = 9000, certdir: Path | None = None):
-        self.port = port
+        self._default_port = port  # remember the user’s first choice
+        self.port = port  # ← current, may change after restart
         self.certdir = certdir or Path(".mitm_certs")
         self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
         self.out_q: asyncio.Queue[bytes] = asyncio.Queue()
@@ -34,15 +37,16 @@ class ProxyService:
     async def start(self) -> str:
         if self._dump:
             return f"Proxy already running on :{self.port}"
+        # ------------------------------------------------------------------+
+        # 1) Pick a free port (Windows may keep the old one in TIME_WAIT)   |
+        # ------------------------------------------------------------------+
+        self.port = await self._pick_free_port(self.port)
+
         opts = options.Options(
             listen_host="127.0.0.1", listen_port=self.port, confdir=str(self.certdir)
         )
-
-        # ── older wheels (<9) expose these; v9+ do not ────────────────────
         ProxyConfig: Any | None = getattr(proxy, "ProxyConfig", None)
         ProxyServer: Any | None = getattr(proxy, "ProxyServer", None)
-        # ------------------------------------------------------------------
-
         self._dump = DumpMaster(opts)
 
         # mitmproxy <9 needs explicit server objects
@@ -69,6 +73,34 @@ class ProxyService:
             raise  # Re-raise the exception so the caller knows startup failed
         return f"Proxy listening on http://127.0.0.1:{self.port}"
 
+    # ----------------------------------------------------------------------+
+    # Helpers                                                               |
+    # ----------------------------------------------------------------------+
+
+    async def _pick_free_port(self, first_choice: int, max_attempts: int = 5) -> int:
+        """
+        Return *first_choice* if it’s free, otherwise the next free port
+        (tries at most *max_attempts* consecutive numbers).
+        """
+        for offset in range(max_attempts):
+            cand = first_choice + offset
+            if self._is_port_free(cand):
+                # on Windows the kernel may free the port a split-second later:
+                await asyncio.sleep(0.1)
+                if self._is_port_free(cand):
+                    return cand
+        raise RuntimeError(
+            f"No free port in range {first_choice}-{first_choice + max_attempts - 1}"
+        )
+
+    @staticmethod
+    def _is_port_free(port: int) -> bool:
+        with contextlib.closing(
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            return sock.connect_ex(("127.0.0.1", port)) != 0
+
     async def stop(self) -> str:
         if not self._dump:
             return "Proxy not running."
@@ -79,7 +111,8 @@ class ProxyService:
             if not self._task.done():  # Only operate on tasks that aren't done
                 self._task.cancel()
                 try:
-                    await self._task
+                    # wait up to 3 s so the OS definitely releases the socket
+                    await asyncio.wait_for(self._task, timeout=3)
                 except asyncio.CancelledError:
                     log.info("ProxyService: mitmproxy task cancelled as expected.")
                     # pass # Expected, no specific action needed beyond logging
@@ -99,6 +132,9 @@ class ProxyService:
         # Clean up instance variables
         self._dump = None
         self._task = None
+        # reset to the *original* preferred port so the next call to start()
+        # tries the same number first (nice for humans, harmless for tests).
+        self.port = self._default_port
         log.info("ProxyService: mitmproxy stopped.")
         return "Proxy stopped."
 
