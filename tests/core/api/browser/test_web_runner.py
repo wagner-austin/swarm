@@ -13,15 +13,17 @@ pytestmark = pytest.mark.asyncio
 @pytest.fixture
 def mock_settings_fixture(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Mocks settings for browser runner tests."""
-    mock_browser_settings = MagicMock()
-    mock_browser_settings.visible = False
-    mock_browser_settings.proxy_enabled = False
-    mock_browser_settings.read_only = False
-    mock_browser_settings.launch_timeout_ms = 30000
-
-    mock_global_settings = MagicMock()
-    mock_global_settings.browser = mock_browser_settings
-    mock_global_settings.proxy_port = 8080  # Example port
+    mock_browser_settings = MagicMock(
+        headless=True,
+        visible=False,
+        proxy_enabled=False,
+        read_only=False,
+        launch_timeout_ms=30000,
+    )
+    mock_global_settings = MagicMock(
+        browser=mock_browser_settings,
+        proxy_port=8080,  # Example port
+    )
 
     monkeypatch.setattr("bot.core.api.browser.runner.settings", mock_global_settings)
     return mock_global_settings
@@ -58,7 +60,7 @@ async def test_web_runner_enqueue_goto_starts_engine_and_processes_command(
     # Assert
     # Check that BrowserEngine was instantiated correctly
     MockBrowserEngine.assert_called_once_with(
-        headless=not mock_settings_fixture.browser.visible,
+        headless=False,  # runner uses pre-created browser
         proxy=None,  # Based on mock_settings_fixture proxy_enabled = False
         timeout_ms=mock_settings_fixture.browser.launch_timeout_ms,
     )

@@ -25,6 +25,12 @@ class BrowserEngine:
     # Lifecycle                                                        #
     # ------------------------------------------------------------------+
     async def start(self) -> None:
+        # Already initialised by WebRunner? → bail out early.
+        if self._browser is not None:  # idempotent start()
+            if self._page is None:  # but ensure we have a page
+                self._page = await self._browser.new_page()
+            return
+
         self._playwright = await async_playwright().start()
         assert self._playwright is not None  # mypy: narrows to Playwright
         self._browser = await self._playwright.chromium.launch(

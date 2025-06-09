@@ -9,7 +9,6 @@ from discord import app_commands
 from discord.ext import commands
 from bot.core import metrics
 
-READABLE = "{:.1f}"
 SPACER = " │ "  # visual separator in a single embed field
 
 
@@ -26,7 +25,7 @@ class Status(commands.Cog):
         """Reply with wall-clock uptime and traffic counters."""
         s = metrics.get_stats()
         uptime_hms = metrics.format_hms(s["uptime_s"])
-        uptime_hrs = READABLE.format(s["uptime_s"] / 3600)
+        uptime_hrs = f"{s['uptime_s'] / 3600:.1f}"
 
         # Dynamic counters
         latency_ms = int(self.bot.latency * 1000)  # round ms

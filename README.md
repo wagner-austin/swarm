@@ -7,14 +7,26 @@ This file provides setup, configuration, and usage instructions for the Discord 
 After installing dependencies and configuring your `.env`, you can start the bot in either of these ways:
 
 ```sh
-python -m bot_core.main
+python -m bot.core.main
 ```
 
-or
+Alternatively, if you have a `Makefile` (like the one potentially implied by `make run`) or use `python bot.py` directly:
 
-```sh
-python bot.py
+The bot now starts **with a visible Chromium window by default**.  
+Set `BROWSER_HEADLESS=true` (or export nothing but put the key in your `.env`) to make it headless for CI.
+
+```bash
+# For systems that use environment variables like this (Linux/macOS)
+make run 
+# or
+# python bot.py
+
+# For Windows PowerShell:
+# make run 
+# or
+# python bot.py
 ```
+Unset `BROWSER_HEADLESS` or set it to `true` (default) to keep the browser headless (e.g., for CI).
 
 The bot will respond to commands that start with `!` or when mentioned:
 

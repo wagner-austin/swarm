@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 
 class BrowserConfig(BaseModel):
-    headless: bool = False
-    visible: bool = False  # preferred clarity: mutually exclusive with headless
+    headless: bool = False  # default is *not* headless
+    visible: bool = True  # visible by default
     read_only: bool = False  # <‑‑ NEW – block mutating actions when True
     launch_timeout_ms: int = 60000
     proxy_enabled: bool = False
