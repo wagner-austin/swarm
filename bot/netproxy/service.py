@@ -1,5 +1,5 @@
 """
-tankpit.proxy.service
+Generic MITM-TLS proxy service.
 =====================
 Start/stop a TLS-MITM proxy on localhost:*port*.
 
@@ -10,28 +10,42 @@ Start/stop a TLS-MITM proxy on localhost:*port*.
 from __future__ import annotations
 import asyncio
 import logging
-import socket
-import contextlib
 from pathlib import Path
 from mitmproxy import options, proxy
-from typing import Any, cast
+from mitmproxy.http import HTTPFlow  # For WebSocket flow type hint
+from typing import (
+    Any,
+    cast,
+    Protocol,
+    runtime_checkable,
+)
 from mitmproxy.tools.dump import DumpMaster
-from .addon import WSAddon
+# Removed: from .addon import WSAddon
 
 log = logging.getLogger(__name__)
 
 
+@runtime_checkable
+class AddonProtocol(Protocol):  # minimal contract
+    async def websocket_message(self, flow: HTTPFlow) -> None: ...
+
+
 class ProxyService:
-    def __init__(self, port: int = 9000, certdir: Path | None = None):
-        self._default_port = port  # remember the user’s first choice
-        self.port = port  # ← current, may change after restart
+    def __init__(
+        self,
+        port: int = 9000,
+        *,
+        certdir: Path | None = None,
+        addon: AddonProtocol | None = None,  # Added addon parameter
+    ):
+        self._default_port = port
+        self.port = port
         self.certdir = certdir or Path(".mitm_certs")
         self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
         self.out_q: asyncio.Queue[bytes] = asyncio.Queue()
         self._dump: DumpMaster | None = None
-        self._task: asyncio.Future[None] | None = (
-            None  # run_in_executor returns a Future
-        )
+        self._task: asyncio.Future[None] | None = None
+        self._addon = addon  # Added this line
 
     # ── public API ──────────────────────────────────────────────
     async def start(self) -> str:
@@ -40,7 +54,9 @@ class ProxyService:
         # ------------------------------------------------------------------+
         # 1) Pick a free port (Windows may keep the old one in TIME_WAIT)   |
         # ------------------------------------------------------------------+
-        self.port = await self._pick_free_port(self.port)
+        from bot.utils.net import pick_free_port  # Import from utils
+
+        self.port = await pick_free_port(self.port)  # Use the new helper
 
         opts = options.Options(
             listen_host="127.0.0.1", listen_port=self.port, confdir=str(self.certdir)
@@ -56,7 +72,14 @@ class ProxyService:
             cast(Any, self._dump).server = ProxyServer(pconf)
         # mitmproxy 9/10: DumpMaster listens automatically
         # wire the addon
-        self._dump.addons.add(WSAddon(self.in_q, self.out_q))  # type: ignore[no-untyped-call]
+        if self._addon is not None:
+            # Accept either a ready instance *or* a class/factory
+            addon_instance = (
+                self._addon(self.in_q, self.out_q)
+                if isinstance(self._addon, type)
+                else self._addon
+            )
+            self._dump.addons.add(addon_instance)  # type: ignore[no-untyped-call]
         # Ensure the certdir exists
         self.certdir.mkdir(parents=True, exist_ok=True)
         # run mitmproxy in the background
@@ -73,33 +96,7 @@ class ProxyService:
             raise  # Re-raise the exception so the caller knows startup failed
         return f"Proxy listening on http://127.0.0.1:{self.port}"
 
-    # ----------------------------------------------------------------------+
-    # Helpers                                                               |
-    # ----------------------------------------------------------------------+
-
-    async def _pick_free_port(self, first_choice: int, max_attempts: int = 5) -> int:
-        """
-        Return *first_choice* if it’s free, otherwise the next free port
-        (tries at most *max_attempts* consecutive numbers).
-        """
-        for offset in range(max_attempts):
-            cand = first_choice + offset
-            if self._is_port_free(cand):
-                # on Windows the kernel may free the port a split-second later:
-                await asyncio.sleep(0.1)
-                if self._is_port_free(cand):
-                    return cand
-        raise RuntimeError(
-            f"No free port in range {first_choice}-{first_choice + max_attempts - 1}"
-        )
-
-    @staticmethod
-    def _is_port_free(port: int) -> bool:
-        with contextlib.closing(
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        ) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            return sock.connect_ex(("127.0.0.1", port)) != 0
+    # _pick_free_port and _is_port_free are now in bot.utils.net
 
     async def stop(self) -> str:
         if not self._dump:

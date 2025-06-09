@@ -21,16 +21,8 @@ from bot.core.settings import settings
 if TYPE_CHECKING:
     import undetected_chromedriver as uc
 
-import socket
-
-
-def _proxy_alive(host: str = "127.0.0.1", port: int = 9000) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=0.3):
-            return True
-    except OSError:
-        return False
-
+# import socket # No longer needed as _proxy_alive is removed
+from bot.utils import is_port_free  # Import the centralized utility
 
 logger = logging.getLogger(__name__)
 
@@ -69,16 +61,19 @@ def _patch_uc_chrome_del() -> None:
                         original_del(self_chrome_instance)
                 except Exception as e:
                     logger.debug(
-                        f"[BrowserDriver] Suppressed error in original Chrome.__del__: {e}"
+                        f"[BrowserDriver._patch_uc_chrome_del] Suppressed error in original uc.Chrome.__del__: {e}"
                     )
 
             uc.Chrome.__del__ = safe_del
             _chrome_del_patched = True
-            logger.info(
-                "[BrowserDriver] Applied Chrome.__del__ patch to prevent invalid handle errors."
+            logger.debug(
+                "[BrowserDriver._patch_uc_chrome_del] Applied uc.Chrome.__del__ patch to prevent invalid handle errors on exit."
             )
     except Exception as e:
-        logger.warning(f"[BrowserDriver] Could not patch Chrome.__del__: {e}")
+        logger.warning(
+            f"[BrowserDriver._patch_uc_chrome_del] Could not patch uc.Chrome.__del__: {e}",
+            exc_info=True,
+        )
 
 
 def create_uc_driver(
@@ -90,6 +85,9 @@ def create_uc_driver(
     timeout: int = 60,  # Add timeout parameter
 ) -> "uc.Chrome":
     """Creates and configures an undetected_chromedriver instance."""
+    logger.debug(
+        f"[BrowserDriver.create_uc_driver] Called with: profile_name='{profile_name}', headless_mode={headless_mode}, version_main={version_main}, proxy_config_present={proxy_config is not None}, user_data_dir_base_present={user_data_dir_base is not None}, timeout={timeout}s"
+    )
     uc = _get_uc()
     _patch_uc_chrome_del()
 
@@ -102,9 +100,7 @@ def create_uc_driver(
     chrome_options.add_argument("--hide-crash-restore-bubble")  # Chrome ≥115
 
     _actual_proxy_port_for_check = settings.proxy_port or 9000
-    if settings.proxy_enabled and _proxy_alive(
-        "127.0.0.1", _actual_proxy_port_for_check
-    ):
+    if settings.proxy_enabled and is_port_free(_actual_proxy_port_for_check):
         proxy_argument_port = settings.proxy_port or 9000
         chrome_options.add_argument(
             f"--proxy-server=http://127.0.0.1:{proxy_argument_port}"
@@ -114,11 +110,13 @@ def create_uc_driver(
         chrome_options.add_argument(
             "--proxy-bypass-list=<-loopback>;localhost;127.0.0.1"
         )
-        logger.info(
-            f"[BrowserDriver] Using proxy server http://127.0.0.1:{proxy_argument_port}"
+        logger.debug(
+            f"[BrowserDriver.create_uc_driver] Using proxy server http://127.0.0.1:{proxy_argument_port}"
         )
     else:
-        logger.info("[BrowserDriver] Proxy not running - launching Chrome without it.")
+        logger.debug(
+            "[BrowserDriver.create_uc_driver] Proxy not configured or not running - launching Chrome without it."
+        )
 
     if settings.browser_download_dir is not None:
         download_dir_path = Path(settings.browser_download_dir)
@@ -180,10 +178,9 @@ def create_uc_driver(
                 # Start timer for performance tracking
                 start_time = time.time()
                 logger.debug(
-                    f"[BrowserDriver] Attempting uc.Chrome driver creation with timeout={timeout}s"
+                    f"[BrowserDriver.create_uc_driver] Attempting to initialize uc.Chrome with: headless={headless_mode}, version_main={version_main}, user_data_dir='{user_data_dir}', use_subprocess=True"
                 )
-
-                # Submit the driver creation task to the executor
+                # Submit the potentially long-running uc.Chrome() to the executor
                 future = executor.submit(
                     lambda: uc.Chrome(
                         options=chrome_options,
@@ -199,13 +196,14 @@ def create_uc_driver(
 
                 elapsed = time.time() - start_time
                 logger.info(
-                    f"[BrowserDriver] Chrome driver initialized successfully in {elapsed:.2f}s"
+                    f"[BrowserDriver.create_uc_driver] Chrome driver initialized successfully in {elapsed:.2f}s"
                 )
                 return driver
 
             except concurrent.futures.TimeoutError:
                 logger.error(
-                    f"[BrowserDriver] Chrome driver initialization timed out after {timeout}s"
+                    f"[BrowserDriver.create_uc_driver] Chrome driver initialization timed out after {timeout}s. Chrome process might be hanging.",
+                    exc_info=False,  # TimeoutError itself is descriptive
                 )
                 raise RuntimeError(
                     f"Chrome driver initialization timed out after {timeout} seconds. "
@@ -214,11 +212,15 @@ def create_uc_driver(
 
             except TypeError as e:
                 logger.warning(
-                    f"[BrowserDriver] TypeError during uc.Chrome initialization: {e}. "
-                    "Attempting with minimal options."
+                    f"[BrowserDriver.create_uc_driver] TypeError during uc.Chrome initialization: {e}. "
+                    "Attempting with minimal options.",
+                    exc_info=True,
                 )
 
                 # Try again with minimal options
+                logger.debug(
+                    f"[BrowserDriver.create_uc_driver] Attempting fallback uc.Chrome initialization with: headless={headless_mode}, version_main=None (minimal options due to TypeError)"
+                )
                 future = executor.submit(
                     lambda: uc.Chrome(
                         options=chrome_options,
@@ -229,26 +231,27 @@ def create_uc_driver(
 
                 driver = future.result(timeout=timeout)
                 logger.info(
-                    "[BrowserDriver] Chrome driver initialized successfully with minimal options"
+                    "[BrowserDriver.create_uc_driver] Chrome driver initialized successfully with minimal options after TypeError fallback."
                 )
                 return driver
     except SessionNotCreatedException as e:
         if version_main is None:
             logger.error(
-                "[BrowserDriver] SessionNotCreatedException even after auto-detect retry: %s",
+                "[BrowserDriver.create_uc_driver] SessionNotCreatedException even after auto-detect retry: %s",
                 e,
                 exc_info=True,
             )
             raise
 
         logger.warning(
-            f"[BrowserDriver] SessionNotCreatedException with version_main='{version_main}': {e}. "
-            f"Assuming driver/browser version mismatch. Clearing cache and retrying with auto-detect."
+            f"[BrowserDriver.create_uc_driver] SessionNotCreatedException with version_main='{version_main}': {e}. "
+            f"Assuming driver/browser version mismatch. Clearing cache and retrying with auto-detect.",
+            exc_info=True,  # Add exc_info for context
         )
         module_file_path = uc.__file__
         if module_file_path is None:
             logger.error(
-                "[BrowserDriver] uc module's __file__ attribute is None. Cannot determine cache path. "
+                "[BrowserDriver.create_uc_driver] uc module's __file__ attribute is None. Cannot determine cache path. "
                 "Skipping cache clear and re-raising original error. This is unexpected if the "
                 "SessionNotCreatedException originated from the real undetected_chromedriver."
             )
@@ -258,20 +261,20 @@ def create_uc_driver(
         uc_driver_cache_dir = pathlib.Path(module_file_path).resolve().parent / "driver"
 
         if uc_driver_cache_dir.is_dir():
-            logger.info(
-                f"[BrowserDriver] Attempting to remove uc cache directory: {uc_driver_cache_dir}"
+            logger.debug(
+                f"[BrowserDriver.create_uc_driver] Attempting to remove uc cache directory: {uc_driver_cache_dir}"
             )
             shutil.rmtree(uc_driver_cache_dir, ignore_errors=True)
-            logger.info(
-                f"[BrowserDriver] Removed uc cache directory (or operation ignored errors): {uc_driver_cache_dir}"
+            logger.debug(
+                f"[BrowserDriver.create_uc_driver] Removed uc cache directory (or operation ignored errors): {uc_driver_cache_dir}"
             )
         else:
             logger.warning(
-                f"[BrowserDriver] uc cache path {uc_driver_cache_dir} not found or not a directory. Skipping cache clear."
+                f"[BrowserDriver.create_uc_driver] uc cache path {uc_driver_cache_dir} not found or not a directory. Skipping cache clear."
             )
 
         logger.info(
-            "[BrowserDriver] Retrying create_uc_driver with version_main=None (auto-detect)."
+            "[BrowserDriver.create_uc_driver] Retrying create_uc_driver with version_main=None (auto-detect) after SessionNotCreatedException."
         )
         return create_uc_driver(
             profile_name=profile_name,
@@ -282,7 +285,7 @@ def create_uc_driver(
         )
     except Exception as e:
         logger.error(
-            "[BrowserDriver] Failed to launch Chrome (outer exception): %s",
+            "[BrowserDriver.create_uc_driver] Failed to launch Chrome (outer exception): %s",
             e,
             exc_info=True,
         )

@@ -1,9 +1,8 @@
 # src/bot_core/startup.py
 import logging
-import os
 
 from bot.core.settings import settings
-from bot.infra.tankpit.proxy.service import ProxyService
+from bot.netproxy.service import ProxyService
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +16,6 @@ async def startup() -> ProxyService | None:
     proxy_service_instance: ProxyService | None = None
     try:
         # (DB layer removed – backup logic no longer exists)
-
-        if os.environ.get("FAST_EXIT_FOR_TESTS") == "1":
-            logger.info("FAST_EXIT_FOR_TESTS is set. Aborting full startup.")
-            return None
 
         # If `settings.proxy_port` is None, fall back to 9000
         proxy_port = settings.proxy_port or 9000

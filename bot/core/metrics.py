@@ -7,16 +7,20 @@ This file now carries full type hints so it passes `mypy --strict`.
 from __future__ import annotations
 import os
 import time
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional, Any  # Added Optional, Any
+from types import ModuleType  # Added ModuleType
 
 # psutil is optional – the code degrades gracefully if it's absent
-try:
-    import psutil
+psutil: Optional[ModuleType] = None
+_PROC: Optional[Any] = None  # Using Any for _PROC if psutil.Process is not available
 
+try:
+    import psutil as _imported_psutil
+
+    psutil = _imported_psutil
     _PROC = psutil.Process(os.getpid())
 except ModuleNotFoundError:  # pragma: no cover
-    psutil = None
-    _PROC = None
+    pass  # psutil remains None, _PROC remains None
 
 process_start_time: float = time.time()
 # incremented by the MetricsTracker cog (outbound socket payloads)

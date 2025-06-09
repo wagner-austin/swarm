@@ -20,7 +20,7 @@ OP_BINARY = 0x2
 # -------------------------------------------------------------------
 
 
-class WSAddon:
+class TankPitWSAddon:  # Renamed from WSAddon
     def __init__(
         self, inbound: asyncio.Queue[tuple[str, bytes]], outbound: asyncio.Queue[bytes]
     ) -> None:
@@ -73,6 +73,6 @@ class WSAddon:
             except Exception as e:
                 # It's good to log errors in a background task like this
                 if hasattr(ctx, "log") and hasattr(ctx.log, "error"):
-                    ctx.log.error(f"Error in WSAddon running loop: {e}")  # type: ignore[no-untyped-call]
+                    ctx.log.error(f"Error in TankPitWSAddon running loop: {e}")  # type: ignore[no-untyped-call]
             finally:
                 self.out_q.task_done()
