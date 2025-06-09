@@ -21,11 +21,22 @@ dependencies = [
   "mitmproxy>=10.0.0,<11.0.0",      # MITM TLS proxy, BSD-licensed
   "aiohttp>=3.12.11",
   "aiohappyeyeballs>=2.6.1",
+
+  # --- runtime resource metrics ---
+  "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
 discord = ["discord.py[voice]>=2.3"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.4", "black>=24.1", "mypy>=1.9", "types-requests"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.4",
+  "black>=24.1",
+  "mypy>=1.9",
+  "types-requests",
+  "types-psutil",     # ⇐ optional: stub package for mypy
+]
 
 [tool.setuptools]
 packages = { find = { where = [ "." ], include = ["bot*"] } }

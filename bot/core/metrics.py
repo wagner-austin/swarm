@@ -5,8 +5,18 @@ This file now carries full type hints so it passes `mypy --strict`.
 """
 
 from __future__ import annotations
+import os
 import time
-from typing import Dict
+from typing import Dict, Tuple
+
+# psutil is optional – the code degrades gracefully if it's absent
+try:
+    import psutil
+
+    _PROC = psutil.Process(os.getpid())
+except ModuleNotFoundError:  # pragma: no cover
+    psutil = None
+    _PROC = None
 
 process_start_time: float = time.time()
 # incremented by the MetricsTracker cog (outbound socket payloads)
@@ -68,6 +78,28 @@ def get_stats() -> Dict[str, float | int]:
         "messages_sent": messages_sent,
         "discord_messages_processed": discord_messages_processed,
     }
+
+
+# ------------------------------------------------------------+
+#  New public helpers                                         |
+# ------------------------------------------------------------+
+
+
+def get_cpu_mem() -> Tuple[str, str]:  # noqa: D401 – utility
+    """
+    Return **(system_cpu_percent, bot_mem_mb)** strings.
+
+    • Uses :func:`psutil.cpu_percent(interval=0.1)` for a quick,
+      human-meaningful load sample.\
+    • Still shows “n/a” gracefully when *psutil* is missing.
+    """
+    if psutil is None or _PROC is None:  # pragma: no cover
+        return "n/a", "n/a"
+
+    # 0.1-second blocking sample – short enough to stay async-friendly
+    cpu_total = psutil.cpu_percent(interval=0.1)
+    mem_bot = _PROC.memory_full_info().rss / (1024 * 1024)
+    return f"{cpu_total:.1f} %", f"{mem_bot:.0f} MB"
 
 
 # End of core/metrics.py
