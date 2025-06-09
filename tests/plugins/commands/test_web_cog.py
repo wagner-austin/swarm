@@ -57,7 +57,7 @@ async def test_web_cog_start_command_success(
         mock_interaction.channel_id, "goto", test_url
     )
     mock_interaction.followup.send.assert_awaited_once_with(
-        f"🟢 Navigated to **{test_url}**"
+        f"🟢 Started browser and navigated to **{test_url}**"
     )
 
 

@@ -115,16 +115,15 @@ class WebRunner:
         )
 
         eng = BrowserEngine(
-            headless=False,  # existing browser → headless flag irrelevant
+            headless=settings.browser.headless,
             proxy=proxy_addr,
             timeout_ms=settings.browser.launch_timeout_ms,
         )
-
-        # make BrowserEngine a no‑op if the browser is pre‑supplied
-        await eng.start()
+        # Re‑use the objects we already created – **no eng.start() call**,
+        # so nothing extra gets launched.
+        eng._playwright = self._active_runners[channel_id].playwright
         eng._browser = browser
         eng._page = await context.new_page()
-        eng._playwright = self._active_runners[channel_id].playwright
         log.info(f"Using pre-created Playwright objects for channel {channel_id}")
         try:
             while True:

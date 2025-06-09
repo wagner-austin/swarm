@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from typing import Any
+from typing import Any, Optional
 from bot.core.settings import settings
 
 from bot.core.api.browser.runner import WebRunner
@@ -86,7 +86,8 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             await interaction.response.defer(thinking=True)
         try:
             await self._runner.enqueue(chan, op, *op_args)
-            await interaction.followup.send(success)
+            if success:  # Only send follow-up if success message is not empty
+                await interaction.followup.send(success)
         except asyncio.QueueFull:
             await interaction.followup.send(
                 "❌ The browser command queue is full. Please try again later.",
@@ -106,10 +107,55 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             return None
         return interaction.channel_id
 
-    @app_commands.command(name="start", description="Open a page at the given URL.")
+    @app_commands.command(
+        name="start", description="Start a browser session with an optional URL."
+    )
+    @app_commands.describe(url="Optional URL to navigate to.")
+    async def start(
+        self, interaction: discord.Interaction, url: Optional[str] = None
+    ) -> None:
+        """Opens a new browser page and optionally navigates to the specified URL."""
+        if url:
+            try:
+                processed_url = _normalise_url_or_raise(url)
+                await self._run(
+                    interaction,
+                    "goto",
+                    processed_url,
+                    success=f"🟢 Started browser and navigated to **{processed_url}**",
+                )
+            except InvalidURLError as e:
+                await interaction.response.send_message(
+                    f"❌ Invalid URL: {e}. Please include a scheme (e.g., http:// or https://).",
+                    ephemeral=True,
+                )
+        else:
+            # Just start the browser without navigating anywhere specific
+            chan = await self._ensure_channel_id(interaction)
+            if chan is None:
+                return
+
+            await interaction.response.defer(thinking=True)
+            try:
+                # Just trigger a health_check to ensure the browser starts
+                await self._runner.enqueue(chan, "health_check")
+                await interaction.followup.send("🟢 Browser started successfully.")
+            except asyncio.QueueFull:
+                await interaction.followup.send(
+                    "❌ The browser command queue is full. Please try again later.",
+                    ephemeral=True,
+                )
+            except Exception as exc:
+                await interaction.followup.send(
+                    f"❌ {type(exc).__name__}: {exc}", ephemeral=True
+                )
+
+    @app_commands.command(
+        name="open", description="Navigate to the specified URL in the current browser."
+    )
     @app_commands.describe(url="The URL to navigate to.")
-    async def start(self, interaction: discord.Interaction, url: str) -> None:
-        """Opens a new browser page and navigates to the specified URL."""
+    async def open(self, interaction: discord.Interaction, url: str) -> None:
+        """Navigates the current browser to the specified URL."""
         try:
             processed_url = _normalise_url_or_raise(url)
         except InvalidURLError as e:
@@ -280,29 +326,56 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                         f"Error deleting temp screenshot file {screenshot_path}: {e_unlink}"
                     )
 
-    @app_commands.command(
-        name="status", description="Show browser status for this channel"
-    )
+    @app_commands.command(name="status", description="Show browser status")
     async def status(self, interaction: discord.Interaction) -> None:
         """Shows information about the browser instance for the current channel."""
-        chan = await self._ensure_channel_id(interaction)
-        if chan is None:
-            return
+        # First check if browsers exist
+        rows = browser_manager.status_readout()
 
-        rows = [r for r in browser_manager.status_readout() if r["channel"] == chan]
+        # If we have active browsers, perform health check and attempt to heal
+        if rows:
+            try:
+                # Trigger browser self-healing for each channel by executing a minimal health check operation
+                for r in rows:
+                    chan = r["channel"]
+                    try:
+                        # This will trigger the self-healing mechanism if browser is closed
+                        # We use a 2-second timeout to avoid blocking if there are issues
+                        await asyncio.wait_for(
+                            self._runner.enqueue(chan, "health_check"), timeout=2.0
+                        )
+                    except asyncio.TimeoutError:
+                        # If timeout occurs, continue with other channels
+                        pass
+                    except Exception:
+                        # Ignore any other errors - we'll still show status with what we have
+                        pass
+            except Exception:
+                pass  # Don't let health check errors prevent status display
+
+            # Re-fetch status now that we've attempted healing
+            rows = browser_manager.status_readout()
+
+        # Display status information
         if not rows:
             await interaction.response.send_message(
-                "No browser running for this channel.", ephemeral=True
+                "No active browser workers.", ephemeral=True
             )
             return
 
-        r = rows[0]
-        await interaction.response.send_message(
-            f"🗂️ Queue: {r['queue_len']} • "
-            f"📄 Pages: {r['pages']} • "
-            f"{'🟢 Idle' if r['idle'] else '🔵 Busy'}",
-            ephemeral=True,
-        )
+        embed = discord.Embed(title="Browser Workers Status")
+        for r in rows:
+            status_emoji = "🟢 Idle" if r["idle"] else "🔵 Busy"
+            embed.add_field(
+                name=f"Channel ID: {r['channel']}",
+                value=(
+                    f"🗂️ **Queue** {r['queue_len']}\n"
+                    f"{status_emoji}\n"
+                    f"📄 **Pages** {r['pages']}"
+                ),
+                inline=False,
+            )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(
         name="close", description="Close the browser for this channel"

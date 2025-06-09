@@ -60,13 +60,14 @@ async def test_web_runner_enqueue_goto_starts_engine_and_processes_command(
     # Assert
     # Check that BrowserEngine was instantiated correctly
     MockBrowserEngine.assert_called_once_with(
-        headless=False,  # runner uses pre-created browser
+        headless=mock_settings_fixture.browser.headless,  # Using real setting for recreations
         proxy=None,  # Based on mock_settings_fixture proxy_enabled = False
         timeout_ms=mock_settings_fixture.browser.launch_timeout_ms,
     )
 
-    # Check that engine's start method was called
-    mock_engine_instance.start.assert_awaited_once()
+    # We no longer call start() to avoid creating an extra about:blank tab
+    # Instead, we set browser objects directly in BrowserEngine
+    # mock_engine_instance.start.assert_awaited_once()
 
     # Check that the 'goto' method was called on the engine instance with the correct URL
     mock_engine_instance.goto.assert_awaited_once_with(test_url)

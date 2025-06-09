@@ -31,7 +31,8 @@ def _discover_extensions() -> list[str]:
     if commands_path.is_dir():
         for p in commands_path.glob("*.py"):
             if p.stem != "__init__":
-                extensions.append(f"bot.plugins.commands.{p.stem}")
+                if p.stem != "browser_status":  # ← skip legacy cog
+                    extensions.append(f"bot.plugins.commands.{p.stem}")
     else:
         logger.warning(
             f"Commands directory not found at {commands_path}, no command plugins loaded from there."
