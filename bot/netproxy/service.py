@@ -20,6 +20,7 @@ from typing import (
     runtime_checkable,
 )
 from mitmproxy.tools.dump import DumpMaster
+
 # Removed: from .addon import WSAddon
 
 log = logging.getLogger(__name__)

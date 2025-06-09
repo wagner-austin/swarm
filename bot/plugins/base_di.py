@@ -18,12 +18,13 @@ class BaseDIClientCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:  # noqa: D401  (imperative)
         super().__init__()
         self.bot = bot
-        # Prefer the container the runner already attached
-        existing = getattr(bot, "container", None)
-        if existing is None:  # unit tests often skip the runner
-            existing = Container()
-            setattr(bot, "container", existing)
-        self.container = existing
+        # Fail fast if container is missing
+        if not hasattr(bot, "container"):
+            raise RuntimeError(
+                "DI container missing – start the bot via discord_runner "
+                "or attach a Container in your test fixture."
+            )
+        self.container = bot.container
         logging.getLogger(__name__).debug(
             "[BaseDIClientCog] container resolved: %s", type(self.container).__name__
         )

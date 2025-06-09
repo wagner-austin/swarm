@@ -1,17 +1,9 @@
-# src/bot_core/api/browser/__init__.py
-"""
-Browser automation API, providing BrowserSession for managing web driver interactions.
-"""
+# Consolidated public surface for the browser sub‑package.
+# Only the stable entry‑points are re‑exported; everything else stays private.
 
-from .session import BrowserSession, State
-from .session_manager import SessionManager
-from .actions import BrowserActions
-from . import exceptions
+from .engine import BrowserEngine
+from .runner import WebRunner
+from .exceptions import BrowserError, InvalidURLError  # ← NEW
+# BrowserActions & SessionManager removed in #221 – stale references purged
 
-__all__ = [
-    "BrowserSession",
-    "State",
-    "SessionManager",
-    "BrowserActions",
-    "exceptions",
-]
+__all__: list[str] = ["BrowserEngine", "WebRunner", "BrowserError", "InvalidURLError"]

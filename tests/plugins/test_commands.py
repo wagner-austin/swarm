@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import discord
 from discord.ext import commands
 
+from bot.core.containers import Container
 from bot.plugins.commands.about import About
 from bot.plugins.commands.chat import Chat
 
@@ -46,6 +47,7 @@ class StubInteraction(AsyncMock):
 async def test_about_command() -> None:
     """/about should send an embed without raising."""
     bot = AsyncMock(spec=commands.Bot)
+    bot.container = Container()
     cog = About(bot)
 
     ix = StubInteraction(bot=bot)
@@ -88,6 +90,7 @@ async def test_chat_command(monkeypatch: Any) -> None:
 
     # ----------------------------------------------------------------------
     bot = AsyncMock(spec=commands.Bot)
+    bot.container = Container()
     bot.is_owner = AsyncMock(return_value=True)
 
     cog = Chat(bot)

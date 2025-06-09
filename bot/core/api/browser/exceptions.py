@@ -1,41 +1,18 @@
 """
-Custom exceptions for the BrowserService and related browser operations.
+Browser‑subsystem exception types.
+
+Keeping them in their own small module avoids import cycles and lets
+call‑sites depend on a single import path.
 """
 
 
-class BrowserServiceError(Exception):
-    """Base class for exceptions raised by the BrowserService."""
+class BrowserError(Exception):
+    """Base‑class for all browser‑layer problems."""
 
     pass
 
 
-class BrowserInitializationError(BrowserServiceError):
-    """Raised when the browser driver fails to initialize."""
-
-    pass
-
-
-class BrowserStateError(BrowserServiceError):
-    """Raised when an operation is attempted in an inappropriate browser state."""
-
-    pass
-
-
-class NavigationError(BrowserServiceError):
-    """Raised when a browser navigation operation fails."""
-
-    pass
-
-
-class ScreenshotError(BrowserServiceError):
-    """Raised when taking a screenshot fails."""
-
-    pass
-
-
-class InvalidURLError(BrowserServiceError, ValueError):
-    """Raised when a URL is considered invalid for browser operations.
-    Inherits from ValueError for compatibility with existing checks if needed.
-    """
+class InvalidURLError(BrowserError, ValueError):
+    """Raised when a user‑supplied URL does not pass validation."""
 
     pass

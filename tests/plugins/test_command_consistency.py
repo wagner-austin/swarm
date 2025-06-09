@@ -1,17 +1,32 @@
-import unittest
+"""
+Ensures that the slash‑command names documented in the cog’s help text
+actually exist in the code.
+
+This test was originally written for the legacy *browser* cog; it now targets
+the renamed *web* cog introduced in #214.
+"""
+
+from __future__ import annotations
+
+import importlib
 import re
+import unittest
 
-from bot.plugins.commands.browser import USAGE, _ENTRY_CMD as CMD_BROWSER
+# Dynamically import the cog so we never depend on its concrete filename.
+web_mod = importlib.import_module("bot.plugins.commands.web")
 
-# Single source-of-truth for the six sub-command names.
-# (Matches the explicit `@app_commands.command(name="…")` decorators in browser.py.)
-_BROWSER_SUBCOMMANDS: set[str] = {
+CMD_ROOT = "web"  # hard‑coded top‑level slash command
+USAGE: str = web_mod.__doc__ or ""
+
+# Keep this list in sync with the explicit @app_commands.command(name="…")
+# decorators inside bot/plugins/commands/web.py
+_WEB_SUBCOMMANDS: set[str] = {
     "start",
-    "open",
-    "close",
+    "click",
+    "fill",
+    "upload",
+    "wait",
     "screenshot",
-    "status",
-    "restart",
 }
 
 
@@ -29,7 +44,7 @@ class TestCommandConsistency(unittest.TestCase):
                 usage_commands.add(match.group(1))
 
         # Implemented commands taken straight from `_BROWSER_SUBCOMMANDS`
-        actual_commands = _BROWSER_SUBCOMMANDS
+        actual_commands = _WEB_SUBCOMMANDS
 
         # ------------------------------------------------------------+
         # 1)  Docs → Code: every command mentioned in USAGE must be
@@ -37,7 +52,7 @@ class TestCommandConsistency(unittest.TestCase):
         # ------------------------------------------------------------+
         for cmd in usage_commands:
             # Skip the parent command which isn't in our set
-            if cmd != CMD_BROWSER:
+            if cmd != CMD_ROOT:
                 self.assertIn(
                     cmd,
                     actual_commands,

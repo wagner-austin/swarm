@@ -1,6 +1,8 @@
 from __future__ import annotations
 from urllib.parse import urlparse
 
+from bot.core.settings import settings
+
 
 # ---------------------------------------------------------------------------+
 # Public helper – the *only* place that validates a user‑supplied URL        +
@@ -30,9 +32,14 @@ def validate_and_normalise_web_url(raw: str) -> str:
     # Extract the host part (no port) for validation
     host = parsed.hostname or parsed.netloc  # fallback for rare edge‑cases
 
-    # At least one dot in the host **or** exactly “localhost”
+    # 1) basic sanity (unchanged)
     if "." not in host and host.lower() != "localhost":
         raise ValueError(f"'{raw}' does not look like a valid host")
+
+    # 2) allowed‑hosts enforcement (skip when list empty or has wildcard)
+    allow = settings.allowed_hosts
+    if allow and "*" not in allow and host.lower() not in {h.lower() for h in allow}:
+        raise ValueError(f"Navigation to '{host}' is not permitted by configuration")
 
     return url
 

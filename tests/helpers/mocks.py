@@ -1,4 +1,4 @@
-__all__: list[str] = ["MockCtx", "MockMessage", "StubInteraction"]
+__all__: list[str] = ["MockCtx", "MockMessage", "StubInteraction", "DummyDump"]
 
 from typing import Any, List
 import types
@@ -108,3 +108,21 @@ class StubInteraction(AsyncMock):
                 self.sent_messages.append(content)
 
         self.followup.send.side_effect = _capture
+
+
+# ------------------------------------------------------------------+
+# mitmproxy DummyDump – shared by all proxy tests                   +
+# ------------------------------------------------------------------+
+class DummyDump:
+    """Minimal stand‑in for mitmproxy.tools.dump.DumpMaster."""
+
+    def __init__(self) -> None:
+        from types import SimpleNamespace
+
+        self.addons = SimpleNamespace(add=lambda *_: None)
+
+    async def run(self) -> None:  # noqa: D401
+        return None
+
+    def shutdown(self) -> None:  # noqa: D401
+        return None

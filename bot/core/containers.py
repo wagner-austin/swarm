@@ -2,8 +2,8 @@ from dependency_injector import containers, providers
 from pathlib import Path
 
 from bot.core.settings import Settings
-from bot.core.api.browser.session_manager import SessionManager
-from bot.core.api.browser.actions import BrowserActions
+from bot.core.api.browser.engine import BrowserEngine
+from bot.core.api.browser.runner import WebRunner
 from bot.netproxy.service import ProxyService
 from bot.infra.tankpit.proxy.ws_tankpit import TankPitWSAddon
 
@@ -20,21 +20,24 @@ class Container(containers.DeclarativeContainer):
     # The actual settings values will be loaded when accessed, typically from .env
     config = providers.Singleton(Settings)
 
-    # Browser-related services
-    session_manager = providers.Singleton(
-        SessionManager,
-        cfg=config,
+    # Browser-related services (Playwright based)
+    browser_engine: providers.Singleton[BrowserEngine] = providers.Singleton(
+        BrowserEngine
+        # Proxy host/port are not set here; WebRunner injects them dynamically from ProxyService
     )
 
-    browser_actions = providers.Singleton(
-        BrowserActions,
-        mgr=session_manager,
+    web_runner: providers.Singleton[WebRunner] = providers.Singleton(
+        WebRunner,
+        engine=browser_engine,
+        idle_timeout_secs=providers.Callable(
+            lambda cfg: cfg.browser_idle_timeout_secs, config
+        ),
     )
 
     # Proxy service
     # The default_port and cert_dir for ProxyService can be sourced from config.
     # The 'addon' parameter defaults to None as per ProxyService.__init__ signature.
-    proxy_service = providers.Singleton(
+    proxy_service: providers.Singleton["ProxyService"] = providers.Singleton(
         ProxyService,
         port=providers.Callable(
             lambda cfg: cfg.proxy_port or 9000,  # Use OR for default
@@ -58,8 +61,8 @@ class Container(containers.DeclarativeContainer):
 #     # For example, in discord_runner.py, you might do:
 #     # container.wire(modules=[__name__, ".cogs.browser_cog_module_if_it_exists"])
 #
-#     sm = container.session_manager()
-#     ba = container.browser_actions()
+#     engine = container.browser_engine()
+#     runner = container.web_runner()
 #     ps = container.proxy_service()
 #
-#     # Now sm, ba, ps are ready to be used or passed to cogs.
+#     # Now engine, runner, ps are ready to be used or passed to cogs.

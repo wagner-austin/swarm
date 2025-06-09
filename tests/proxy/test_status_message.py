@@ -1,27 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
 
 import pytest
 from bot.netproxy.service import ProxyService
+from tests.helpers.mocks import DummyDump as _DummyDump
 
 # ── tiny in-house mitmproxy stub (same pattern as in test_restart_and_port_fallback) ──
-
-
-class _DummyAddons:
-    def add(self, _addon: Any) -> None:
-        return None
-
-
-class _DummyDump:
-    def __init__(self) -> None:
-        self.addons: _DummyAddons = _DummyAddons()
-
-    async def run(self) -> None:  # noqa: D401
-        return None
-
-    def shutdown(self) -> None:  # noqa: D401
-        return None
 
 
 @pytest.mark.asyncio

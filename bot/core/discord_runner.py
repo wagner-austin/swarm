@@ -113,6 +113,8 @@ async def run_bot() -> None:
     # Make the singleton container reachable everywhere
     bot.container = container  # type: ignore[attr-defined]
     if ps_instance and ps_instance.is_running():
+        loop = asyncio.get_running_loop()
+        setattr(loop, "proxy_service", ps_instance)
         bot.proxy_service = (
             ps_instance  # Store the running proxy service instance on the bot
         )

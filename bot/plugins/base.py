@@ -20,7 +20,4 @@ class BaseCog(BaseDIClientCog):  # now inherits the DI logic
         # when commands are defined as methods within the Cog class.
         # This loop might be more relevant for commands added dynamically or in older versions.
         # For standard method-based commands, this might be redundant but harmless.
-        # `walk_commands()` yields every command registered to this cog,
-        # recursively, so sub-commands inside groups are included.
-        for cmd in self.walk_commands():  # unchanged
-            cmd.cog = self
+        # Command‑to‑cog binding is automatic – no manual fix‑up required.
