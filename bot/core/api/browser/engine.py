@@ -7,6 +7,7 @@ from playwright.async_api import (
     Playwright,
     Browser,
     Page,
+    BrowserContext,
 )
 
 
@@ -20,6 +21,9 @@ class BrowserEngine:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._page: Page | None = None
+        self._context: BrowserContext | None = (
+            None  # Track the browser context to avoid leaks
+        )
         self._last_url: str | None = None  # ← track last navigation
 
     # ------------------------------------------------------------------+
@@ -88,12 +92,20 @@ class BrowserEngine:
         assert self._browser is not None  # type narrowing for mypy
 
         if page_closed:
-            ctx = (
-                self._browser.contexts[0]
-                if self._browser.contexts
-                else await self._browser.new_context()
-            )
+            # Close the previous context if it exists to prevent leaking resources
+            if self._context is not None:
+                try:
+                    await self._context.close()
+                except Exception:
+                    # Ignore errors when closing, just ensure we don't leak
+                    pass
+
+            # Create a new context
+            ctx = await self._browser.new_context()
             assert ctx is not None  # type narrowing for mypy
+            self._context = ctx  # Save the context reference to close it later
+
+            # Create a new page in the context
             self._page = await ctx.new_page()
             if self._last_url:
                 try:
@@ -106,7 +118,9 @@ class BrowserEngine:
 
     async def close(self) -> None:
         if self._page:
-            await self._page.close()  # Ensure page is closed before browser
+            await self._page.close()  # Ensure page is closed before context
+        if self._context:
+            await self._context.close()  # Ensure context is closed before browser
         if self._browser:
             await self._browser.close()
         if self._playwright:
