@@ -11,6 +11,7 @@ closed – the same approach used by CPython's own `asyncio` in 3.14 dev.
 
 from __future__ import annotations
 
+import os
 import sys
 from importlib import import_module
 from types import ModuleType
@@ -20,7 +21,7 @@ from typing import List
 #  Windows asyncio bug‑work‑around                                          +
 # ---------------------------------------------------------------------------+
 
-if sys.platform.startswith("win"):
+if sys.platform.startswith("win") and os.getenv("BOT_TEST_MODE"):
     try:
         # internal – stable since 3.8; guarded import keeps POSIX untouched
         from asyncio.proactor_events import _ProactorBasePipeTransport

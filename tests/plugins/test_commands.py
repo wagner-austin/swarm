@@ -9,33 +9,12 @@ import types
 import pytest
 from unittest.mock import AsyncMock
 
-import discord
 from discord.ext import commands
 
 from bot.core.containers import Container
 from bot.plugins.commands.about import About
 from bot.plugins.commands.chat import Chat
-
-# ---------------------------------------------------------------------------+
-# Minimal Interaction stub                                                   +
-# ---------------------------------------------------------------------------+
-
-
-class StubInteraction(AsyncMock):
-    """Just enough of discord.Interaction for our slash handlers."""
-
-    def __init__(self, *, bot: commands.Bot):
-        super().__init__(spec=discord.Interaction)
-        self.client = bot  # alias used by commands
-        self.user = AsyncMock()  # needed for owner checks
-
-        # response & followup each expose .send_message / .send
-        self.response = AsyncMock()
-        self.response.defer = AsyncMock()
-        self.response.send_message = AsyncMock()
-
-        self.followup = AsyncMock()
-        self.followup.send = AsyncMock()
+from tests._mocks.mocks import StubInteraction
 
 
 # ---------------------------------------------------------------------------+

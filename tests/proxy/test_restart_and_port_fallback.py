@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from bot.netproxy.service import ProxyService
-from tests.helpers.mocks import DummyDump
+from tests._mocks.mocks import DummyDump
 
 
 @pytest.mark.asyncio
