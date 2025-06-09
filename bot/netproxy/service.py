@@ -99,10 +99,19 @@ class ProxyService:
     # _pick_free_port and _is_port_free are now in bot.utils.net
 
     async def stop(self) -> str:
-        if not self._dump:
+        # Check if proxy was never started
+        if not self._dump and not self._task:
             return "Proxy not running."
+
+        # Check if proxy is not running but may have been started before
+        if not self._dump:
+            log.info("ProxyService: No active mitmproxy instance to stop.")
+            self._task = None
+            self.port = self._default_port
+            return "Proxy not running."
+
         log.info("ProxyService: Shutting down mitmproxy.")
-        assert self._dump is not None  # Ensured by the 'if not self._dump:' check above
+        assert self._dump is not None  # Ensured by the checks above
         self._dump.shutdown()  # type: ignore[no-untyped-call] # tell mitmproxy to stop
         if self._task:
             if not self._task.done():  # Only operate on tasks that aren't done
