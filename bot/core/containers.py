@@ -2,8 +2,8 @@ from dependency_injector import containers, providers
 from pathlib import Path
 
 from bot.core.settings import Settings
-from bot.core.api.browser.engine import BrowserEngine
-from bot.core.api.browser.runner import WebRunner
+from bot.core.browser_manager import browser_manager
+
 from bot.netproxy.service import ProxyService
 from bot.infra.tankpit.proxy.ws_tankpit import TankPitWSAddon
 
@@ -20,19 +20,8 @@ class Container(containers.DeclarativeContainer):
     # The actual settings values will be loaded when accessed, typically from .env
     config = providers.Singleton(Settings)
 
-    # Browser-related services (Playwright based)
-    browser_engine: providers.Singleton[BrowserEngine] = providers.Singleton(
-        BrowserEngine
-        # Proxy host/port are not set here; WebRunner injects them dynamically from ProxyService
-    )
-
-    web_runner: providers.Singleton[WebRunner] = providers.Singleton(
-        WebRunner,
-        engine=browser_engine,
-        idle_timeout_secs=providers.Callable(
-            lambda cfg: cfg.browser_idle_timeout_secs, config
-        ),
-    )
+    # Browser manager singleton
+    browser_manager = providers.Object(browser_manager)
 
     # Proxy service
     # The default_port and cert_dir for ProxyService can be sourced from config.

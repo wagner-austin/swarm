@@ -23,7 +23,7 @@ class About(commands.Cog):
         embed.add_field(name="Developer", value="Austin Wagner", inline=False)
         embed.add_field(
             name="Source Code",
-            value="[Link to your bot's source code](https://github.com/wagner-austin/DiscordBot)",
+            value="[Source Code](https://github.com/wagner-austin/DiscordBot)",
             inline=False,
         )
 

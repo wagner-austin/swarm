@@ -47,6 +47,7 @@ class ProxyService:
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
         self._addon = addon  # Added this line
+        self._process: asyncio.subprocess.Process | None = None
 
     # ── public API ──────────────────────────────────────────────
     async def start(self) -> str:
@@ -159,3 +160,28 @@ class ProxyService:
             f"running on http://127.0.0.1:{self.port} — "
             f"{in_q_len} inbound / {out_q_len} outbound frames queued"
         )
+
+    async def aclose(self) -> None:
+        """Gracefully stop the mitmproxy service.
+        This method ensures that the existing stop() logic is awaited.
+        """
+        log.info("ProxyService: aclose() called. Initiating shutdown via stop().")
+        await self.stop()
+        # If self._process was intended for a different way of running mitmproxy (e.g., external subprocess),
+        # and if that way could co-exist or be an alternative, then the original logic for self._process
+        # might be relevant. However, based on current start(), mitmproxy runs via self._task.
+        # The original aclose diff's self._process logic:
+        # if self._process is None:
+        #     return
+        # self._process.terminate()
+        # await self._process.wait()
+        # self._process = None
+        # For now, we assume self.stop() handles all necessary cleanup for the current start() implementation.
+        log.info("ProxyService: aclose() completed.")
+
+
+# ------------------------------------------------------------------
+# module‑level singleton so other modules can just "from … import proxy_service"
+# ------------------------------------------------------------------
+
+proxy_service: "ProxyService" = ProxyService()

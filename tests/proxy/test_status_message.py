@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from bot.netproxy.service import ProxyService
-from tests.helpers.mocks import DummyDump as _DummyDump
+from tests.helpers.mocks import DummyDump
 
 # ── tiny in-house mitmproxy stub (same pattern as in test_restart_and_port_fallback) ──
 
@@ -13,7 +13,7 @@ async def test_status_string(monkeypatch: pytest.MonkeyPatch) -> None:
     # Stub DumpMaster & WSAddon so no real mitmproxy spins up
     monkeypatch.setattr(
         "bot.netproxy.service.DumpMaster",
-        lambda *a, **k: _DummyDump(),
+        lambda *a, **k: DummyDump(),
     )
     svc = ProxyService(port=9000)
     # stopped ⇒ plain “stopped”
