@@ -3,18 +3,26 @@ Settings for the DiscordBot. All browser flags live in Settings.browser (see Bro
 """
 
 from pydantic_settings import BaseSettings
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ValidationInfo
 from typing import Optional
 from typing import TYPE_CHECKING, Any
 
 
 class BrowserConfig(BaseModel):
     headless: bool = False
-    disable_gpu: bool = True
-    window_size: str = "1920,1080"
-    no_sandbox: bool = True
+    visible: bool = False  # preferred clarity: mutually exclusive with headless
+    read_only: bool = False  # <‑‑ NEW – block mutating actions when True
+    launch_timeout_ms: int = 60000
+    proxy_enabled: bool = False
 
     model_config = {"extra": "ignore"}
+
+    @field_validator("visible")
+    @classmethod
+    def _exclusive_with_headless(cls, v: bool, info: ValidationInfo) -> bool:
+        if v and info.data.get("headless"):
+            raise ValueError("`visible=True` and `headless=True` cannot both be set")
+        return v
 
 
 class Settings(BaseSettings):
@@ -54,6 +62,9 @@ class Settings(BaseSettings):
     )
 
     browser: BrowserConfig = BrowserConfig()
+
+    # --- URL guard‑rails ---
+    allowed_hosts: list[str] = []  # e.g. ["github.com", "docs.python.org"]
 
     model_config = {"env_file": ".env", "case_sensitive": False, "extra": "allow"}
 

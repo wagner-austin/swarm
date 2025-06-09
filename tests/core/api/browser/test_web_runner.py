@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import asyncio
+import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
+
+from bot.core.api.browser.runner import WebRunner
+
+# Mark all tests in this module as asyncio
+pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture
+def mock_settings_fixture(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Mocks settings for browser runner tests."""
+    mock_browser_settings = MagicMock()
+    mock_browser_settings.visible = False
+    mock_browser_settings.proxy_enabled = False
+    mock_browser_settings.read_only = False
+    mock_browser_settings.launch_timeout_ms = 30000
+
+    mock_global_settings = MagicMock()
+    mock_global_settings.browser = mock_browser_settings
+    mock_global_settings.proxy_port = 8080  # Example port
+
+    monkeypatch.setattr("bot.core.api.browser.runner.settings", mock_global_settings)
+    return mock_global_settings
+
+
+@patch("bot.core.api.browser.runner.BrowserEngine")
+async def test_web_runner_enqueue_goto_starts_engine_and_processes_command(
+    MockBrowserEngine: MagicMock,
+    mock_settings_fixture: MagicMock,  # Ensure settings are mocked, now receives the mock
+) -> None:
+    """Test that enqueueing a 'goto' command starts the BrowserEngine and calls its methods."""
+    # Arrange
+    mock_engine_instance = AsyncMock()
+    MockBrowserEngine.return_value = mock_engine_instance
+
+    runner = WebRunner()
+    channel_id = 12345
+    test_url = "http://example.com"
+
+    # Act
+    task_future = await runner.enqueue(channel_id, "goto", test_url)
+
+    # Allow the worker task to process the command
+    # The worker runs _worker, which processes one command then checks queue
+    # If queue is empty, it starts a 120s timeout to wait for new command or exit
+    # We need to ensure the first command is processed.
+    try:
+        await asyncio.wait_for(
+            task_future, timeout=5.0
+        )  # Wait for the specific command future to complete
+    except asyncio.TimeoutError:
+        pytest.fail("The enqueued command did not complete in time.")
+
+    # Assert
+    # Check that BrowserEngine was instantiated correctly
+    MockBrowserEngine.assert_called_once_with(
+        headless=not mock_settings_fixture.browser.visible,
+        proxy=None,  # Based on mock_settings_fixture proxy_enabled = False
+        timeout_ms=mock_settings_fixture.browser.launch_timeout_ms,
+    )
+
+    # Check that engine's start method was called
+    mock_engine_instance.start.assert_awaited_once()
+
+    # Check that the 'goto' method was called on the engine instance with the correct URL
+    mock_engine_instance.goto.assert_awaited_once_with(test_url)
+
+    # Check that the future associated with the command was resolved
+    assert task_future.done(), "Command future should be resolved"
+    assert task_future.exception() is None, (
+        "Command future should not have an exception"
+    )
+
+    # Cleanup: Allow the worker to finish its idle timeout and close
+    # This requires the queue to be empty and then for the timeout in _worker to expire.
+    # To ensure the worker exits cleanly, we can try to wait for the queue to be deleted.
+    # This part is tricky to test without direct access to the worker task or making it more complex.
+    # For now, we assume the primary action (goto) is tested. A more robust test might involve
+    # a way to signal the worker to shut down or check self._queues after a delay.
+
+    # A simple way to help worker exit: ensure queue is empty and wait a bit beyond its internal poll
+    if channel_id in runner._queues:
+        queue = runner._queues[channel_id]
+        assert queue.empty(), (
+            "Queue should be empty after command processing for worker to consider exiting"
+        )
+        # The worker waits for 120s on an empty queue. We can't wait that long in a test.
+        # For a more robust test of worker shutdown, WebRunner might need a dedicated shutdown method.
+        # For now, we'll manually trigger the shutdown logic by cancelling the implicit worker task
+        # This is a bit of a hack and depends on knowing the internal structure.
+        tasks = [t for t in asyncio.all_tasks() if "WebRunner._worker" in repr(t)]
+        for t in tasks:
+            t.cancel()
+            try:
+                await t  # Allow cancellation to propagate
+            except asyncio.CancelledError:
+                pass
+        # After cancellation, the engine's close should be called in the finally block of _worker
+        mock_engine_instance.close.assert_awaited_once()
+        assert channel_id not in runner._queues, (
+            "Queue should be removed after worker exits"
+        )

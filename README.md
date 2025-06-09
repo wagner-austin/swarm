@@ -125,3 +125,8 @@ class MyWizard(WizardPlugin):
         return f"You said: {answer}"
 ```
 See `plugins/wizard.py` for details. Wizards are channel-agnostic and can be used in REST APIs or chatbots alike.
+
+
+### Security toggles
+* `BROWSER_READ_ONLY=true`  → blocks /web click|fill|upload unless owner/admin
+* `ALLOWED_HOSTS=github.com,internal‑portal.local` → restricts navigation targets

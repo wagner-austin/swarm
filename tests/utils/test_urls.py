@@ -1,5 +1,6 @@
 # tests/utils/test_urls.py
 import pytest
+from pytest import MonkeyPatch
 from bot.utils.urls import validate_and_normalise_web_url
 
 
@@ -13,6 +14,13 @@ from bot.utils.urls import validate_and_normalise_web_url
 )
 def test_good_urls(raw: str, expect: str) -> None:
     assert validate_and_normalise_web_url(raw) == expect
+
+
+# ensure allow‑list blocks disallowed hosts
+def test_disallowed_host(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr("bot.core.settings.settings.allowed_hosts", ["example.com"])
+    with pytest.raises(ValueError):
+        validate_and_normalise_web_url("https://not‑allowed.org")
 
 
 @pytest.mark.parametrize("raw", ["", "notaurl", "ftp://foo", "http://no_dot_host"])

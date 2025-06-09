@@ -13,9 +13,8 @@ dependencies = [
   "pydantic>=2",
   "pydantic-settings",
 
-  "undetected_chromedriver>=3",
+  "playwright>=1.44",   # single install; run `playwright install chromium` post-deploy
   "discord.py>=2.3",
-  "selenium>=4",
 
   # --- proxy and websocket support ---
   "mitmproxy>=10.0.0,<11.0.0",      # MITM TLS proxy, BSD-licensed

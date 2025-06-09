@@ -11,12 +11,25 @@ from typing import TYPE_CHECKING
 
 from mitmproxy import ctx, websocket
 
+# ---------------------------------------------------------------------------+
+#  Binary‑frame opcode constant                                              +
+#                                                                           +
+# • At runtime, modern mitmproxy exposes `websocket.Opcode.BINARY`.          +
+# • The public type stubs, however, *omit* the `Opcode` enum, which breaks   +
+#   `mypy --strict`.                                                         +
+# • We fall back to the hard‑coded value (0x2) that has been stable since    +
+#   RFC 6455, keeping full compatibility with older mitmproxy versions and   +
+#   satisfying the type‑checker.                                             +
+# ---------------------------------------------------------------------------+
+try:
+    OP_BINARY: int = websocket.Opcode.BINARY  # type: ignore[attr-defined]
+except AttributeError:  # pragma: no cover – stubs or very old runtime
+    OP_BINARY = 0x2  # WebSocket binary frame opcode
+
 # ── type-only import; mitmproxy stubs are incomplete ───────────────
 if TYPE_CHECKING:
     from mitmproxy.http import HTTPFlow
 
-# mitmproxy's opcode enum (TEXT=1, BINARY=2, …) – we need just the binary value
-OP_BINARY = 0x2
 # -------------------------------------------------------------------
 
 
@@ -51,10 +64,9 @@ class TankPitWSAddon:  # Renamed from WSAddon
                     for f_flow in ctx.master.state.flows:  # Iterate all flows
                         if f_flow.websocket and not f_flow.websocket.closed:
                             # Assuming TankPit uses binary frames for game data.
-                            # websocket.OPCODE.BINARY is typically 0x2.
-                            # If text frames are used, it should be websocket.OPCODE.TEXT (0x1).
+                            # Use our cross-version compatible binary opcode constant
                             new_msg = websocket.WebSocketMessage(
-                                OP_BINARY,  # ← replaces websocket.OPCODE_BINARY
+                                OP_BINARY,
                                 from_client=True,
                                 content=data,
                             )

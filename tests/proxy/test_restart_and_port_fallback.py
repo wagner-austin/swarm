@@ -1,27 +1,10 @@
 # tests/proxy/test_restart_and_port_fallback.py
 from __future__ import annotations
 
-from typing import Any
 
 import pytest
 from bot.netproxy.service import ProxyService
-
-
-class MockAddons:
-    def add(self, addon_instance: Any) -> None:  # noqa: D401
-        """No-op add used by mitmproxy stubs."""
-        return None
-
-
-class DummyDump:
-    def __init__(self) -> None:
-        self.addons: MockAddons = MockAddons()
-
-    async def run(self) -> None:
-        return None
-
-    def shutdown(self) -> None:  # noqa: D401
-        return None
+from tests.helpers.mocks import DummyDump
 
 
 @pytest.mark.asyncio
