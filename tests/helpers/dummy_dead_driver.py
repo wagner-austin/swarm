@@ -17,14 +17,17 @@ class DeadAfterOne:
     _dead: bool
     _calls: int
     title: str
+    current_url: str
 
     def __init__(self) -> None:
         self._dead = False
         self._calls = 0
         self.title = "dummy"
+        self.current_url = "about:blank"
 
-    def get(self, *_args: Any, **_kw: Any) -> None:
+    def get(self, url: str, *_args: Any, **_kw: Any) -> None:
         self._calls += 1
+        self.current_url = url
         if self._calls > 1:
             self._dead = True
             raise WebDriverException("invalid session id")

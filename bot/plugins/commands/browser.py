@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.GroupCog
 from bot.core.api.browser_service import BrowserService
+from bot.core.api.browser.exceptions import InvalidURLError, NavigationError
 
 __all__ = ["Browser"]
 
@@ -66,7 +67,16 @@ class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
             self._browser.set_preferred_headless(False)
         assert self._browser is not None, "Browser service is not initialized."
         await interaction.response.defer(thinking=True, ephemeral=True)
-        msg = await self._browser.open(url)
+        try:
+            msg = await self._browser.open(url)
+        except InvalidURLError as e:
+            # tell the user instead of raising into the logs / tests
+            await interaction.followup.send(str(e))
+            return
+        except NavigationError as e:
+            await interaction.followup.send(f"⚠️ {e}")
+            return
+
         await interaction.followup.send(msg)
 
     # ------------------------------------------------------------------+

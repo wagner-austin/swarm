@@ -54,7 +54,7 @@ async def test_bot_startup_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_proxy_stop(self: Any) -> str:  # noqa: D401
         return "proxy-stopped"
 
-    from bot.infra.tankpit.proxy.service import ProxyService
+    from bot.netproxy.service import ProxyService
 
     monkeypatch.setattr(ProxyService, "start", fake_proxy_start, raising=False)
     monkeypatch.setattr(ProxyService, "stop", fake_proxy_stop, raising=False)

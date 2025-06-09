@@ -7,7 +7,7 @@ from discord import Intents
 from discord.ext import commands
 
 from bot.core.settings import settings
-from bot.infra.tankpit.proxy.service import ProxyService
+from bot.netproxy.service import ProxyService
 from bot.core.api.browser_service import BrowserService  # Added for DI
 from bot.plugins.commands.browser import (
     setup as browser_cog_setup,

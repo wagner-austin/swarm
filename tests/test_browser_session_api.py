@@ -5,10 +5,10 @@ from typing import Any
 
 
 class DummyDriver:
-    current_url = "about:blank"
-
     def __init__(self, *args: Any, **kwargs: Any):
-        pass  # Accept any args/kwargs
+        self.current_url = "about:blank"
+
+    # accept any ctor args silently
 
     def get(self, url: str) -> None:
         self.current_url = url

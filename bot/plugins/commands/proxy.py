@@ -2,7 +2,8 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.GroupCog
-from bot.core.api.proxy_service import ProxyService
+from bot.netproxy.service import ProxyService
+from bot.infra.tankpit.proxy.ws_tankpit import TankPitWSAddon
 
 log = logging.getLogger(__name__)
 
@@ -12,10 +13,14 @@ class ProxyCog(
     group_name="proxy",
     group_description="Manage the TankPit MITM proxy",
 ):
-    def __init__(self, bot: commands.Bot, svc: ProxyService):
+    def __init__(self, bot: commands.Bot, proxy_service: ProxyService) -> None:
         super().__init__()
         self.bot = bot
-        self.svc = svc
+        self.svc = proxy_service  # Use the injected ProxyService
+        # Ensure the addon is wired up if not already handled by ProxyService initialization
+        # This assumes ProxyService is instantiated without an addon initially, or this re-wires it.
+        if not self.svc._addon:
+            self.svc._addon = TankPitWSAddon(self.svc.in_q, self.svc.out_q)
 
     @app_commands.command(name="start", description="Start the proxy")
     async def start(self, interaction: discord.Interaction) -> None:

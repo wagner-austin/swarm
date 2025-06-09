@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from bot.infra.tankpit.proxy.service import ProxyService
+from bot.netproxy.service import ProxyService
 
 # ── tiny in-house mitmproxy stub (same pattern as in test_restart_and_port_fallback) ──
 
@@ -28,11 +28,8 @@ class _DummyDump:
 async def test_status_string(monkeypatch: pytest.MonkeyPatch) -> None:
     # Stub DumpMaster & WSAddon so no real mitmproxy spins up
     monkeypatch.setattr(
-        "bot.infra.tankpit.proxy.service.DumpMaster",
+        "bot.netproxy.service.DumpMaster",
         lambda *a, **k: _DummyDump(),
-    )
-    monkeypatch.setattr(
-        "bot.infra.tankpit.proxy.service.WSAddon", lambda *a, **k: object()
     )
     svc = ProxyService(port=9000)
     # stopped ⇒ plain “stopped”
