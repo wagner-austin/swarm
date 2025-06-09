@@ -1,6 +1,5 @@
 # core/api/__init__.py
-from .browser_service import BrowserService
+# Exports from this package can be defined here if needed in the future.
+# For now, sub-packages like 'browser' manage their own exports.
 
-__all__ = [
-    "BrowserService",
-]
+__all__: list[str] = []

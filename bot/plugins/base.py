@@ -1,10 +1,17 @@
 from discord.ext import commands
 
 
-class BaseCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        super().__init__()
-        self.bot = bot
+from .base_di import BaseDIClientCog  # ← add import
+
+
+class BaseCog(BaseDIClientCog):  # now inherits the DI logic
+    """
+    Existing convenience base‑class now also provides DI resolution via
+    :class:`BaseDIClientCog`.  Nothing else changes.
+    """
+
+    def __init__(self, bot: commands.Bot) -> None:
+        super().__init__(bot)  # BaseDIClientCog takes care of self.bot
         # Ensure commands are properly associated with this cog instance
         # It's generally good practice for discord.py to handle this,
         # but explicitly setting can resolve some edge cases or ensure consistency
@@ -15,5 +22,5 @@ class BaseCog(commands.Cog):
         # For standard method-based commands, this might be redundant but harmless.
         # `walk_commands()` yields every command registered to this cog,
         # recursively, so sub-commands inside groups are included.
-        for cmd in self.walk_commands():
+        for cmd in self.walk_commands():  # unchanged
             cmd.cog = self

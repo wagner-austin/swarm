@@ -5,7 +5,6 @@ Initializes logging and starts the bot application.
 """
 
 from bot.core.logger_setup import setup_logging
-from bot.core.startup import startup
 from bot.core.discord_runner import run_bot  # Import run_bot directly
 import asyncio
 
@@ -17,8 +16,7 @@ async def main() -> None:
     """
     setup_logging()
     try:
-        proxy_service_instance = await startup()
-        await run_bot(proxy_service_instance)  # Pass the instance to run_bot
+        await run_bot()  # run_bot now handles service initialization internally
     except (KeyboardInterrupt, asyncio.CancelledError):
         # Already logged inside run_bot; just make sure we exit quietly.
         pass
