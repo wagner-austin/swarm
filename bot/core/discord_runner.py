@@ -1,4 +1,5 @@
 # src/bot_core/discord_runner.py
+from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
@@ -7,11 +8,8 @@ from discord import Intents
 from discord.ext import commands
 
 from bot.core.settings import settings
-from bot.netproxy.service import ProxyService
-from bot.core.api.browser_service import BrowserService  # Added for DI
-from bot.plugins.commands.browser import (
-    setup as browser_cog_setup,
-)  # Added for manual loading
+from bot.netproxy.service import ProxyService  # For type hinting MyBot.proxy_service
+from bot.core.containers import Container
 import os
 import asyncio
 
@@ -43,7 +41,7 @@ def _discover_extensions() -> list[str]:
     return extensions
 
 
-async def run_bot(proxy_service: ProxyService | None) -> None:
+async def run_bot() -> None:
     """
     Creates, configures, and starts the Discord bot.
     Handles bot-specific lifecycle and error events.
@@ -52,26 +50,80 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
         logger.critical("DISCORD_TOKEN is not set. Bot cannot start.")
         return
 
+    # Initialize DI container
+    container = Container()
+    # Replace default Settings() singleton with the already-initialised one
+    container.config.override(settings)
+
+    # ------------------------------------------------------------------+
+    # Dependency-Injection wiring                                       |
+    # ------------------------------------------------------------------+
+    #
+    #  1.  Import *bot.plugins* once – this gives us the package object
+    #      that dependency-injector can hook into.
+    #  2.  `packages=[bot.plugins]` installs an import-hook: every module
+    #      that is imported *under that package* afterwards is wired
+    #      automatically.  Perfect for Discord’s lazy extension loader.
+    #
+    #  3.  Add `modules=[__name__]` so the runner itself can request
+    #      injected services (e.g. in future health checks).
+    #
+    # ------------------------------------------------------------------+
+    # 1. Extension discovery & *pre-import*                            |
+    # ------------------------------------------------------------------+
+    discovered_extensions = _discover_extensions()
+
+    # Pre-import every commands module so the container can wire them
+    # **before** Discord calls their `setup()` and instantiates the cogs.
+    import importlib
+
+    modules_to_wire = []
+    for ext in discovered_extensions:
+        modules_to_wire.append(importlib.import_module(ext))
+
+    # ------------------------------------------------------------------+
+    # 2. Dependency-Injection wiring                                    |
+    # ------------------------------------------------------------------+
+    container.wire(
+        modules=[__name__, *modules_to_wire],  # runner + all command modules
+    )
+
+    # Start ProxyService if enabled
+    ps_instance: ProxyService | None = None
+    if container.config().proxy_enabled:
+        logger.info("Proxy is enabled in settings. Attempting to start ProxyService...")
+        try:
+            ps_instance = (
+                container.proxy_service()
+            )  # DI will provide the configured instance
+            await ps_instance.start()
+            logger.info(f"ProxyService started successfully on port {ps_instance.port}")
+        except Exception as e:
+            logger.exception(
+                "Failed to start ProxyService. It will be unavailable.", exc_info=e
+            )
+            ps_instance = None  # Ensure it's None if startup failed
+    else:
+        logger.info("Proxy is disabled in settings.")
+
     intents = Intents.default()
     # prefix is ignored but must exist → mention-only
     # No legacy prefixes – users interact via slash menu or @mention.
     bot = MyBot(command_prefix=None, intents=intents)
-    if proxy_service:
-        bot.proxy_service = proxy_service  # Store the proxy service instance on the bot
+    # Make the singleton container reachable everywhere
+    bot.container = container  # type: ignore[attr-defined]
+    if ps_instance and ps_instance.is_running():
+        bot.proxy_service = (
+            ps_instance  # Store the running proxy service instance on the bot
+        )
+    else:
+        bot.proxy_service = None
 
-    discovered_extensions = _discover_extensions()
-    manually_loaded_extensions = {
-        "bot.plugins.commands.browser",
-        "bot.plugins.commands.proxy",
-    }
-
+    # ------------------------------------------------------------------+
+    # 3. Load extensions - the modules are already imported and wired   |
+    # ------------------------------------------------------------------+
+    logger.info("Loading extensions...")
     for ext_name in discovered_extensions:
-        if ext_name in manually_loaded_extensions:
-            logger.info(
-                f"Skipping automatic load for {ext_name}; will be loaded manually with DI."
-            )
-            continue
-
         try:
             await bot.load_extension(ext_name)
             logger.info(f"Successfully loaded extension: {ext_name}")
@@ -91,49 +143,7 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
                 f"An unexpected error occurred while loading extension {ext_name}",
                 exc_info=e,
             )
-
-    if proxy_service:
-        try:
-            from bot.plugins.commands.proxy import setup as proxy_setup_func
-
-            await proxy_setup_func(bot, proxy_service=proxy_service)
-            logger.info(
-                "Successfully loaded 'bot.plugins.commands.proxy' with ProxyService injection."
-            )
-        except ImportError:
-            logger.error(
-                "Failed to import 'bot.plugins.commands.proxy'. Ensure it exists and is importable."
-            )
-        except AttributeError:
-            logger.error("'setup' function not found in 'bot.plugins.commands.proxy'.")
-        except Exception as e:
-            logger.exception(
-                "Failed to manually load 'bot.plugins.commands.proxy'", exc_info=e
-            )
-    elif os.environ.get("FAST_EXIT_FOR_TESTS") != "1":
-        logger.warning(
-            "ProxyService is not available. Skipping load of 'bot.plugins.commands.proxy'."
-        )
-
-    # Manually load the Browser cog with BrowserService dependency injection
-    try:
-        browser_service_instance = BrowserService()
-        await browser_cog_setup(bot, browser_service_instance)
-        logger.info(
-            "Successfully loaded 'bot.plugins.commands.browser' with BrowserService injection."
-        )
-    except ImportError:
-        logger.error(
-            "Failed to import 'bot.plugins.commands.browser' or 'BrowserService'. Ensure they exist and are importable."
-        )
-    except AttributeError as e:
-        logger.error(
-            f"'setup' function not found in 'bot.plugins.commands.browser' or BrowserService init failed: {e}"
-        )
-    except Exception as e:
-        logger.exception(
-            "Failed to manually load 'bot.plugins.commands.browser'", exc_info=e
-        )
+    logger.info("Finished loading extensions.")
 
     # ------------------------------------------------------------
     # Event Handlers                                               #
@@ -185,12 +195,34 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
     async def on_app_command_error(
         interaction: discord.Interaction, error: discord.app_commands.AppCommandError
     ) -> None:
+        from discord.app_commands import (
+            CheckFailure,
+        )  # Import moved inside for locality
+
+        if isinstance(error, CheckFailure):
+            # No permission – be nice but firm
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "🚫 You don’t have permission to use that command.",
+                    ephemeral=True,
+                )
+            return
+
         if isinstance(error, discord.app_commands.CommandOnCooldown):
             await interaction.response.send_message(
                 f"⏱️ Cooldown – try again in {error.retry_after:.1f}s", ephemeral=True
             )
             return
-        raise error
+
+        # If the error is not handled above, log it and inform the user generically.
+        logger.error(f"Unhandled app command error: {error}", exc_info=error)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "⚙️ An unexpected error occurred. Please try again later.",
+                ephemeral=True,
+            )
+        # No `raise error` here to prevent scary tracebacks in console for unhandled ones,
+        # as long as we've informed the user and logged it.
 
     @bot.event
     async def on_message(message: discord.Message) -> None:  # noqa: D401
@@ -216,20 +248,21 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
             "An unexpected error occurred in the bot's main run loop:", exc_info=e
         )
     finally:
-        # Attempt to stop the proxy service first
-        if (
-            hasattr(bot, "proxy_service")
-            and bot.proxy_service
-            and hasattr(bot.proxy_service, "stop")
-        ):
-            logger.info("Attempting to stop ProxyService...")
+        # Attempt to stop services from DI container
+        logger.info("Attempting to gracefully shutdown services...")
+
+        # SessionManager is shut down by its cog's cog_unload method.
+
+        # Shutdown ProxyService (if it was started and assigned to bot.proxy_service)
+        if bot.proxy_service and hasattr(bot.proxy_service, "stop"):
+            logger.info("Shutting down ProxyService...")
             try:
-                await bot.proxy_service.stop()  # Assuming stop() is async
-                logger.info("ProxyService stopped.")
+                await bot.proxy_service.stop()
+                logger.info("ProxyService shutdown successfully.")
             except Exception as e:
-                logger.exception(
-                    "Error stopping ProxyService during shutdown:", exc_info=e
-                )
+                logger.exception("Error during ProxyService shutdown:", exc_info=e)
+
+        logger.info("Finished service shutdown attempts.")
 
         # Then close the bot connection
         if bot and not bot.is_closed():  # bot is defined in this scope

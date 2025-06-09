@@ -98,10 +98,12 @@ class StubInteraction(AsyncMock):
 
         # Convenience for assertions
         self.sent_messages: List[str] = []
+        # Also set sent_messages on followup for tests expecting it there
+        self.followup.sent_messages = self.sent_messages
 
         # Capture content of follow-ups
         async def _capture(*_args: Any, **kw: Any) -> None:
-            content = kw.get("content") or (_args[1] if len(_args) > 1 else "")
+            content = kw.get("content") or (_args[0] if _args else "")
             if isinstance(content, str):
                 self.sent_messages.append(content)
 

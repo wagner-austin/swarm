@@ -62,5 +62,6 @@ async def test_bot_startup_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
     # ------------------------------------------------------------------
     # 4.  Finally exercise the runner.  If any step raises, pytest will fail.
     # ------------------------------------------------------------------
-    svc = ProxyService(port=9999)
-    await run_bot(svc)
+    # ProxyService is now managed by the DI container within run_bot.
+    # The monkeypatches for ProxyService.start/stop will affect the instance created by the container.
+    await run_bot()

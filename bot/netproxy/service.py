@@ -51,12 +51,10 @@ class ProxyService:
     async def start(self) -> str:
         if self._dump:
             return f"Proxy already running on :{self.port}"
-        # ------------------------------------------------------------------+
-        # 1) Pick a free port (Windows may keep the old one in TIME_WAIT)   |
-        # ------------------------------------------------------------------+
-        from bot.utils.net import pick_free_port  # Import from utils
+        # Always delegate to utils.net – single source of truth
+        from bot.utils.net import pick_free_port
 
-        self.port = await pick_free_port(self.port)  # Use the new helper
+        self.port = await pick_free_port(self.port)
 
         opts = options.Options(
             listen_host="127.0.0.1", listen_port=self.port, confdir=str(self.certdir)

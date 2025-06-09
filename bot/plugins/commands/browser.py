@@ -1,8 +1,11 @@
 import logging
+from bot.plugins.base_di import BaseDIClientCog  # <- move here
 import discord
 from discord import app_commands
-from discord.ext import commands  # For commands.Bot, commands.GroupCog
-from bot.core.api.browser_service import BrowserService
+from discord.ext import commands
+
+from bot.core.api.browser.session_manager import SessionManager
+from bot.core.api.browser.actions import BrowserActions
 from bot.core.api.browser.exceptions import InvalidURLError, NavigationError
 
 __all__ = ["Browser"]
@@ -15,26 +18,32 @@ USAGE: str = "Automate an on-device Chrome browser."
 _ENTRY_CMD = "browser"
 
 
-class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
-    def __init__(self, bot: commands.Bot, browser_service: BrowserService) -> None:
-        super().__init__()
-        self.bot = bot
-        self._browser = browser_service
+# --------------------------------------------------
+class Browser(
+    BaseDIClientCog, commands.GroupCog, group_name="browser", group_description=USAGE
+):  # noqa: E501
+    def __init__(self, bot: commands.Bot) -> None:
+        commands.GroupCog.__init__(self)  # GroupCog init
+        BaseDIClientCog.__init__(self, bot)  # DI resolution
+
+        self._session_manager: SessionManager = self.container.session_manager()
+        self._browser_actions: BrowserActions = self.container.browser_actions()
 
     async def cog_unload(
         self,
     ) -> None:  # Should be async as per discord.py Cog superclass
-        if self._browser:
-            logger.info("Browser cog unloading, stopping browser service...")
-            await self._browser.stop()
-            logger.info("Browser service stopped during cog unload.")
+        if self._session_manager:
+            logger.info("Browser cog unloading, stopping browser session manager...")
+            await self._session_manager.stop()
+            logger.info("Browser session manager stopped during cog unload.")
 
     # ------------------------------------------------------------------+
     # /browser start
     # ------------------------------------------------------------------+
     @app_commands.command(name="start", description="Launch Chrome, optionally at URL")
     @app_commands.describe(
-        url="URL to open (optional)", visible="Show window instead of headless"
+        url="URL to open (optional)",
+        visible="Show window instead of headless for this launch",
     )
     async def start(  # noqa: D401 (imperative mood)
         self,
@@ -42,10 +51,37 @@ class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
         url: str | None = None,
         visible: bool = False,
     ) -> None:
-        assert self._browser is not None, "Browser service is not initialized."
+        assert self._session_manager is not None, (
+            "Browser session manager is not initialized."
+        )
         await interaction.response.defer(thinking=True)
-        msg = await self._browser.start(url=url, headless=not visible)
-        await interaction.followup.send(msg)
+        start_msg = await self._session_manager.start(headless=not visible)
+        final_msg = start_msg
+        if url:
+            try:
+                logger.info(
+                    f"Initial start message: {start_msg}. Now opening URL: {url}"
+                )
+                open_msg = await self._browser_actions.open(url)
+                final_msg = f"{start_msg}\n{open_msg}".strip()
+            except (InvalidURLError, NavigationError) as e:
+                logger.error(
+                    f"Error opening URL '{url}' after start: {e}", exc_info=True
+                )
+                await interaction.followup.send(
+                    f"{start_msg}\n⚠️ Error opening URL: {e}"
+                )
+                return
+            except Exception as e:  # Catch any other exception from open
+                logger.error(
+                    f"Unexpected error opening URL '{url}' after start: {e}",
+                    exc_info=True,
+                )
+                await interaction.followup.send(
+                    f"{start_msg}\n⚠️ Unexpected error opening URL: {e}"
+                )
+                return
+        await interaction.followup.send(final_msg)
 
     # ------------------------------------------------------------------+
     # /browser open
@@ -53,31 +89,34 @@ class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
     @app_commands.command(
         name="open", description="Navigate to a URL in the active session"
     )
-    @app_commands.describe(
-        url="URL to navigate to",
-        visible="Show window instead of headless for this and future actions",
-    )
+    @app_commands.describe(url="URL to navigate to")
     async def open(
         self,
         interaction: discord.Interaction,
         url: str,
-        visible: bool = False,
     ) -> None:
-        if visible:  # remember GUI preference
-            self._browser.set_preferred_headless(False)
-        assert self._browser is not None, "Browser service is not initialized."
+        assert self._browser_actions is not None, "Browser actions are not initialized."
+        # Note: The 'visible' parameter's previous effect of setting a persistent headless preference
+        # via `set_preferred_headless` is removed as SessionManager doesn't have this method in PR1 scope.
+        # If the session wasn't alive, _ensure_alive_and_ready would have started it.
+        # Visibility is determined by how the session was last started.
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
-            msg = await self._browser.open(url)
+            open_msg = await self._browser_actions.open(url)
         except InvalidURLError as e:
-            # tell the user instead of raising into the logs / tests
-            await interaction.followup.send(str(e))
+            await interaction.followup.send(content=str(e))
             return
         except NavigationError as e:
-            await interaction.followup.send(f"⚠️ {e}")
+            await interaction.followup.send(content=f"⚠️ Navigation failed: {e}")
+            return
+        except Exception as e:  # Catch any other unexpected error from open
+            logger.error(f"Unexpected error during open: {e}", exc_info=True)
+            await interaction.followup.send(
+                content=f"⚙️ An unexpected error occurred: {e}"
+            )
             return
 
-        await interaction.followup.send(msg)
+        await interaction.followup.send(content=open_msg)
 
     # ------------------------------------------------------------------+
     # /browser restart
@@ -89,11 +128,15 @@ class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
         interaction: discord.Interaction,
         visible: bool = False,
     ) -> None:
-        assert self._browser is not None, "Browser service is not initialized."
+        assert self._session_manager is not None, (
+            "Browser session manager is not initialized."
+        )
         await interaction.response.defer(thinking=True)
         headless_val = not visible
-        await self._browser.stop()  # Stop the current session
-        msg = await self._browser.start(headless=headless_val)  # Start a new one
+        await self._session_manager.stop()  # Stop the current session
+        msg = await self._session_manager.start(
+            headless=headless_val
+        )  # Start a new one
         await interaction.followup.send(msg)
 
     # ------------------------------------------------------------------+
@@ -103,10 +146,10 @@ class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
         name="screenshot", description="Take a screenshot of the current view"
     )
     async def screenshot(self, interaction: discord.Interaction) -> None:
-        assert self._browser is not None, "Browser service is not initialized."
+        assert self._browser_actions is not None, "Browser actions are not initialized."
         await interaction.response.defer(thinking=True)
 
-        filepath, msg = await self._browser.screenshot()
+        filepath, msg = await self._browser_actions.screenshot()
 
         if not filepath:
             await interaction.followup.send(msg)
@@ -137,9 +180,11 @@ class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
     # ------------------------------------------------------------------+
     @app_commands.command(name="close", description="Close the browser session")
     async def close(self, interaction: discord.Interaction) -> None:
-        assert self._browser is not None, "Browser service is not initialized."
+        assert self._session_manager is not None, (
+            "Browser session manager is not initialized."
+        )
         await interaction.response.defer(thinking=True, ephemeral=True)
-        msg = await self._browser.stop()
+        msg = await self._session_manager.stop()
         await interaction.followup.send(msg)
 
     # ------------------------------------------------------------------+
@@ -147,18 +192,37 @@ class Browser(commands.GroupCog, group_name="browser", group_description=USAGE):
     # ------------------------------------------------------------------+
     @app_commands.command(name="status", description="Report browser session status")
     async def status(self, interaction: discord.Interaction) -> None:
-        assert self._browser is not None, "Browser service is not initialized."
+        assert self._session_manager is not None, (
+            "Browser session manager is not initialized."
+        )
         await interaction.response.defer(thinking=True, ephemeral=True)
-        await self._browser._ensure_alive()
-        await interaction.followup.send(self._browser.status())
+
+        # Only auto-restart if a session was ever started and then died.
+        if self._session_manager.has_session():
+            try:
+                await self._session_manager._ensure_alive()
+            except Exception:
+                # If the window was killed, _ensure_alive() may throw or fail;
+                # we swallow it so status() can report “dead” or “restarted” state.
+                pass
+
+        # Now report status; if no session exists, this will say “not running”
+        try:
+            status_msg = self._session_manager.status()
+        except Exception as e:
+            logger.error(f"Error getting browser status: {e}", exc_info=True)
+            status_msg = f"⚠️ Error retrieving browser status: {e}"
+
+        await interaction.followup.send(status_msg)
 
 
-async def setup(bot: commands.Bot, browser_service_instance: BrowserService) -> None:
+async def setup(bot: commands.Bot) -> None:
     """Setup function for the browser plugin.
 
     This is called by the bot when loading the extension.
+    Dependencies are injected into the cog via the DI container.
     """
-    await bot.add_cog(Browser(bot, browser_service_instance))
+    await bot.add_cog(Browser(bot))
 
 
 __all__ = ["Browser"]
