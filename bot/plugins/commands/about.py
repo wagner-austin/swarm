@@ -1,6 +1,23 @@
 import discord
+import tomllib
+from pathlib import Path
 from discord import app_commands
 from discord.ext import commands
+
+
+def get_bot_version() -> str:
+    """Get the bot version from pyproject.toml."""
+    try:
+        project_root = Path(__file__).parents[
+            3
+        ]  # Go up three directories to project root
+        pyproject_path = project_root / "pyproject.toml"
+
+        with open(pyproject_path, "rb") as f:
+            pyproject_data = tomllib.load(f)
+            return str(pyproject_data["project"]["version"])
+    except (FileNotFoundError, KeyError, tomllib.TOMLDecodeError):
+        return "unknown"
 
 
 class About(commands.Cog):
@@ -14,7 +31,7 @@ class About(commands.Cog):
         assert self.bot.user is not None  # narrow Optional for mypy
         embed = discord.Embed(
             title=f"{self.bot.user.name} - About",
-            description=f"A helpful Discord bot. Version: 1.0.0\nRunning on discord.py {discord.__version__}.",
+            description=f"A helpful Discord bot. Version: {get_bot_version()}\nRunning on discord.py {discord.__version__}.",
             color=discord.Color.blue(),
         )
         if self.bot.user.avatar:
