@@ -1,4 +1,7 @@
-__all__: list[str] = ["MockCtx", "MockMessage", "StubInteraction", "DummyDump"]
+"""
+Mock objects used in tests.
+These are intentionally separated from production code to avoid accidental imports.
+"""
 
 from typing import Any, List
 import types
