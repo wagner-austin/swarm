@@ -28,6 +28,16 @@ class Status(commands.Cog):
         uptime_hms = metrics.format_hms(s["uptime_s"])
         uptime_hrs = READABLE.format(s["uptime_s"] / 3600)
 
+        # Dynamic counters
+        latency_ms = int(self.bot.latency * 1000)  # round ms
+        cpu, mem = metrics.get_cpu_mem()
+        guilds = len(self.bot.guilds)
+        shard_info = (
+            f"{self.bot.shard_id + 1}/{self.bot.shard_count}"
+            if self.bot.shard_count and self.bot.shard_id is not None
+            else "—"
+        )
+
         # Create one tidy embed instead of a plain string wall
         embed = discord.Embed(
             title="Bot status",
@@ -44,7 +54,29 @@ class Status(commands.Cog):
             inline=False,
         )
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed.add_field(
+            name="Runtime",
+            value=f"🖥️ {cpu} CPU{SPACER}💾 {mem}",
+            inline=False,
+        )
+        embed.add_field(
+            name="Discord",
+            value=(
+                f"⏰ {latency_ms} ms latency\n🌐 {guilds} guilds\n🔀 Shard {shard_info}"
+            ),
+            inline=False,
+        )
+
+        # 1) Acknowledge if we haven’t already (no harm if we’re late)
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException:
+                # If the gateway beat us by milliseconds, ignore the race
+                pass
+
+        # 2) ALWAYS deliver via follow-up – never risks a double-ack
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

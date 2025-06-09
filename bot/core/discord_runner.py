@@ -60,7 +60,18 @@ async def run_bot(proxy_service: ProxyService | None) -> None:
         bot.proxy_service = proxy_service  # Store the proxy service instance on the bot
 
     discovered_extensions = _discover_extensions()
+    manually_loaded_extensions = {
+        "bot.plugins.commands.browser",
+        "bot.plugins.commands.proxy",
+    }
+
     for ext_name in discovered_extensions:
+        if ext_name in manually_loaded_extensions:
+            logger.info(
+                f"Skipping automatic load for {ext_name}; will be loaded manually with DI."
+            )
+            continue
+
         try:
             await bot.load_extension(ext_name)
             logger.info(f"Successfully loaded extension: {ext_name}")
