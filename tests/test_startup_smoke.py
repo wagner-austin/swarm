@@ -5,7 +5,7 @@ import pytest
 from typing import Any
 
 # ── internal entry-points we want to exercise ─────────────────────────
-from bot.core.discord_runner import run_bot
+from bot.core.launcher import launch_bot
 
 
 @pytest.mark.asyncio
@@ -33,7 +33,7 @@ async def test_bot_startup_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
         **kwargs: Any,
     ) -> None:  # noqa: D401
         # Immediately drop back into the caller the same way a Ctrl-C would,
-        # which run_bot already handles gracefully.
+        # which the lifecycle manager already handles gracefully.
         raise KeyboardInterrupt
 
     async def fake_bot_close(self: Any) -> None:  # noqa: D401
@@ -64,4 +64,4 @@ async def test_bot_startup_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
     # ------------------------------------------------------------------
     # ProxyService is now managed by the DI container within run_bot.
     # The monkeypatches for ProxyService.start/stop will affect the instance created by the container.
-    await run_bot()
+    await launch_bot()
