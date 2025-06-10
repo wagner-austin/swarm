@@ -5,8 +5,7 @@ Initializes logging and starts the bot application.
 """
 
 from bot.core.logger_setup import setup_logging
-from bot.core.discord_runner import run_bot  # Import run_bot directly
-import asyncio
+from bot.core.launcher import launch_bot  # Import launch_bot from new launcher
 
 
 async def main() -> None:
@@ -15,11 +14,8 @@ async def main() -> None:
     Configures logging and delegates to the startup orchestrator.
     """
     setup_logging()
-    try:
-        await run_bot()  # run_bot now handles service initialization internally
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        # Already logged inside run_bot; just make sure we exit quietly.
-        pass
+    # The new launch_bot and BotLifecycle handle KeyboardInterrupt/CancelledError internally.
+    await launch_bot()
 
 
 # If this script were to be run directly (e.g. `python src/bot_core/main.py`),
