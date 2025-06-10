@@ -66,6 +66,22 @@ class Settings(BaseSettings):
     # --- URL guard‑rails ---
     allowed_hosts: list[str] = []  # e.g. ["github.com", "docs.python.org"]
 
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def _split_csv(cls, v: Any) -> list[str]:  # noqa: D401
+        """
+        Allow simple comma‑separated strings in .env:
+
+            ALLOWED_HOSTS=github.com,docs.python.org
+        """
+        if isinstance(v, str):
+            return [h.strip() for h in v.split(",") if h.strip()]
+        if isinstance(v, list):
+            # Ensure all items are strings
+            return [str(item) for item in v]
+        # Default to empty list for unexpected types
+        return []
+
     model_config = {"env_file": ".env", "case_sensitive": False, "extra": "allow"}
 
     @field_validator("discord_token")

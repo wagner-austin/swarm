@@ -123,6 +123,7 @@ class WebRunner:
         # so nothing extra gets launched.
         eng._playwright = self._active_runners[channel_id].playwright
         eng._browser = browser
+        eng._context = context  # <‑‑ keep reference for _ensure_page()
         eng._page = await context.new_page()
         log.info(f"Using pre-created Playwright objects for channel {channel_id}")
         try:
