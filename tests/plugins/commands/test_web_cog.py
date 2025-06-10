@@ -71,14 +71,14 @@ async def test_web_cog_start_command_invalid_url(
     MockWebRunner.return_value = mock_runner_instance
 
     cog = WebCog(mock_bot)
-    invalid_url = "example.com"  # Missing scheme
+    invalid_url = "notaurl"  # Not a valid URL format
 
     # Act
     await cast(Any, cog.start.callback)(cog, mock_interaction, invalid_url)
 
     # Assert
     mock_interaction.response.send_message.assert_awaited_once_with(
-        f"❌ Invalid URL: '{invalid_url}' does not look like an external web URL. Please include a scheme (e.g., http:// or https://).",
+        f"❌ Invalid URL: '{invalid_url}' does not look like a valid host. Please include a scheme (e.g., http:// or https://).",
         ephemeral=True,
     )
     mock_runner_instance.enqueue.assert_not_called()

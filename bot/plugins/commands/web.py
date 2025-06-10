@@ -3,143 +3,130 @@ from __future__ import annotations
 import logging
 import asyncio
 import tempfile
+import time
 from pathlib import Path
+import functools
+from typing import Any, Callable, TypeVar, Optional, Coroutine, ParamSpec
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from typing import Any, Optional
 from bot.core.settings import settings
 
 from bot.core.api.browser.runner import WebRunner
 from bot.core.browser_manager import browser_manager
 from discord.ext.commands import Bot
 from bot.utils.urls import validate_and_normalise_web_url
-from bot.core.api.browser.exceptions import (
-    InvalidURLError,
-)
 
 
 # --- validation helpers for this cog -------------------------------------
-def _normalise_url_or_raise(raw: str) -> str:
-    # Reject strings that do not explicitly specify a scheme
-    # – this is what the test‐suite expects (“example.com” must be invalid).
-    if "://" not in raw:
-        raise InvalidURLError(f"'{raw}' does not look like an external web URL")
-
-    try:
-        return validate_and_normalise_web_url(raw)
-    except ValueError as exc:
-        raise InvalidURLError(str(exc)) from None
-
-
 log = logging.getLogger(__name__)
 
+# Type parameters for decorator function signatures
+P = ParamSpec("P")  # for parameters
+T = TypeVar("T")  # for return value
 
-class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
-    # ------------- helper ---------------------------------------------------
-    async def _check_mutation_allowed(self, interaction: discord.Interaction) -> bool:
-        """Return True if the caller may execute state‑changing actions."""
+# Command result type
+CommandResult = tuple[str, tuple[Any, ...], str]
+
+
+# --- Helper decorators for browser commands ---
+def read_only_guard() -> Callable[[Callable[..., Any]], Any]:
+    """Check decorator that allows commands to run only if not in read-only mode or if user is admin/owner."""
+
+    async def predicate(interaction: discord.Interaction) -> bool:
         if not settings.browser.read_only:
-            return True
-        # owners & admins bypass read‑only
-        is_owner = await self.bot.is_owner(interaction.user)
+            return True  # Not in read-only mode, allow anyone
+
+        # In read-only mode, check if user is owner or admin
+        # We need to cast client to Bot (or commands.Bot) to access is_owner
+        client = interaction.client
+        is_owner = False
+        if isinstance(client, commands.Bot):
+            is_owner = await client.is_owner(interaction.user)
 
         has_admin = False
-        if isinstance(interaction.user, discord.Member):  # Check if user is a Member
-            # Now it's safe to access guild_permissions
-            if (
-                interaction.user.guild_permissions
-            ):  # Ensure guild_permissions is not None
-                has_admin = interaction.user.guild_permissions.administrator
+        if (
+            isinstance(interaction.user, discord.Member)
+            and interaction.user.guild_permissions
+        ):
+            has_admin = interaction.user.guild_permissions.administrator
 
         if is_owner or has_admin:
             return True
+
+        # User doesn't have permission, send error message
         await interaction.response.send_message(
-            "🔒 The browser is currently in **read‑only** mode; mutating actions are disabled.",
+            "🔒 The browser is currently in **read-only** mode; mutating actions are disabled.",
             ephemeral=True,
         )
         return False
 
-    def __init__(self, bot: Bot) -> None:
-        self.bot = bot
-        self._runner = WebRunner()
+    return app_commands.check(predicate)
 
-    # ------------------------------------------------------------------+
-    #  shared helper – one place for uniform defer/queue/error handling  +
-    # ------------------------------------------------------------------+
-    async def _run(
-        self,
-        interaction: discord.Interaction,
-        op: str,
-        *op_args: Any,
-        success: str,
-        defer_ephemeral: bool = False,
-    ) -> None:
-        chan = await self._ensure_channel_id(interaction)
-        if chan is None:
-            return
-        if defer_ephemeral:
-            await interaction.response.defer(thinking=True, ephemeral=True)
-        else:
-            await interaction.response.defer(thinking=True)
-        try:
-            await self._runner.enqueue(chan, op, *op_args)
-            if success:  # Only send follow-up if success message is not empty
-                await interaction.followup.send(success)
-        except asyncio.QueueFull:
-            await interaction.followup.send(
-                "❌ The browser command queue is full. Please try again later.",
-                ephemeral=True,
-            )
-        except Exception as exc:
-            await interaction.followup.send(
-                f"❌ {type(exc).__name__}: {exc}", ephemeral=True
-            )
 
-    async def _ensure_channel_id(self, interaction: discord.Interaction) -> int | None:
-        if interaction.channel_id is None:
-            await interaction.response.send_message(
-                "This command must be used in a channel context where a channel ID is available.",
-                ephemeral=True,
-            )
-            return None
-        return interaction.channel_id
+def browser_command(
+    queued: bool = True,
+    allow_mutation: bool = False,
+    defer_ephemeral: bool = False,
+) -> Callable[[Callable[..., Coroutine[Any, Any, CommandResult | None]]], Any]:
+    """Decorator that handles common boilerplate for browser commands.
 
-    @app_commands.command(
-        name="start", description="Start a browser session with an optional URL."
-    )
-    @app_commands.describe(url="Optional URL to navigate to.")
-    async def start(
-        self, interaction: discord.Interaction, url: Optional[str] = None
-    ) -> None:
-        """Opens a new browser page and optionally navigates to the specified URL."""
-        if url:
-            try:
-                processed_url = _normalise_url_or_raise(url)
-                await self._run(
-                    interaction,
-                    "goto",
-                    processed_url,
-                    success=f"🟢 Started browser and navigated to **{processed_url}**",
-                )
-            except InvalidURLError as e:
+    Args:
+        queued: Whether the command should be queued through the WebRunner
+        allow_mutation: Whether the command mutates browser state (will apply read_only check)
+        defer_ephemeral: Whether the defer response should be ephemeral
+    """
+
+    def decorator(
+        func: Callable[
+            [Any, discord.Interaction, Any, Any],
+            Coroutine[Any, Any, CommandResult | None],
+        ],
+    ) -> Callable[[Any, discord.Interaction, Any, Any], Coroutine[Any, Any, None]]:
+        # The outermost function that Discord registers **must** carry the check,
+        # otherwise the predicate is never evaluated.
+
+        @functools.wraps(func)
+        async def wrapper(
+            self: Any, interaction: discord.Interaction, *args: Any, **kwargs: Any
+        ) -> None:
+            # Get channel ID
+            if interaction.channel_id is None:
                 await interaction.response.send_message(
-                    f"❌ Invalid URL: {e}. Please include a scheme (e.g., http:// or https://).",
+                    "This command must be used in a channel context where a channel ID is available.",
                     ephemeral=True,
                 )
-        else:
-            # Just start the browser without navigating anywhere specific
-            chan = await self._ensure_channel_id(interaction)
-            if chan is None:
                 return
 
-            await interaction.response.defer(thinking=True)
+            channel_id = interaction.channel_id
+
+            # Get operation details from the command function
+            result = await func(self, interaction, *args, **kwargs)
+
+            # By returning None, we signal that this command doesn't need followup handling
+            if result is None:
+                return
+
+            # Unpack operation details
+            op, op_args, success_msg = result
+
+            # Defer the response
+            if defer_ephemeral:
+                await interaction.response.defer(thinking=True, ephemeral=True)
+            else:
+                await interaction.response.defer(thinking=True)
+
+            # If not queued, just return (the command handled everything internally)
+            if not queued:
+                return
+
+            # Queue the operation
             try:
-                # Just trigger a health_check to ensure the browser starts
-                await self._runner.enqueue(chan, "health_check")
-                await interaction.followup.send("🟢 Browser started successfully.")
+                await self._runner.enqueue(channel_id, op, *op_args)
+                if success_msg:
+                    await interaction.followup.send(success_msg)
             except asyncio.QueueFull:
                 await interaction.followup.send(
                     "❌ The browser command queue is full. Please try again later.",
@@ -149,92 +136,112 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 await interaction.followup.send(
                     f"❌ {type(exc).__name__}: {exc}", ephemeral=True
                 )
+            return
+
+        # Attach the guard at the very end so it wraps the *wrapper* that Discord sees
+        return read_only_guard()(wrapper) if allow_mutation else wrapper
+
+    return decorator
+
+
+class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
+    def __init__(self, bot: Bot) -> None:
+        self.bot = bot
+        self._runner = WebRunner()
+
+    @app_commands.command(
+        name="start", description="Start a browser session with an optional URL."
+    )
+    @app_commands.describe(url="Optional URL to navigate to.")
+    @browser_command(allow_mutation=True)
+    async def start(
+        self, interaction: discord.Interaction, url: Optional[str] = None
+    ) -> CommandResult | None:
+        """Opens a new browser page and optionally navigates to the specified URL."""
+        if url:
+            try:
+                processed_url = validate_and_normalise_web_url(url)
+                return (
+                    "goto",
+                    (processed_url,),
+                    f"🟢 Started browser and navigated to **{processed_url}**",
+                )
+            except ValueError as e:
+                await interaction.response.send_message(
+                    f"❌ Invalid URL: {e}. Please include a scheme (e.g., http:// or https://).",
+                    ephemeral=True,
+                )
+                return None
+        else:
+            # Just start the browser without navigating anywhere specific
+            return ("health_check", (), "🟢 Browser started successfully.")
 
     @app_commands.command(
         name="open", description="Navigate to the specified URL in the current browser."
     )
     @app_commands.describe(url="The URL to navigate to.")
-    async def open(self, interaction: discord.Interaction, url: str) -> None:
+    @browser_command(allow_mutation=True)
+    async def open(
+        self, interaction: discord.Interaction, url: str
+    ) -> CommandResult | None:
         """Navigates the current browser to the specified URL."""
         try:
-            processed_url = _normalise_url_or_raise(url)
-        except InvalidURLError as e:
+            processed_url = validate_and_normalise_web_url(url)
+            return ("goto", (processed_url,), f"🟢 Navigated to **{processed_url}**")
+        except ValueError as e:
             await interaction.response.send_message(
                 f"❌ Invalid URL: {e}. Please include a scheme (e.g., http:// or https://).",
                 ephemeral=True,
             )
-            return
-
-        await self._run(
-            interaction,
-            "goto",
-            processed_url,
-            success=f"🟢 Navigated to **{processed_url}**",
-        )
+            return None
 
     @app_commands.command(
         name="click", description="Click an element matching the CSS selector."
     )
     @app_commands.describe(selector="The CSS selector of the element to click.")
-    async def click(self, interaction: discord.Interaction, selector: str) -> None:
+    @browser_command(allow_mutation=True, defer_ephemeral=True)
+    async def click(
+        self, interaction: discord.Interaction, selector: str
+    ) -> CommandResult:
         """Clicks an element on the current page."""
-        if not await self._check_mutation_allowed(interaction):
-            return
-
-        await self._run(
-            interaction,
-            "click",
-            selector,
-            success=f"✔️ Clicked `{selector}`",
-            defer_ephemeral=True,
-        )
+        return ("click", (selector,), f"✔️ Clicked `{selector}`")
 
     @app_commands.command(name="fill", description="Fill a form field with text.")
     @app_commands.describe(
         selector="The CSS selector of the form field.", text="The text to fill."
     )
+    @browser_command(allow_mutation=True, defer_ephemeral=True)
     async def fill(
         self, interaction: discord.Interaction, selector: str, text: str
-    ) -> None:
+    ) -> CommandResult:
         """Fills a form field on the current page."""
-        if not await self._check_mutation_allowed(interaction):
-            return
-
-        await self._run(
-            interaction,
-            "fill",
-            selector,
-            text,
-            success=f"✔️ Filled `{selector}`.",
-            defer_ephemeral=True,
-        )
+        return ("fill", (selector, text), f"✔️ Filled `{selector}`.")
 
     @app_commands.command(
         name="upload", description="Upload a file to an input element."
     )
     @app_commands.describe(
         selector="The CSS selector of the file input element.",
-        file="The file to upload.",
+        attachment="The file to upload.",
     )
+    @browser_command(allow_mutation=True, defer_ephemeral=True)
     async def upload(
-        self, interaction: discord.Interaction, selector: str, file: discord.Attachment
-    ) -> None:
-        """Uploads a file to a file input on the current page."""
-        if not await self._check_mutation_allowed(interaction):
-            return
+        self,
+        interaction: discord.Interaction,
+        selector: str,
+        attachment: discord.Attachment,
+    ) -> CommandResult | None:
+        """Uploads a file to a file input element on the page."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir) / file.filename
+            temp_path = Path(temp_dir) / attachment.filename
             # Download the file to a temporary location
-            await file.save(temp_path)
+            await attachment.save(temp_path)
 
-            await self._run(
-                interaction,
-                "upload",
-                selector,
-                temp_path,
-                success=f"✔️ Uploaded `{file.filename}` to `{selector}`.",
-                defer_ephemeral=True,
+            return (
+                "upload_file",
+                (selector, temp_path),
+                f"✔️ Uploaded `{attachment.filename}` to `{selector}`",
             )
 
     @app_commands.command(
@@ -242,7 +249,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         description="Wait for an element to be visible, hidden, attached, or detached.",
     )
     @app_commands.describe(
-        selector="The CSS selector of the element to wait for.",
+        selector="The CSS selector of the element.",
         state="The state to wait for (default: visible).",
     )
     @app_commands.choices(
@@ -253,78 +260,108 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             app_commands.Choice(name="Detached", value="detached"),
         ]
     )
+    @browser_command()
     async def wait(
         self, interaction: discord.Interaction, selector: str, state: str = "visible"
-    ) -> None:
+    ) -> CommandResult | None:
         """Waits for an element on the current page to reach a certain state."""
-        # Convert the state string to an enum value
-        valid_states = ["attached", "detached", "visible", "hidden"]
+        # Make sure the state is one of the valid options
+        valid_states = ["visible", "hidden", "enabled", "disabled", "stable"]
         if state.lower() not in valid_states:
             await interaction.response.send_message(
-                f"❌ Invalid state '{state}'. Valid options are: {', '.join(valid_states)}",
+                f"❌ Invalid state '{state}'. Valid options: {', '.join(valid_states)}",
                 ephemeral=True,
             )
-            return
+            return None
 
-        await self._run(
-            interaction,
+        return (
             "wait_for",
-            selector,
-            state.lower(),
-            success=f"✔️ Waited for `{selector}` to be `{state}`.",
+            (selector, state.lower()),
+            f"✔️ Waited for `{selector}` to be `{state}`.",
         )
+
+    # ------------------------------------------------------------------+
+    # internal helpers (used by close / closeall and legacy paths)      |
+    # ------------------------------------------------------------------+
+
+    async def _ensure_channel_id(self, interaction: discord.Interaction) -> int | None:
+        """Return the current channel-ID or inform the user if none exists."""
+        if interaction.channel_id is None:
+            await interaction.response.send_message(
+                "This command must be used in a channel context "
+                "where a channel ID is available.",
+                ephemeral=True,
+            )
+            return None
+        return interaction.channel_id
+
+    # Helper removed - now using @read_only_guard() decorator instead
 
     @app_commands.command(
         name="screenshot", description="Take a screenshot of the current page."
     )
-    @app_commands.describe(
-        filename="Optional filename for the screenshot (e.g., page.png)."
-    )
+    @app_commands.describe(filename="Optional filename for the screenshot.")
+    @browser_command(queued=True, allow_mutation=False)
     async def screenshot(
         self, interaction: discord.Interaction, filename: str | None = None
-    ) -> None:
+    ) -> CommandResult | None:
         """Takes a screenshot of the current browser page."""
         actual_filename = filename or "screenshot.png"
-        if not any(
-            actual_filename.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg")
-        ):
-            actual_filename += ".png"
+        if not any(actual_filename.endswith(ext) for ext in [".png", ".jpg", ".jpeg"]):
+            actual_filename += ".png"  # Default to PNG if no extension
 
-        screenshot_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                suffix=f"_{actual_filename.replace('/', '_').replace('\\', '_')}",
-                delete=False,
-            ) as tmp:
-                screenshot_path = Path(tmp.name)
+        # Create subfolder for screenshots
+        screenshots_dir = Path("./screenshots")
+        screenshots_dir.mkdir(exist_ok=True)
 
-            # Use _run for the core logic
-            await self._run(
-                interaction,
-                "screenshot",
-                screenshot_path,
-                success="",  # We'll handle sending the file ourselves
+        # Generate unique filename for storage
+        timestamp = int(time.time())
+        unique_name = f"{timestamp}_{actual_filename}"
+        screenshot_path = screenshots_dir / unique_name
+
+        if screenshot_path.exists():
+            await interaction.response.send_message(
+                f"❌ File already exists: {actual_filename}", ephemeral=True
             )
+            return None
 
-            if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
-                discord_file = discord.File(screenshot_path, filename=actual_filename)
-                await interaction.followup.send(file=discord_file)
-            else:
-                await interaction.followup.send(
-                    "❌ Failed to take screenshot or screenshot is empty.",
-                    ephemeral=True,
-                )
-        except Exception as e:
-            # Main exceptions are already handled by _run
-            log.error(f"Error handling screenshot file: {e}", exc_info=True)
-        finally:
-            if screenshot_path and screenshot_path.exists():
-                try:
-                    screenshot_path.unlink()
-                except Exception as e_unlink:
-                    log.error(
-                        f"Error deleting temp screenshot file {screenshot_path}: {e_unlink}"
+        # Queue the screenshot operation
+        result = ("screenshot", (screenshot_path,), "")
+
+        # Define the callback to handle the screenshot after it's taken
+        async def process_screenshot() -> None:
+            try:
+                if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
+                    discord_file = discord.File(
+                        screenshot_path, filename=actual_filename
                     )
+                    await interaction.followup.send(
+                        content="✔️ Screenshot captured:",
+                        file=discord_file,
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.followup.send(
+                        "❌ Failed to capture screenshot (empty or missing file).",
+                        ephemeral=True,
+                    )
+            except Exception as e:
+                await interaction.followup.send(
+                    f"❌ Error sending screenshot: {e}", ephemeral=True
+                )
+            finally:
+                # Clean up temporary file
+                if screenshot_path.exists():
+                    try:
+                        screenshot_path.unlink()
+                    except Exception as e:
+                        log.error(f"Error deleting screenshot: {e}")
+
+        # We should schedule this to run after the browser action completes
+        # For now, we'll use asyncio.create_task, but a better implementation could
+        # await the future returned by self._runner.enqueue
+        asyncio.create_task(process_screenshot())
+        return result
 
     @app_commands.command(name="status", description="Show browser status")
     async def status(self, interaction: discord.Interaction) -> None:
@@ -369,7 +406,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             embed.add_field(
                 name=f"Channel ID: {r['channel']}",
                 value=(
-                    f"🗂️ **Queue** {r['queue_len']}\n"
+                    f"📂 **Queue** {r['queue_len']}\n"
                     f"{status_emoji}\n"
                     f"📄 **Pages** {r['pages']}"
                 ),
@@ -380,13 +417,11 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     @app_commands.command(
         name="close", description="Close the browser for this channel"
     )
+    @read_only_guard()  # replaces manual guard
     async def close(self, interaction: discord.Interaction) -> None:
         """Closes the browser instance for the current channel."""
         chan = await self._ensure_channel_id(interaction)
         if chan is None:
-            return
-
-        if not await self._check_mutation_allowed(interaction):
             return
 
         # First check if a browser exists for this channel
@@ -408,6 +443,37 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         except Exception as exc:
             await interaction.followup.send(
                 f"❌ Error closing browser: {type(exc).__name__}: {exc}", ephemeral=True
+            )
+
+    @app_commands.command(
+        name="closeall", description="Close all browser instances (admin only)"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def closeall(self, interaction: discord.Interaction) -> None:
+        """Closes all browser instances across all channels (admin only)."""
+        # The decorator already enforces permissions; no extra checks needed
+
+        # Check if there are any active browsers
+        rows = browser_manager.status_readout()
+        if not rows:
+            await interaction.response.send_message(
+                "No active browser instances to close.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        try:
+            # Close all browsers
+            await browser_manager.close_all()
+            await interaction.followup.send(
+                f"✅ Successfully closed {len(rows)} browser instance(s).",
+                ephemeral=True,
+            )
+        except Exception as exc:
+            await interaction.followup.send(
+                f"❌ Error closing browsers: {type(exc).__name__}: {exc}",
+                ephemeral=True,
             )
 
 
