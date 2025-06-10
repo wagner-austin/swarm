@@ -103,7 +103,7 @@ async def test_web_cog_click_command_success(
 
     # Assert
     mock_interaction.response.defer.assert_awaited_once_with(
-        ephemeral=True, thinking=True
+        thinking=True, ephemeral=True
     )
     mock_runner_instance.enqueue.assert_awaited_once_with(
         mock_interaction.channel_id, "click", test_selector

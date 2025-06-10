@@ -92,31 +92,31 @@ def browser_command(
         async def wrapper(
             self: Any, interaction: discord.Interaction, *args: Any, **kwargs: Any
         ) -> None:
-            # Get channel ID
-            if interaction.channel_id is None:
-                await interaction.response.send_message(
-                    "This command must be used in a channel context where a channel ID is available.",
-                    ephemeral=True,
-                )
-                return
-
-            channel_id = interaction.channel_id
-
-            # Get operation details from the command function
+            # 0️⃣ Run the inner handler **first** so it can fail fast
+            #    (e.g. invalid-URL validation) *before* we show a spinner.
             result = await func(self, interaction, *args, **kwargs)
 
-            # By returning None, we signal that this command doesn't need followup handling
+            # If the inner handler already produced a response we're done.
             if result is None:
                 return
 
-            # Unpack operation details
-            op, op_args, success_msg = result
+            # We now know it's a "real" browser action → safe to defer.
+            chan = interaction.channel_id
+            if chan is None:
+                await interaction.response.send_message(
+                    "This command must be used inside a text channel.", ephemeral=True
+                )
+                return
 
-            # Defer the response
             if defer_ephemeral:
+                # Ephemeral spinner (e.g. /click, /fill…)
                 await interaction.response.defer(thinking=True, ephemeral=True)
             else:
+                # Regular spinner (e.g. /start, /open…)
                 await interaction.response.defer(thinking=True)
+
+            # Unpack operation details
+            op, op_args, success_msg = result
 
             # If not queued, just return (the command handled everything internally)
             if not queued:
@@ -124,7 +124,7 @@ def browser_command(
 
             # Queue the operation
             try:
-                await self._runner.enqueue(channel_id, op, *op_args)
+                await self._runner.enqueue(chan, op, *op_args)
                 if success_msg:
                     await interaction.followup.send(success_msg)
             except asyncio.QueueFull:
@@ -238,8 +238,9 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             # Download the file to a temporary location
             await attachment.save(temp_path)
 
+            # Engine method is called **upload** – keep naming consistent
             return (
-                "upload_file",
+                "upload",
                 (selector, temp_path),
                 f"✔️ Uploaded `{attachment.filename}` to `{selector}`",
             )
@@ -265,8 +266,8 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         self, interaction: discord.Interaction, selector: str, state: str = "visible"
     ) -> CommandResult | None:
         """Waits for an element on the current page to reach a certain state."""
-        # Make sure the state is one of the valid options
-        valid_states = ["visible", "hidden", "enabled", "disabled", "stable"]
+        # Playwright supports exactly these four states
+        valid_states = ["visible", "hidden", "attached", "detached"]
         if state.lower() not in valid_states:
             await interaction.response.send_message(
                 f"❌ Invalid state '{state}'. Valid options: {', '.join(valid_states)}",
@@ -283,17 +284,6 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     # ------------------------------------------------------------------+
     # internal helpers (used by close / closeall and legacy paths)      |
     # ------------------------------------------------------------------+
-
-    async def _ensure_channel_id(self, interaction: discord.Interaction) -> int | None:
-        """Return the current channel-ID or inform the user if none exists."""
-        if interaction.channel_id is None:
-            await interaction.response.send_message(
-                "This command must be used in a channel context "
-                "where a channel ID is available.",
-                ephemeral=True,
-            )
-            return None
-        return interaction.channel_id
 
     # Helper removed - now using @read_only_guard() decorator instead
 
@@ -325,12 +315,17 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             )
             return None
 
-        # Queue the screenshot operation
-        result = ("screenshot", (screenshot_path,), "")
+        # Ask the browser to take a screenshot and wait for completion
+        chan = interaction.channel_id
+        assert chan is not None  # mypy: Optional → int
 
-        # Define the callback to handle the screenshot after it's taken
+        enqueue_fut = asyncio.create_task(
+            self._runner.enqueue(chan, "screenshot", screenshot_path)
+        )
+
         async def process_screenshot() -> None:
             try:
+                await enqueue_fut  # wait for Playwright to finish the file
                 if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
                     discord_file = discord.File(
                         screenshot_path, filename=actual_filename
@@ -361,7 +356,8 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         # For now, we'll use asyncio.create_task, but a better implementation could
         # await the future returned by self._runner.enqueue
         asyncio.create_task(process_screenshot())
-        return result
+        # We already scheduled the browser action ourselves; tell decorator not to queue.
+        return None
 
     @app_commands.command(name="status", description="Show browser status")
     async def status(self, interaction: discord.Interaction) -> None:
@@ -420,9 +416,8 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     @read_only_guard()  # replaces manual guard
     async def close(self, interaction: discord.Interaction) -> None:
         """Closes the browser instance for the current channel."""
-        chan = await self._ensure_channel_id(interaction)
-        if chan is None:
-            return
+        chan = interaction.channel_id
+        assert chan is not None
 
         # First check if a browser exists for this channel
         rows = [r for r in browser_manager.status_readout() if r["channel"] == chan]
