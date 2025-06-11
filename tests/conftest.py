@@ -35,6 +35,29 @@ Provides a CLI-runner; no DB fixtures remain.
 # ------------------------------------------------------------------+
 setup_logging({"root": {"level": "WARNING"}})
 
+# ------------------------------------------------------------------+
+# Global Playwright headless override (safety in CI)                 +
+# ------------------------------------------------------------------+
+
+# Ensure every test run keeps the browser headless and invisible to
+# avoid accidental UI launches (especially in CI environments).
+
+
+# Type annotated autouse fixture (required by --strict mypy)
+@pytest.fixture(autouse=True)
+def _force_headless(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force Playwright to run headless for the entire test session."""
+
+    # Patch the global settings object if it exists. `raising=False` means
+    # the attribute will be created if missing, so this works even if the
+    # settings module gets imported lazily during tests.
+    monkeypatch.setattr(
+        "bot.core.settings.settings.browser.headless", True, raising=False
+    )
+    monkeypatch.setattr(
+        "bot.core.settings.settings.browser.visible", False, raising=False
+    )
+
 
 @pytest.fixture
 def cli_runner() -> Generator[Any, None, None]:

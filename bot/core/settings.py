@@ -14,6 +14,8 @@ class BrowserConfig(BaseModel):
     read_only: bool = False  # <‑‑ NEW – block mutating actions when True
     launch_timeout_ms: int = 60000
     proxy_enabled: bool = False
+    worker_idle_timeout_sec: float = 120.0  # Seconds before an idle worker shuts down
+    slow_mo: int = 0  # Milliseconds to slow down Playwright operations, 0 to disable
 
     model_config = {"extra": "ignore"}
 
