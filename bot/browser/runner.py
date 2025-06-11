@@ -12,7 +12,6 @@ from playwright.async_api import (
     Error as PlaywrightError,
 )
 
-from bot.core.api.browser.signals import SHUTDOWN_SENTINEL
 from bot.core.browser_manager import browser_manager, Runner
 from bot.core.settings import settings
 
@@ -20,6 +19,7 @@ from bot.core.settings import settings
 from .command import Command
 from .registry import browser_worker_registry
 from .worker import browser_worker
+from .signals import SHUTDOWN_SENTINEL
 
 log = logging.getLogger(__name__)
 

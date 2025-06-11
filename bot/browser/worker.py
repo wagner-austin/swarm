@@ -11,10 +11,10 @@ from playwright.async_api import (
     Error as PlaywrightError,
 )
 
-from bot.core.api.browser.command import Command
-from bot.core.api.browser.engine import BrowserEngine
-from bot.core.api.browser.registry import browser_worker_registry
-from bot.core.api.browser.signals import SHUTDOWN_SENTINEL
+from .command import Command
+from .engine import BrowserEngine
+from .registry import browser_worker_registry
+from .signals import SHUTDOWN_SENTINEL
 from bot.core.browser_manager import browser_manager
 from bot.core.settings import settings
 

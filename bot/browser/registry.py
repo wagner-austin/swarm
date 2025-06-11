@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import Dict, Any, TypeVar  # Using Any for asyncio.Task generic type
 
 # Assuming Command is already defined in command.py
-from bot.core.api.browser.command import Command
+from .command import Command
 
 _T = TypeVar("_T")
 
