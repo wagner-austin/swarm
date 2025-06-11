@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     gemini_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
 
+    # Bot owner Discord user ID – used for restricted personas
+    owner_id: Optional[int] = None
+
+    # --- Tunable bot behaviour ---
+    conversation_max_turns: int = (
+        20  # Rolling chat history length per channel + persona
+    )
+    discord_chunk_size: int = 1900  # Characters per Discord message chunk
+    gemini_model: str = "gemini-2.5-flash-preview-04-17"  # Default Gemini model name
+
     # --- Proxy settings ---
     proxy_enabled: bool = False
     proxy_port: Optional[int] = None
