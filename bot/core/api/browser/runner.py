@@ -1,218 +1,340 @@
 from __future__ import annotations
+
 import asyncio
 import logging
-from collections import defaultdict
-from typing import NamedTuple, Callable, Awaitable, Any, Dict
+from typing import Any
+
 from playwright.async_api import (
-    Browser,
-    BrowserContext,
     Playwright,
     async_playwright,
+    Browser,
+    BrowserContext,
+    Error as PlaywrightError,
 )
+
+from bot.core.api.browser.signals import SHUTDOWN_SENTINEL
 from bot.core.browser_manager import browser_manager, Runner
-from bot.core.api.browser.engine import BrowserEngine
 from bot.core.settings import settings
+
+# Refactored imports
+from .command import Command
+from .registry import browser_worker_registry
+from .worker import browser_worker
 
 log = logging.getLogger(__name__)
 
 
-class Command(NamedTuple):
-    action: str
-    args: tuple[Any, ...]
-    kwargs: dict[str, Any]
-    future: asyncio.Future[Any]
-
-
 class WebRunner:
-    _active_runners: Dict[int, Runner] = {}
     """
-    Maintains **one Playwright page per Discord channel**.
-    Commands are queued so user interactions never block the event-loop.
+    Public facade for managing browser interactions.
+    Enqueues commands and manages the lifecycle of browser workers.
+    One worker (and its associated browser context) is created per channel_id.
     """
-
-    _queues: dict[int, asyncio.Queue[Command]] = defaultdict(  # channel‑id → queue
-        lambda: asyncio.Queue(maxsize=100)
-    )
 
     async def enqueue(
         self, channel_id: int, action: str, *args: Any, **kwargs: Any
     ) -> asyncio.Future[Any]:
-        fut: asyncio.Future[Any] = asyncio.get_event_loop().create_future()
-        cmd = Command(action, args, kwargs, fut)
-        # Ensure channel_id is a valid dict key (int)
-        # In discord.py, interaction.channel_id is typically an int.
-        # If it could be None (e.g., for DMs if channel_id is None there), handle appropriately.
-        # Assuming channel_id is always a valid int here based on typical Discord bot structure.
-        command_queue = self._queues[channel_id]
-        command_queue.put_nowait(cmd)
+        """Enqueues a command to be run in the browser context for the given channel_id."""
+        """
+        Enqueues a browser command for a given channel.
+        If no worker is active for the channel, it starts one.
+        """
+        loop = asyncio.get_event_loop()
+        command_future: asyncio.Future[Any] = loop.create_future()
+        cmd = Command(action=action, args=args, kwargs=kwargs, future=command_future)
 
-        if channel_id not in self._active_runners:
-            log.info(f"Creating new browser runner for channel {channel_id}")
+        command_queue = await browser_worker_registry.get_or_create_queue(channel_id)
+        try:
+            command_queue.put_nowait(cmd)
+        except asyncio.QueueFull:
+            log.error(
+                f"Command queue full for channel {channel_id}. Command '{action}' dropped."
+            )
+            # Immediately fail the future if the queue is full
+            command_future.set_exception(
+                RuntimeError(f"Browser command queue for channel {channel_id} is full.")
+            )
+            return command_future
+
+        # Check if a worker is already active or if its task is retrievable and not done.
+        # The browser_manager stores the Runner object which includes the worker_task.
+        # The registry also stores the worker_task. We can use either, but registry is simpler here.
+        if not await browser_worker_registry.is_worker_active(channel_id):
+            log.info(
+                f"No active worker for channel {channel_id}. Attempting to start a new one."
+            )
+            # No active worker, or previous worker finished. Start a new one.
+            # This block is responsible for creating Playwright resources and the worker task.
+            playwright_object: Playwright | None = None
+            browser_instance: Browser | None = None
+            context_instance: BrowserContext | None = None
+            worker_task_instance: asyncio.Task[Any] | None = None
+
             try:
-                playwright_obj: Playwright = await async_playwright().start()
-                browser_instance = await playwright_obj.chromium.launch(
+                playwright_object = await async_playwright().start()
+                # slow_mo is now defined in BrowserConfig with a default of 0
+                # If slow_mo is 0 (default), use 100ms if not headless, else 0.
+                # If slow_mo is explicitly set to non-zero, use that value.
+                slow_mo_val = settings.browser.slow_mo
+                if slow_mo_val == 0:
+                    slow_mo_val = 100 if not settings.browser.headless else 0
+
+                browser_instance = await playwright_object.chromium.launch(
                     headless=settings.browser.headless,
-                    slow_mo=100 if not settings.browser.headless else 0,
+                    slow_mo=slow_mo_val,
                 )
-                context_instance = await browser_instance.new_context()
-                worker_task_instance = asyncio.create_task(
-                    self._worker(
-                        channel_id, command_queue, context_instance, browser_instance
+                context_instance = await browser_instance.new_context(
+                    # Pass any context options from settings if available
+                )
+                # Removed context_options expansion as per review feedback; BrowserConfig does not define it.
+
+                # Create and start the new worker task
+                worker_task_instance = loop.create_task(
+                    browser_worker(
+                        channel_id,
+                        command_queue,  # The queue obtained from the registry
+                        playwright_object,
+                        browser_instance,
+                        context_instance,
                     )
                 )
+                # Store the worker task in the registry
+                await browser_worker_registry.add_worker_task(
+                    channel_id, worker_task_instance
+                )
+
+                # Register with BrowserManager
+                # The Runner object now primarily serves browser_manager for resource tracking.
+                # The actual worker logic is in browser_worker.
                 runner_data = Runner(
                     channel_id=channel_id,
-                    playwright=playwright_obj,
+                    playwright=playwright_object,  # Pass the Playwright instance
                     browser=browser_instance,
                     context=context_instance,
-                    queue=command_queue,  # This is the command queue the worker will process
+                    queue=command_queue,
                     worker_task=worker_task_instance,
                 )
-                self._active_runners[channel_id] = runner_data
                 await browser_manager.register(runner_data)
                 log.info(
-                    f"Browser runner for channel {channel_id} registered with BrowserManager."
+                    f"New browser worker started and registered for channel {channel_id}."
                 )
-            except Exception as e:
+
+            except PlaywrightError as e_pw:
                 log.error(
-                    f"Failed to create browser runner for channel {channel_id}: {e}",
+                    f"Playwright error during worker startup for channel {channel_id}: {e_pw}",
                     exc_info=True,
                 )
-                fut.set_exception(e)
-                # Clean up partially created resources if necessary
-                if "browser_instance" in locals() and browser_instance:
-                    await browser_instance.close()
-                if "playwright_obj" in locals():
-                    await playwright_obj.stop()
-                # No need to unregister from browser_manager if registration failed or didn't happen.
-                self._active_runners.pop(channel_id, None)  # Ensure no partial entry
-                self._queues.pop(
-                    channel_id, None
-                )  # Clean up queue if worker failed to start
-                return fut
+                command_future.set_exception(e_pw)
+                await self._cleanup_failed_startup(
+                    channel_id,
+                    playwright_object,
+                    browser_instance,
+                    worker_task_instance,
+                )
+                return command_future
+            except Exception as e:
+                log.error(
+                    f"Failed to create and start browser worker for channel {channel_id}: {e}",
+                    exc_info=True,
+                )
+                if not command_future.done():  # Ensure future is only set once
+                    command_future.set_exception(e)
+                # Cleanup resources on failure
+                await self._cleanup_failed_startup(
+                    channel_id,
+                    playwright_object,
+                    browser_instance,
+                    worker_task_instance,
+                )
+                return command_future
+        else:
+            log.debug(
+                f"Worker already active for channel {channel_id}. Command enqueued."
+            )
 
-        return fut
+        return command_future
 
-    # ------------------------------------------------------------+
-    # private – long-running worker per channel                    |
-    # ------------------------------------------------------------+
-    async def _worker(
+    async def _cleanup_failed_startup(
         self,
         channel_id: int,
-        queue: asyncio.Queue[Command],
-        context: BrowserContext,
-        browser: Browser,
+        playwright: Playwright | None,
+        browser: Browser | None,
+        worker_task: asyncio.Task[Any] | None,
     ) -> None:
-        from bot.netproxy.service import ProxyService  # type-only
+        """Helper to clean up resources if worker startup fails."""
+        log.warning(
+            f"Cleaning up resources after failed worker startup for channel {channel_id}."
+        )
+        if worker_task and not worker_task.done():
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                log.debug(
+                    f"Worker task for channel {channel_id} cancelled during cleanup."
+                )
+            except Exception as e_task_cleanup:
+                log.error(
+                    f"Error awaiting cancelled worker task for {channel_id}: {e_task_cleanup}"
+                )
 
-        svc: ProxyService | None = getattr(
-            asyncio.get_running_loop(), "proxy_service", None
-        )
-        proxy_addr = (
-            f"http://127.0.0.1:{svc.port}"
-            if (svc and settings.browser.proxy_enabled)
-            else None
-        )
+        # Attempt to close browser and playwright resources if they were created
+        if browser:
+            try:
+                await browser.close()
+                log.debug(f"Browser for channel {channel_id} closed during cleanup.")
+            except Exception as e_browser:
+                log.error(
+                    f"Error closing browser for channel {channel_id} during cleanup: {e_browser}"
+                )
+        if playwright:
+            try:
+                await playwright.stop()
+                log.debug(
+                    f"Playwright for channel {channel_id} stopped during cleanup."
+                )
+            except Exception as e_pw:
+                log.error(
+                    f"Error stopping playwright for channel {channel_id} during cleanup: {e_pw}"
+                )
 
-        eng = BrowserEngine(
-            headless=settings.browser.headless,
-            proxy=proxy_addr,
-            timeout_ms=settings.browser.launch_timeout_ms,
-        )
-        # Re‑use the objects we already created – **no eng.start() call**,
-        # so nothing extra gets launched.
-        eng._playwright = self._active_runners[channel_id].playwright
-        eng._browser = browser
-        eng._context = context  # <‑‑ keep reference for _ensure_page()
-        eng._page = await context.new_page()
-        log.info(f"Using pre-created Playwright objects for channel {channel_id}")
+        # Ensure info is removed from registry and manager
+        await browser_worker_registry.remove_worker_info(
+            channel_id
+        )  # Cleans up queue if empty, and task
         try:
-            while True:
-                item = await queue.get()
-                if item is None:  # Shutdown sentinel
-                    queue.task_done()
-                    log.info(
-                        f"Worker for channel {channel_id} received shutdown sentinel."
-                    )
-                    break
-                cmd: Command = item
-                log.debug(f"Channel {channel_id} processing action: {cmd.action}")
-                try:
-                    # Ensure the action is a valid method in BrowserEngine
-                    if not hasattr(eng, cmd.action) or not callable(
-                        getattr(eng, cmd.action)
-                    ):
-                        raise AttributeError(
-                            f"BrowserEngine has no callable action '{cmd.action}'"
-                        )
+            # Unregister might fail if it was never registered, or if already unregistered by worker.
+            # This is a best-effort cleanup.
+            await browser_manager.unregister(channel_id)
+        except Exception as e_unreg:
+            log.debug(
+                f"Issue unregistering channel {channel_id} from browser_manager during cleanup: {e_unreg}"
+            )
 
-                    coro: Callable[..., Awaitable[Any]] = getattr(eng, cmd.action)
-                    result = await coro(*cmd.args, **cmd.kwargs)
-                    cmd.future.set_result(result)
+    async def shutdown_channel_worker(self, channel_id: int, wait: bool = True) -> None:
+        """
+        Attempts to gracefully shut down the worker for a specific channel.
+        Sends a sentinel to the queue and optionally waits for the worker task to complete.
+        """
+        log.info(f"Requesting shutdown for worker of channel {channel_id}.")
+        worker_task = await browser_worker_registry.get_worker_task(channel_id)
+        command_queue = await browser_worker_registry.get_or_create_queue(
+            channel_id
+        )  # Get queue even if task is gone
+
+        if worker_task and not worker_task.done():
+            log.debug(
+                f"Worker task for channel {channel_id} is active. Sending None sentinel to queue."
+            )
+            try:
+                command_queue.put_nowait(
+                    SHUTDOWN_SENTINEL
+                )  # Sentinel to signal worker to stop
+            except asyncio.QueueFull:
+                log.warning(
+                    f"Queue full for channel {channel_id}, cannot send shutdown sentinel. Forcing cancel."
+                )
+                worker_task.cancel()  # Force cancel if queue is full
+
+            if wait:
+                try:
+                    await asyncio.wait_for(
+                        worker_task, timeout=30.0
+                    )  # Wait for worker to finish
+                    log.info(f"Worker for channel {channel_id} shut down gracefully.")
+                except asyncio.TimeoutError:
+                    log.warning(
+                        f"Timeout waiting for worker {channel_id} to shut down. Forcing cancel."
+                    )
+                    if not worker_task.done():
+                        worker_task.cancel()
+                except asyncio.CancelledError:
+                    log.info(
+                        f"Shutdown wait for worker {channel_id} was cancelled."
+                    )  # Task itself was cancelled
                 except Exception as e:
                     log.error(
-                        f"Error executing action {cmd.action} for channel {channel_id}: {e}",
+                        f"Error during supervised shutdown of worker {channel_id}: {e}",
                         exc_info=True,
                     )
-                    cmd.future.set_exception(e)
-                finally:
-                    queue.task_done()
-
-                # Check if queue is empty *after* task_done. If it became non-empty
-                # between q.get() and q.task_done(), we should not exit yet.
-                if queue.empty():
-                    # auto-close after 2 min idle
-                    log.info(
-                        f"Channel {channel_id} queue is empty. Starting idle timer."
-                    )
-                    waiter = asyncio.create_task(queue.get())
-                    try:
-                        # Wait for a new item or timeout. q.join() is not suitable here as it waits for all tasks to be done.
-                        # We need to wait for a new item to be put on the queue.
-                        cmd_again = await asyncio.wait_for(waiter, timeout=120)
-                        queue.put_nowait(cmd_again)  # push into queue for next loop
-                        continue
-                        log.info(
-                            f"Channel {channel_id} received new command, continuing worker."
-                        )
-                    except asyncio.TimeoutError:
-                        waiter.cancel()
-                        log.info(
-                            f"Channel {channel_id} idle timeout reached. Shutting down worker."
-                        )
-                        break  # Exit the while loop to close engine and delete queue
-        except Exception as e:
-            log.error(
-                f"Browser worker for channel {channel_id} encountered a critical error: {e}",
-                exc_info=True,
+                    if not worker_task.done():
+                        worker_task.cancel()  # Ensure it's cancelled on other errors
+        elif worker_task and worker_task.done():
+            log.info(f"Worker task for channel {channel_id} already done.")
+        else:
+            log.info(
+                f"No active worker task found for channel {channel_id} to shut down."
             )
-        finally:
-            log.info(f"Worker for channel {channel_id} stopping.")
-            await browser_manager.unregister(channel_id)
 
-            # Close the BrowserEngine instance created by this worker
-            if "eng" in locals() and eng is not None:
+        # Final cleanup from registry, in case worker didn't (e.g. if it crashed)
+        # The worker's finally block should call this, but this is a safeguard.
+        await browser_worker_registry.remove_worker_info(channel_id)
+
+    async def close(self) -> None:
+        """
+        Convenience method for cog_unload() handlers to shut down all browser workers.
+        Simply delegates to shutdown_all_workers() with wait=True.
+        """
+        await self.shutdown_all_workers(wait=True)
+
+    async def shutdown_all_workers(self, wait: bool = True) -> None:
+        """
+        Attempts to gracefully shut down all active browser workers.
+        """
+        log.info("Attempting to shut down all active browser workers.")
+        # Get a list of channel_ids that have active workers from the registry
+        # Iterate over a copy of task keys as shutdown_channel_worker modifies the underlying dict
+        active_channel_ids = list(browser_worker_registry._active_worker_tasks.keys())
+
+        shutdown_tasks = [
+            self.shutdown_channel_worker(
+                channel_id, wait=False
+            )  # Don't wait individually here
+            for channel_id in active_channel_ids
+        ]
+        results = await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+
+        for channel_id, result in zip(active_channel_ids, results):
+            if isinstance(result, Exception):
+                log.error(
+                    f"Error shutting down worker for channel {channel_id}: {result}"
+                )
+
+        if (
+            wait and active_channel_ids
+        ):  # Only wait if we actually shut down workers and wait is true
+            # After signaling all workers, wait for their tasks to complete.
+            # This relies on browser_manager holding the tasks.
+            # Alternatively, collect tasks from registry before they are removed.
+            all_worker_tasks = await browser_manager.get_all_worker_tasks()
+
+            if all_worker_tasks:
                 log.info(
-                    f"Closing browser engine specific to worker for channel {channel_id}"
+                    f"Waiting for {len(all_worker_tasks)} worker tasks to complete shutdown..."
                 )
-                await eng.close()
-
-            self._active_runners.pop(channel_id, None)
-            log.info(f"Removed active runner entry for channel {channel_id}")
-
-            # Original command queue cleanup logic
-            if channel_id in self._queues and self._queues[channel_id] is queue:
-                if queue.empty():
-                    del self._queues[channel_id]
-                    log.info(f"Removed empty command queue for channel {channel_id}")
-                else:
-                    # If queue is not empty, it means items were added after sentinel or during shutdown.
-                    # These items won't be processed. Log this situation.
+                try:
+                    await asyncio.wait(
+                        all_worker_tasks, timeout=60.0
+                    )  # Overall timeout
+                    log.info("All signaled worker tasks have completed.")
+                except asyncio.TimeoutError:
                     log.warning(
-                        f"Command queue for channel {channel_id} was not empty upon worker exit. {queue.qsize()} items remaining."
+                        "Timeout waiting for all worker tasks to complete. Some may still be running/stuck."
                     )
-                    # Optionally, clear the queue if desired: while not queue.empty(): queue.get_nowait(); queue.task_done()
-            elif channel_id in self._queues:
-                log.warning(
-                    f"Command queue for channel {channel_id} found but was not the instance used by this worker."
+                    # Optionally, iterate and cancel any remaining tasks
+                    for task in all_worker_tasks:
+                        if not task.done():
+                            log.warning(
+                                f"Forcing cancel on task {task.get_name()} due to overall shutdown timeout."
+                            )
+                            task.cancel()
+                except Exception as e:
+                    log.error(
+                        f"Exception while waiting for all worker tasks to complete: {e}",
+                        exc_info=True,
+                    )
+            else:
+                log.info(
+                    "No active worker tasks found to wait for during shutdown_all_workers."
                 )
+        log.info("Finished shutdown_all_workers sequence.")

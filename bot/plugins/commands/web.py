@@ -145,9 +145,29 @@ def browser_command(
 
 
 class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
-    def __init__(self, bot: Bot) -> None:
+    def __init__(
+        self,
+        bot: Bot,
+        *,
+        runner: WebRunner | None = None,
+    ) -> None:
+        """Create a new *Web* cog.
+
+        Parameters
+        ----------
+        bot:
+            The hosting :class:`discord.ext.commands.Bot` instance.
+        runner:
+            Optionally provide a pre-configured :class:`WebRunner`.  Supplying a
+            custom runner is primarily useful for **unit tests** or advanced
+            callers that need fine-grained control over the browser lifecycle.
+            If *None* (the default) a fresh :class:`WebRunner` is created – this
+            preserves the original production behaviour.
+        """
+
         self.bot = bot
-        self._runner = WebRunner()
+        # Fallback to default behaviour if no runner supplied
+        self._runner = runner or WebRunner()
 
     @app_commands.command(
         name="start", description="Start a browser session with an optional URL."

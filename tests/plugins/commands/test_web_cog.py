@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from typing import Any, cast
 
 import discord
 
 from bot.core.containers import Container
-from bot.plugins.commands.web import (
-    Web as WebCog,
-)  # Renamed to WebCog to avoid conflict
 from discord.ext.commands import Bot
 
 # Mark all tests in this module as asyncio
@@ -34,18 +31,16 @@ def mock_interaction() -> MagicMock:
     return interaction
 
 
-@patch(
-    "bot.plugins.commands.web.WebRunner"
-)  # Patch WebRunner where it's imported by the cog
 async def test_web_cog_start_command_success(
-    MockWebRunner: MagicMock, mock_bot: MagicMock, mock_interaction: MagicMock
+    mock_bot: MagicMock, mock_interaction: MagicMock
 ) -> None:
     """Test the /web start command for a successful URL navigation."""
     # Arrange
     mock_runner_instance = AsyncMock()
-    MockWebRunner.return_value = mock_runner_instance
 
-    cog = WebCog(mock_bot)
+    from bot.plugins.commands.web import Web as WebCog
+
+    cog = WebCog(mock_bot, runner=mock_runner_instance)
     test_url = "http://example.com"
 
     # Act
@@ -61,16 +56,16 @@ async def test_web_cog_start_command_success(
     )
 
 
-@patch("bot.plugins.commands.web.WebRunner")
 async def test_web_cog_start_command_invalid_url(
-    MockWebRunner: MagicMock, mock_bot: MagicMock, mock_interaction: MagicMock
+    mock_bot: MagicMock, mock_interaction: MagicMock
 ) -> None:
     """Test the /web start command with an invalid URL."""
     # Arrange
     mock_runner_instance = AsyncMock()
-    MockWebRunner.return_value = mock_runner_instance
 
-    cog = WebCog(mock_bot)
+    from bot.plugins.commands.web import Web as WebCog
+
+    cog = WebCog(mock_bot, runner=mock_runner_instance)
     invalid_url = "notaurl"  # Not a valid URL format
 
     # Act
@@ -86,16 +81,16 @@ async def test_web_cog_start_command_invalid_url(
     mock_interaction.followup.send.assert_not_called()
 
 
-@patch("bot.plugins.commands.web.WebRunner")
 async def test_web_cog_click_command_success(
-    MockWebRunner: MagicMock, mock_bot: MagicMock, mock_interaction: MagicMock
+    mock_bot: MagicMock, mock_interaction: MagicMock
 ) -> None:
     """Test the /web click command."""
     # Arrange
     mock_runner_instance = AsyncMock()
-    MockWebRunner.return_value = mock_runner_instance
 
-    cog = WebCog(mock_bot)
+    from bot.plugins.commands.web import Web as WebCog
+
+    cog = WebCog(mock_bot, runner=mock_runner_instance)
     test_selector = "#myButton"
 
     # Act

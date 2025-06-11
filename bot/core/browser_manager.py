@@ -3,6 +3,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from bot.core.api.browser.signals import SHUTDOWN_SENTINEL
 from playwright.async_api import Browser, BrowserContext, Playwright
 
 __all__ = ["BrowserManager", "Runner"]
@@ -42,7 +43,7 @@ class BrowserManager:
                 return
 
         # Stop the worker task by sending the sentinel
-        runner.queue.put_nowait(None)
+        runner.queue.put_nowait(SHUTDOWN_SENTINEL)
         try:
             # Wait for worker to complete
             await runner.worker_task
@@ -51,7 +52,12 @@ class BrowserManager:
 
         # Close browser resources
         await runner.context.close()
-        await runner.browser.close()
+        if runner.browser.is_connected():
+            await runner.browser.close()
+        else:
+            # Optional: log this, but print might be too noisy for library code
+            # print(f"BrowserManager: Browser for channel {channel_id} already disconnected before explicit close_channel call.")
+            pass  # Already disconnected
         if runner.playwright:
             await runner.playwright.stop()
 
@@ -66,6 +72,15 @@ class BrowserManager:
             for r in self._runners.values()
         ]
 
+    async def get_all_worker_tasks(self) -> List[asyncio.Task[Any]]:
+        """Returns a list of all worker tasks (even done ones with exceptions)."""
+        async with self._lock:
+            tasks = []
+            for runner in self._runners.values():
+                if runner.worker_task:  # Include all tasks, even done ones
+                    tasks.append(runner.worker_task)
+            return tasks
+
     # graceful shutdown -----------------------------------------------------
     async def close_all(self) -> None:
         async with self._lock:
@@ -73,13 +88,18 @@ class BrowserManager:
             self._runners.clear()
 
         for r in tasks:  # sequential—safe on Windows
-            r.queue.put_nowait(None)  # sentinel for the worker
+            r.queue.put_nowait(SHUTDOWN_SENTINEL)  # sentinel for the worker
             try:
                 await r.worker_task  # drain or cancel
             except asyncio.CancelledError:
                 pass
             await r.context.close()
-            await r.browser.close()
+            if r.browser.is_connected():
+                await r.browser.close()
+            else:
+                print(
+                    f"BrowserManager: Browser instance for channel {r.channel_id} already disconnected."
+                )
             if r.playwright:
                 await r.playwright.stop()
 
