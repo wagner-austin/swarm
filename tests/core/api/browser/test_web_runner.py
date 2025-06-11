@@ -4,8 +4,8 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from bot.core.api.browser.runner import WebRunner
-from bot.core.api.browser.registry import browser_worker_registry
+from bot.browser import WebRunner
+from bot.browser.registry import browser_worker_registry
 
 # Mark all tests in this module as asyncio
 pytestmark = pytest.mark.asyncio
@@ -29,15 +29,15 @@ def mock_settings_fixture(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         proxy_enabled=False,  # Explicitly set for the test's expectation
     )
 
-    monkeypatch.setattr("bot.core.api.browser.runner.settings", mock_global_settings)
+    monkeypatch.setattr("bot.browser.runner.settings", mock_global_settings)
     monkeypatch.setattr(
-        "bot.core.api.browser.worker.settings", mock_global_settings
+        "bot.browser.worker.settings", mock_global_settings
     )  # Patch for worker scope
     return mock_global_settings
 
 
-@patch("bot.core.api.browser.runner.async_playwright")
-@patch("bot.core.api.browser.worker.BrowserEngine")
+@patch("bot.browser.runner.async_playwright")
+@patch("bot.browser.worker.BrowserEngine")
 async def test_web_runner_enqueue_goto_starts_engine_and_processes_command(
     MockBrowserEngine: MagicMock,
     mock_async_playwright: MagicMock,

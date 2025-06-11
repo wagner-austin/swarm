@@ -3,7 +3,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from bot.core.api.browser.signals import SHUTDOWN_SENTINEL
+from bot.browser.signals import SHUTDOWN_SENTINEL
 from playwright.async_api import Browser, BrowserContext, Playwright
 
 __all__ = ["BrowserManager", "Runner"]
