@@ -2,6 +2,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from discord import app_commands
+from bot.core.browser_manager import browser_manager
 
 from bot.plugins.base_di import BaseDIClientCog
 
@@ -26,8 +27,12 @@ class Shutdown(BaseDIClientCog):
         except Exception:
             pass
 
-        # Note: Browser cleanup is now handled by /web closeall command
-        # Use that command first if you need to specifically close browser instances
+        # 1️⃣.b Close all browser workers and associated Playwright resources
+        try:
+            await browser_manager.close_all()
+        except Exception:
+            # Log internally – user sees generic shutdown msg already
+            pass
 
         # 2️⃣ finally logout from Discord
         await bot.close()
