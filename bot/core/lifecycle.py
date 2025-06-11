@@ -10,9 +10,10 @@ from discord import Intents
 from discord.ext import commands  # For extension loading exceptions
 
 from bot.core.settings import Settings
+from bot.utils.module_discovery import iter_submodules
 
 # from bot.core.containers import Container # Forward ref
-from bot.core.discord.boot import MyBot, _discover_extensions
+from bot.core.discord.boot import MyBot
 from bot.core.discord.di import initialize_and_wire_container
 from bot.core.discord.events import register_event_handlers
 from bot.core.discord.proxy import start_proxy_service_if_enabled, stop_proxy_service
@@ -95,10 +96,8 @@ class BotLifecycle:
         self._set_state(LifecycleState.INITIALIZING_SERVICES)
         logger.info("Initializing services and bot instance...")
 
-        discovered_extensions = _discover_extensions()
         self._container = initialize_and_wire_container(
             app_settings=self._settings,
-            discovered_extension_paths=discovered_extensions,
             runner_module_name=self.__module__,
         )
 
@@ -117,9 +116,8 @@ class BotLifecycle:
 
         self._set_state(LifecycleState.LOADING_EXTENSIONS)
         logger.info("Loading extensions...")
-        discovered_extensions_paths = _discover_extensions()
 
-        for ext_name in discovered_extensions_paths:
+        for ext_name in iter_submodules("bot.plugins.commands"):
             try:
                 await self._bot.load_extension(ext_name)
                 logger.info(f"Successfully loaded extension: {ext_name}")
