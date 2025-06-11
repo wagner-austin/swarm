@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from bot.core.settings import settings
 
-from bot.core.api.browser.runner import WebRunner
+from bot.browser import WebRunner
 from bot.core.browser_manager import browser_manager
 from discord.ext.commands import Bot
 from bot.utils.urls import validate_and_normalise_web_url
