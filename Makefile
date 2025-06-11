@@ -52,4 +52,8 @@ build:
 
 # Use savecode to save files
 savecode:
+	savecode . --skip tests --ext toml py
+
+# Use savecode to save files
+savecode-test:
 	savecode . --ext toml py
