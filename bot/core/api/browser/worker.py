@@ -122,10 +122,13 @@ async def browser_worker(
                     log.warning(
                         f"Browser closed during action '{cmd['action']}' for channel {channel_id}: {e_pw}"
                     )
-                    # Browser is closed, this is a terminal state
+                    # Resolve the Future with a friendly message instead of an exception
                     if not cmd["future"].done():
-                        cmd["future"].set_exception(e_pw)
-                    # Break out of loop to shut down worker
+                        cmd["future"].set_result(
+                            f"❌ Browser closed during '{cmd['action']}'. "
+                            "Restart with /web start."
+                        )
+                    # Break out of loop to shut down worker gracefully
                     break
                 else:
                     # Likely a transient network error or other Playwright issue
