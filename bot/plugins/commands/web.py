@@ -339,30 +339,36 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         chan = interaction.channel_id
         assert chan is not None  # mypy: Optional → int
 
-        enqueue_fut = asyncio.create_task(
-            self._runner.enqueue(chan, "screenshot", screenshot_path)
-        )
+        # Ensure we acknowledge the interaction promptly; otherwise Discord will
+        # show “The application did not respond”.  We defer **before** kicking
+        # off the asynchronous browser work.
+        if not interaction.response.is_done():
+            await interaction.response.defer(thinking=True, ephemeral=True)
 
         async def process_screenshot() -> None:
             try:
-                await enqueue_fut  # wait for Playwright to finish the file
+                # Enqueue the screenshot action and wait until the browser worker
+                # signals completion.  *enqueue()* returns a Future that resolves
+                # when the underlying Playwright operation has finished.
+                cmd_future = await self._runner.enqueue(
+                    chan, "screenshot", screenshot_path
+                )
+                await cmd_future  # ensures the file has been written
                 if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
-                    discord_file = discord.File(
-                        screenshot_path, filename=actual_filename
-                    )
-                    await interaction.followup.send(
+                    await _safe_followup(
+                        interaction,
                         content="✔️ Screenshot captured:",
-                        file=discord_file,
-                        ephemeral=True,
+                        file=discord.File(screenshot_path, filename=actual_filename),
                     )
                 else:
-                    await interaction.followup.send(
+                    await _safe_followup(
+                        interaction,
                         "❌ Failed to capture screenshot (empty or missing file).",
-                        ephemeral=True,
                     )
             except Exception as e:
-                await interaction.followup.send(
-                    f"❌ Error sending screenshot: {e}", ephemeral=True
+                await _safe_followup(
+                    interaction,
+                    f"❌ Error sending screenshot: {e}",
                 )
             finally:
                 # Clean up temporary file
@@ -489,6 +495,61 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             await interaction.followup.send(
                 f"❌ Error closing browsers: {type(exc).__name__}: {exc}",
                 ephemeral=True,
+            )
+
+
+# ---------------------------------------------------------------------------+
+#  Local helpers                                                             +
+# ---------------------------------------------------------------------------+
+
+
+async def _safe_followup(
+    interaction: discord.Interaction,
+    content: str = "",
+    *,
+    file: discord.File | None = None,
+) -> None:
+    """Send a follow-up or gracefully fall back when the webhook has expired.
+
+    Discord's type stubs expect *content* to be a ``str`` and *file* to be a
+    concrete :class:`discord.File`.  We therefore branch on *file*'s presence
+    to keep *mypy --strict* happy.
+    """
+    try:
+        if file is None:
+            await interaction.followup.send(content=content, ephemeral=True)
+        else:
+            await interaction.followup.send(
+                content=content,
+                file=file,
+                ephemeral=True,
+            )
+    except discord.NotFound:
+        # Webhook is gone – send to the channel instead (best effort)
+        try:
+            chan = interaction.channel
+            if chan is not None:
+                from typing import cast
+
+                messageable = cast(discord.abc.Messageable, chan)
+                if file is None:
+                    await messageable.send(content=content)
+                else:
+                    # The original discord.File's underlying fp may have been closed
+                    # during the failed webhook send. Re-create a fresh File object
+                    # from the original file path to avoid "I/O operation on closed file".
+                    try:
+                        file_path = Path(file.fp.name)  # type: ignore[attr-defined]
+                        fresh_file = discord.File(file_path, filename=file.filename)
+                        await messageable.send(content=content, file=fresh_file)
+                    except Exception:
+                        # Fall back to message without attachment if file could not be re-read
+                        await messageable.send(content=f"{content} (attachment failed)")
+        except Exception as inner_exc:  # pragma: no cover – log fallback failure
+            log.error(
+                "Failed to send fallback screenshot message: %s",
+                inner_exc,
+                exc_info=True,
             )
 
 
