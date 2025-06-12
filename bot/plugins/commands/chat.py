@@ -168,7 +168,9 @@ class Chat(commands.Cog):
                     import asyncio
 
                     async for chunk in stream:
-                        buffer += getattr(chunk, "text", "")
+                        text_fragment = getattr(chunk, "text", None)
+                        if text_fragment:
+                            buffer += text_fragment
                         # Yield control every 100ms to prevent heartbeat blocking
                         current_time = time.time()
                         if current_time - last_update >= 1.0:
@@ -185,9 +187,14 @@ class Chat(commands.Cog):
                             # Yield control back to event loop
                             await asyncio.sleep(0.1)
                         response_text = buffer
+                    # --- FINAL SYNC -------------------------------------------------
+                    # Ensure we didn't miss the tail of the stream (<1 s since last update)
+                    response_text = buffer
                 else:  # the sync dummy used by tests
                     for chunk in stream:
-                        response_text += getattr(chunk, "text", "")
+                        text_fragment = getattr(chunk, "text", None)
+                        if text_fragment:
+                            response_text += text_fragment
 
                 # Delete the progress message when done
                 try:
@@ -336,6 +343,7 @@ class Chat(commands.Cog):
                 )
                 stream = client.models.generate_content_stream(
                     model=settings.gemini_model,
+                    # list[Content] is too narrow for the parameter, cast to list[Any]
                     contents=cast(list[Any], contents),
                     config=config,
                 )
@@ -343,7 +351,9 @@ class Chat(commands.Cog):
                 text_accum = ""
                 # google-genai stream may be sync iterable; iterate normally.
                 for chunk in stream:
-                    text_accum += getattr(chunk, "text", "")
+                    text_fragment = getattr(chunk, "text", None)
+                    if text_fragment:
+                        text_accum += text_fragment
                 return text_accum or "[No response]"
 
             try:
