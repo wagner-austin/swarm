@@ -30,3 +30,6 @@ myenv/
 test_build/
 *.egg-info/
 volunteer_bot.egg-info/
+
+# Personalities
+bot/personalities.py
