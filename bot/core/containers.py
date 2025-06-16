@@ -6,6 +6,7 @@ from bot.core.browser_manager import browser_manager
 
 from bot.netproxy.service import ProxyService
 from bot.infra.tankpit.proxy.ws_tankpit import TankPitWSAddon
+from bot.ai import providers as _ai_providers
 
 
 class Container(containers.DeclarativeContainer):
@@ -22,6 +23,9 @@ class Container(containers.DeclarativeContainer):
 
     # Browser manager singleton
     browser_manager = providers.Object(browser_manager)
+
+    # Mapping of LLM provider singletons discovered in bot.ai.providers
+    llm_providers = providers.Object(_ai_providers.all())
 
     # Proxy service
     # The default_port and cert_dir for ProxyService can be sourced from config.
