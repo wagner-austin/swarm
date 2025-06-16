@@ -150,13 +150,6 @@ class BrowserEngine:
         assert self._page is not None  # type narrowing
         await self._page.locator(selector).set_input_files(str(file_path))
 
-    # ------------------------------------------------------------------+
-    #  Back‑compat shim – remove after next minor release               |
-    # ------------------------------------------------------------------+
-    async def upload_file(self, selector: str, file_path: Path) -> None:  # noqa: D401
-        """Alias kept so older cogs/tests that still call *upload_file* keep working."""
-        await self.upload(selector, file_path)
-
     async def wait_for(
         self,
         selector: str,
