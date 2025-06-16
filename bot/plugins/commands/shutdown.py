@@ -3,7 +3,7 @@ import discord
 from bot.utils.discord_interactions import safe_send
 from discord.ext import commands
 from discord import app_commands
-from bot.core.browser_manager import browser_manager
+from bot.browser.runtime import runtime
 
 from bot.plugins.base_di import BaseDIClientCog
 
@@ -28,9 +28,9 @@ class Shutdown(BaseDIClientCog):
         except Exception:
             pass
 
-        # 1️⃣.b Close all browser workers and associated Playwright resources
+        # 1️⃣.b Close all browser engines
         try:
-            await browser_manager.aclose()
+            await runtime.close_all()
         except Exception:
             # Log internally – user sees generic shutdown msg already
             pass

@@ -17,8 +17,7 @@ from discord.ext import commands
 
 from bot.core.settings import settings
 
-from bot.browser import WebRunner
-from bot.core.browser_manager import browser_manager
+from bot.browser.runtime import runtime
 from discord.ext.commands import Bot
 from bot.utils.urls import validate_and_normalise_web_url
 
@@ -127,7 +126,7 @@ def browser_command(
 
             # Queue the operation
             try:
-                await self._runner.enqueue(chan, op, *op_args)
+                await runtime.enqueue(chan, op, *op_args)
                 if success_msg:
                     await safe_followup(interaction, success_msg)
             except asyncio.QueueFull:
@@ -156,29 +155,17 @@ def browser_command(
 
 
 class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
-    def __init__(
-        self,
-        bot: Bot,
-        *,
-        runner: WebRunner | None = None,
-    ) -> None:
+    def __init__(self, bot: Bot) -> None:
         """Create a new *Web* cog.
 
         Parameters
         ----------
         bot:
             The hosting :class:`discord.ext.commands.Bot` instance.
-        runner:
-            Optionally provide a pre-configured :class:`WebRunner`.  Supplying a
-            custom runner is primarily useful for **unit tests** or advanced
-            callers that need fine-grained control over the browser lifecycle.
-            If *None* (the default) a fresh :class:`WebRunner` is created – this
-            preserves the original production behaviour.
+        runtime is global – no per-cog runner is required.
         """
 
         self.bot = bot
-        # Fallback to default behaviour if no runner supplied
-        self._runner = runner or WebRunner()
 
     @app_commands.command(
         name="start", description="Start a browser session with an optional URL."
@@ -361,9 +348,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 # Enqueue the screenshot action and wait until the browser worker
                 # signals completion.  *enqueue()* returns a Future that resolves
                 # when the underlying Playwright operation has finished.
-                cmd_future = await self._runner.enqueue(
-                    chan, "screenshot", screenshot_path
-                )
+                cmd_future = await runtime.enqueue(chan, "screenshot", screenshot_path)
                 await cmd_future  # ensures the file has been written
                 if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
                     await safe_followup(
@@ -400,7 +385,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     async def status(self, interaction: discord.Interaction) -> None:
         """Shows information about the browser instance for the current channel."""
         # First check if browsers exist
-        rows = browser_manager.status_readout()
+        rows = runtime.status()
 
         # If we have active browsers, perform health check and attempt to heal
         if rows:
@@ -412,7 +397,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                         # This will trigger the self-healing mechanism if browser is closed
                         # We use a 2-second timeout to avoid blocking if there are issues
                         await asyncio.wait_for(
-                            self._runner.enqueue(chan, "health_check"), timeout=2.0
+                            runtime.enqueue(chan, "health_check"), timeout=2.0
                         )
                     except asyncio.TimeoutError:
                         # If timeout occurs, continue with other channels
@@ -424,7 +409,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 pass  # Don't let health check errors prevent status display
 
             # Re-fetch status now that we've attempted healing
-            rows = browser_manager.status_readout()
+            rows = runtime.status()
 
         # Display status information
         if not rows:
@@ -438,11 +423,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             status_emoji = "🟢 Idle" if r["idle"] else "🔵 Busy"
             embed.add_field(
                 name=f"Channel ID: {r['channel']}",
-                value=(
-                    f"📂 **Queue** {r['queue_len']}\n"
-                    f"{status_emoji}\n"
-                    f"📄 **Pages** {r['pages']}"
-                ),
+                value=(f"📂 **Queue** {r['queue']}\n{status_emoji}\n"),
                 inline=False,
             )
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -457,7 +438,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         assert chan is not None
 
         # First check if a browser exists for this channel
-        rows = [r for r in browser_manager.status_readout() if r["channel"] == chan]
+        rows = [r for r in runtime.status() if r["channel"] == chan]
         if not rows:
             await interaction.response.send_message(
                 "No browser running for this channel.", ephemeral=True
@@ -468,7 +449,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
         try:
             # Close the browser for this channel
-            await browser_manager.close_channel(chan)
+            await runtime.close_channel(chan)
             await safe_followup(
                 interaction, "✅ Browser closed successfully.", ephemeral=True
             )
@@ -488,7 +469,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         # The decorator already enforces permissions; no extra checks needed
 
         # Check if there are any active browsers
-        rows = browser_manager.status_readout()
+        rows = runtime.status()
         if not rows:
             await interaction.response.send_message(
                 "No active browser instances to close.", ephemeral=True
@@ -499,7 +480,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
         try:
             # Close all browsers
-            await browser_manager.aclose()
+            await runtime.close_all()
             await safe_followup(
                 interaction,
                 f"✅ Successfully closed {len(rows)} browser instance(s).",

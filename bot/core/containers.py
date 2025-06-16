@@ -2,7 +2,6 @@ from dependency_injector import containers, providers
 from pathlib import Path
 
 from bot.core.settings import Settings
-from bot.core.browser_manager import browser_manager
 
 from bot.netproxy.service import ProxyService
 from bot.infra.tankpit.proxy.ws_tankpit import TankPitWSAddon
@@ -20,9 +19,6 @@ class Container(containers.DeclarativeContainer):
     # Configuration provider for application settings
     # The actual settings values will be loaded when accessed, typically from .env
     config = providers.Singleton(Settings)
-
-    # Browser manager singleton
-    browser_manager = providers.Object(browser_manager)
 
     # Mapping of LLM provider singletons discovered in bot.ai.providers
     # Resolve the registry lazily so newly registered providers are seen.
