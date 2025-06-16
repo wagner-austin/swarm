@@ -1,54 +1,75 @@
-# Makefile for Discord Bot project
+# Makefile — Poetry-aware workflow for Discord Bot project
+# Run `make help` to see available targets.
 
-.PHONY: install lint format test clean run docs build backup
+.PHONY: install shell lint format test clean run build help
 
-# Python command (use python or py depending on your system)
-PYTHON := python
-PIP := $(PYTHON) -m pip
-PYTEST := $(PYTHON) -m pytest
-RUFF := $(PYTHON) -m ruff
-MYPY := $(PYTHON) -m mypy
+# ---------------------------------------------------------------------------
+# Tooling helpers
+# ---------------------------------------------------------------------------
+POETRY  := poetry             # centralised Poetry command (override with POETRY=…)
+RUN     := $(POETRY) run      # prefix to execute inside Poetry venv
+PYTHON  := $(RUN) python
+PIP     := $(RUN) pip
+RUFF    := $(RUN) ruff
+MYPY    := $(RUN) mypy
+PYTEST  := $(RUN) pytest
 
-# Install dependencies
-install:
-	$(PIP) install -e .
+# ---------------------------------------------------------------------------
+# Meta / docs
+# ---------------------------------------------------------------------------
+help:               ## show this help message
+	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
+	 awk 'BEGIN {FS = ":.*?##"}; {printf " \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-# Run linting checks (ruff check --fix, ruff format, black, mypy strict)
-lint:
-	$(PIP) install types-requests
+# ---------------------------------------------------------------------------
+# Environment / dependencies
+# ---------------------------------------------------------------------------
+install:            ## resolve & install all dependencies (incl. dev)
+	$(POETRY) lock
+	$(POETRY) install --with dev --extras dev
+
+shell:              ## activate Poetry shell (interactive)
+	$(POETRY) shell
+
+# ---------------------------------------------------------------------------
+# Code quality
+# ---------------------------------------------------------------------------
+lint: install               ## ruff fix + ruff format + mypy strict type-check
+	$(PIP) install --quiet --disable-pip-version-check types-requests types-PyYAML
 	$(RUFF) check --fix .
 	$(RUFF) format .
 	$(MYPY) --strict .
 
-# Format code
-format:
+format: install             ## auto-format code base (ruff + black)
 	$(RUFF) format .
-	$(PYTHON) -m black .
 
-# Run tests
-test:
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+test: install                ## run pytest suite
 	$(PYTEST)
 
-# Clean up temporary files and caches
-clean:
-	-del /s /q *.pyc *.pyo *.pyd 2>nul
-	-if exist __pycache__ rd /s /q __pycache__ 2>nul
-	-if exist .pytest_cache rd /s /q .pytest_cache 2>nul
-	-if exist .ruff_cache rd /s /q .ruff_cache 2>nul
-	-if exist .mypy_cache rd /s /q .mypy_cache 2>nul
-	-if exist *.egg-info rd /s /q *.egg-info 2>nul
-
-# Run the bot
-run:
+# ---------------------------------------------------------------------------
+# Misc helpers
+# ---------------------------------------------------------------------------
+run: install                ## launch the Discord bot (sync with pyproject script)
 	$(PYTHON) -m bot.core
 
-# Generate documentation (update this if you use a specific doc generator)
-docs:
-	@echo Documentation generation command goes here
+build: install              ## build wheel / sdist
+	$(POETRY) build
 
-# Build the project package
-build:
-	$(PYTHON) -m build
+clean: install              ## remove Python / tool caches
+	@$(RUN) python - <<-'PY'
+	import pathlib, shutil, sys
+	root = pathlib.Path('.')
+	patterns = ["__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", "*.egg-info"]
+	for pat in patterns:
+		for p in root.rglob(pat):
+			try:
+				shutil.rmtree(p) if p.is_dir() else p.unlink()
+			except Exception as e:
+				print("cannot delete", p, "->", e, file=sys.stderr)
+	PY
 
 # Use savecode to save files
 savecode:

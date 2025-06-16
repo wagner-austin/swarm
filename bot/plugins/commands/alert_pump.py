@@ -12,6 +12,7 @@ import logging
 
 import discord
 from discord.ext import commands
+from typing import cast
 
 log = logging.getLogger(__name__)
 
@@ -31,27 +32,31 @@ class AlertPump(commands.Cog):
         self.owner: discord.User | None = None
 
     async def cog_load(self) -> None:  # Called by discord.py 2.3+
+        # Wait until bot is ready only if it's already logging in; avoid calling
+        # before the Client has been initialised which raises RuntimeError.
         if hasattr(self.bot, "wait_until_ready"):
-            await self.bot.wait_until_ready()
+            try:
+                if not self.bot.is_ready():
+                    await self.bot.wait_until_ready()
+            except RuntimeError:
+                # Client not yet initialised; we'll proceed and owner resolution
+                # will retry inside the relay loop once the bot is ready.
+                pass
         lifecycle = getattr(self.bot, "lifecycle", None)
         if lifecycle is None or not hasattr(lifecycle, "alerts_q"):
             log.warning(
                 "AlertPump loaded but lifecycle.alerts_q not available – disabled"
             )
-            return
-        q: asyncio.Queue[str] = lifecycle.alerts_q
+            return  # cannot proceed without a queue
+
+        # At this point lifecycle is guaranteed to have 'alerts_q'
+        q: asyncio.Queue[str] = cast("asyncio.Queue[str]", lifecycle.alerts_q)
         owner_id = self.bot.owner_id
         if owner_id is not None:
             self.owner = self.bot.get_user(owner_id)
         else:
             self.owner = None
 
-        if self.owner is None:
-            try:
-                app_info = await self.bot.application_info()
-                self.owner = app_info.owner
-            except Exception as exc:
-                log.error("Cannot resolve bot owner: %s", exc)
         loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._relay_loop(q))
 

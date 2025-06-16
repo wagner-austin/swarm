@@ -8,6 +8,9 @@ from bot.ai.personas import (
     visible as persona_visible,
 )
 from typing import cast
+
+# Centralized interaction helpers
+from bot.utils.discord_interactions import safe_defer, safe_followup
 import asyncio
 from bot.utils.history import ConversationHistory
 from bot.ai import providers as _providers
@@ -120,7 +123,7 @@ class Chat(commands.Cog):
         final_system_prompt = DEFAULT_SYSTEM_PROMPT + "\n\n" + persona_prompt_str
 
         # Inform Discord we are processing (shows typing indicator)
-        await interaction.response.defer(thinking=True)
+        await safe_defer(interaction, thinking=True)
 
         # Build chat history (excluding the system prompt – passed separately)
         messages: list[dict[str, str]] = [
@@ -140,13 +143,14 @@ class Chat(commands.Cog):
                 system_prompt=final_system_prompt,
             )
         except ModelOverloaded:
-            await interaction.followup.send(
+            await safe_followup(
+                interaction,
                 "The language model is currently overloaded. Please try again in a moment.",
                 ephemeral=True,
             )
             return
         except Exception as exc:
-            await interaction.followup.send(f"LLM error: {exc}")
+            await safe_followup(interaction, f"LLM error: {exc}")
             return
 
         # Providers may still return an async iterator – normalise to a string
@@ -158,24 +162,25 @@ class Chat(commands.Cog):
                 async for fragment in raw_reply:
                     parts.append(fragment)
             except ModelOverloaded:
-                await interaction.followup.send(
+                await safe_followup(
+                    interaction,
                     "The language model is currently overloaded. Please try again in a moment.",
                     ephemeral=True,
                 )
                 return
             except Exception as exc:  # handle unforeseen provider errors mid-stream
-                await interaction.followup.send(f"LLM error: {exc}")
+                await safe_followup(interaction, f"LLM error: {exc}")
                 return
             response_text = "".join(parts)
 
         # Handle Discord's character limit by splitting into chunks
         if not response_text:
-            await interaction.followup.send("[No response]")
+            await safe_followup(interaction, "[No response]")
             return
 
         DISCORD_CHAR_LIMIT: int = settings.discord_chunk_size
         if len(response_text) <= DISCORD_CHAR_LIMIT:
-            await interaction.followup.send(response_text)
+            await safe_followup(interaction, response_text)
         else:
             chunks = [
                 response_text[i : i + DISCORD_CHAR_LIMIT]
@@ -187,7 +192,7 @@ class Chat(commands.Cog):
                     if len(prefix) + len(chunk) > DISCORD_CHAR_LIMIT:
                         chunk = chunk[: DISCORD_CHAR_LIMIT - len(prefix)]
                     chunk = prefix + chunk
-                await interaction.followup.send(chunk)
+                await safe_followup(interaction, chunk)
 
         # Record the turn in history
         self._history.record(channel_id_int, personality, prompt or "", response_text)
@@ -237,7 +242,7 @@ class Chat(commands.Cog):
             )
             return
 
-        await interaction.response.defer(thinking=True)
+        await safe_defer(interaction, thinking=True)
 
         async def _ask_persona(
             name: str, persona_prompt: str
@@ -288,8 +293,8 @@ class Chat(commands.Cog):
 
             title = f"**{name.capitalize()}**"
             if err is not None:
-                await interaction.followup.send(
-                    f"{title} (error): {err}", ephemeral=True
+                await safe_followup(
+                    interaction, f"{title} (error): {err}", ephemeral=True
                 )
                 continue
 
@@ -297,7 +302,7 @@ class Chat(commands.Cog):
             DISCORD_CHAR_LIMIT = settings.discord_chunk_size  # margin for title/prefix
 
             if len(safe_text) + len(title) + 10 <= DISCORD_CHAR_LIMIT:
-                await interaction.followup.send(f"{title}\n```text\n{safe_text}\n```")
+                await safe_followup(interaction, f"{title}\n```text\n{safe_text}\n```")
             else:
                 raw_chunks = [
                     safe_text[
@@ -311,8 +316,8 @@ class Chat(commands.Cog):
                         if len(raw_chunks) > 1
                         else f"{title}\n"
                     )
-                    await interaction.followup.send(
-                        part_prefix + f"```text\n{chunk}\n```"
+                    await safe_followup(
+                        interaction, part_prefix + f"```text\n{chunk}\n```"
                     )
 
             # record turn in history

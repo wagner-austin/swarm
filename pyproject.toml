@@ -9,6 +9,7 @@ requires-python = ">=3.10"
 dependencies = [
 
   "google-genai>=0.4",
+  "rich>=13.7",              # colourful logging / tracebacks
   "python-dotenv>=0.20",
   "pydantic>=2",
   "pydantic-settings",
@@ -40,12 +41,18 @@ dev = [
   "mypy>=1.9",
   "types-requests",
   "types-psutil",     # ⇐ optional: stub package for mypy
+  "pytest-env>=1.1",    # enable [pytest] env= option
 ]
 
 [tool.setuptools]
 packages = { find = { where = [ "." ], include = ["bot*"] } }
 
 [tool.poetry.group.dev.dependencies]
+types-requests = "^2.32.0.20250602"
+
+# Expose CLI through `poetry run discord-bot`
+[tool.poetry.scripts]
+discord-bot = "bot.core.main:main"
 types-requests = "^2.32.0.20250602"
 
 [project.entry-points."bot_plugins"]

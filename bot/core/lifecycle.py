@@ -118,6 +118,9 @@ class BotLifecycle:
 
         self._set_state(LifecycleState.LOADING_EXTENSIONS)
         logger.info("Loading extensions...")
+        # Collect short cog names for summary line
+        loaded: list[str] = []
+        failed: list[str] = []
 
         # Ensure critical AlertPump extension is loaded even if command package is skipped
         try:
@@ -135,24 +138,23 @@ class BotLifecycle:
                 continue
             try:
                 await self._bot.load_extension(ext_name)
-                logger.info(f"Successfully loaded extension: {ext_name}")
+                loaded.append(ext_name.rsplit(".", 1)[-1])
             except commands.ExtensionNotFound:
-                logger.error(f"Extension not found: {ext_name}")
-            except commands.ExtensionAlreadyLoaded:
-                logger.warning(f"Extension already loaded: {ext_name}")
+                failed.append(ext_name.rsplit(".", 1)[-1])
+                logger.error(f"❌ Extension {ext_name} not found")
             except commands.NoEntryPointError:
-                logger.error(f"Extension {ext_name} has no setup() function.")
+                failed.append(ext_name.rsplit(".", 1)[-1])
+                logger.error(f"❌ Extension {ext_name} has no setup() function.")
             except commands.ExtensionFailed as e:
-                logger.exception(
-                    f"Extension {ext_name} failed to load: {e.original}",
-                    exc_info=e.original,
-                )
+                failed.append(ext_name.rsplit(".", 1)[-1])
+                logger.error(f"❌ Extension {ext_name} failed: {e.original}")
             except Exception as e:
-                logger.exception(
-                    f"An unexpected error occurred while loading extension {ext_name}",
-                    exc_info=e,
-                )
-        logger.info("Finished loading extensions.")
+                failed.append(ext_name.rsplit(".", 1)[-1])
+                logger.error(f"❌ Unexpected error loading {ext_name}: {e}")
+        logger.info(
+            f"🧩 Cogs loaded: {', '.join(loaded) or '—'}"
+            + (f" | ❌ failed: {', '.join(failed)}" if failed else "")
+        )
 
     def _register_event_handlers(self) -> None:
         if not self._bot:

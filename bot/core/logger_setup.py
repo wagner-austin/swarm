@@ -40,19 +40,28 @@ DEFAULT_LOGGING_CONFIG: Dict[str, Any] = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
+        # RichHandler ignores most format string except datefmt,
+        # keep formatter minimal and pass only datefmt.
+        "rich": {"datefmt": "%Y-%m-%d %H:%M:%S"},
         "default": {"format": "%(asctime)s [%(levelname)s] %(message)s"},
     },
     "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "default",
+        "rich": {
+            "class": "rich.logging.RichHandler",
+            "markup": True,
+            "rich_tracebacks": True,
+            "show_path": False,
+            "formatter": "rich",
         },
     },
     "root": {
-        "handlers": ["console"],
+        "handlers": ["rich"],
         "level": "INFO",
     },
 }
+
+# Sentinel to avoid multiple configuration attempts
+_CONFIGURED: bool = False
 
 
 def setup_logging(config_overrides: Optional[Dict[str, Any]] = None) -> None:
@@ -66,7 +75,15 @@ def setup_logging(config_overrides: Optional[Dict[str, Any]] = None) -> None:
     Returns:
         None
     """
+    # Modern approach – rely on ``dictConfig(force=True)`` to wipe any pre-existing
+    # handlers instead of manual loops.
+    global _CONFIGURED
+    if _CONFIGURED:
+        return  # already configured – avoid duplicate handlers
+
     config = copy.deepcopy(DEFAULT_LOGGING_CONFIG)
+    # Ensure force is set so *all* previous handlers are removed in one go.
+    config["force"] = True
     if config_overrides:
         merge_dicts(config, config_overrides)
 
@@ -88,7 +105,9 @@ def setup_logging(config_overrides: Optional[Dict[str, Any]] = None) -> None:
         if "root" in config:
             config["root"]["handlers"] = ["console"]
 
+    # Apply final configuration now that defaults are ensured.
     logging.config.dictConfig(config)
+    _CONFIGURED = True
 
 
 # End of core/logger_setup.py

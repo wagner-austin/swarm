@@ -66,7 +66,11 @@ class ProxyService:
         )
         ProxyConfig: Any | None = getattr(proxy, "ProxyConfig", None)
         ProxyServer: Any | None = getattr(proxy, "ProxyServer", None)
-        self._dump = DumpMaster(opts)
+        # Disable mitmproxy’s built-in "termlog" and "dumper" handlers to
+        # prevent duplicate log lines once our own logging is configured.
+        # Both flags default to True; overriding keeps proxy functionality but
+        # stops extra StreamHandlers from being attached to the root logger.
+        self._dump = DumpMaster(opts, with_termlog=False, with_dumper=False)
 
         # mitmproxy <9 needs explicit server objects
         if ProxyConfig is not None and ProxyServer is not None:
