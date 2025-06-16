@@ -7,7 +7,7 @@ This file now carries full type hints so it passes `mypy --strict`.
 from __future__ import annotations
 import os
 import time
-from typing import Dict, Tuple, Optional, Any  # Added Optional, Any
+from typing import Dict, Tuple, Optional, Any
 from types import ModuleType  # Added ModuleType
 
 # psutil is optional – the code degrades gracefully if it's absent
@@ -18,7 +18,7 @@ try:
     import psutil as _imported_psutil
 
     psutil = _imported_psutil
-    _PROC = psutil.Process(os.getpid())
+    _PROC = _imported_psutil.Process(os.getpid())
 except ModuleNotFoundError:  # pragma: no cover
     pass  # psutil remains None, _PROC remains None
 

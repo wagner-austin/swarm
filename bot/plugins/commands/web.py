@@ -6,7 +6,7 @@ import tempfile
 import time
 from pathlib import Path
 import functools
-from typing import Any, Callable, TypeVar, Optional, Coroutine, ParamSpec
+from typing import Any, Callable, TypeVar, Optional, Coroutine, ParamSpec, cast
 
 import discord
 from discord import app_commands
@@ -139,7 +139,14 @@ def browser_command(
             return
 
         # Attach the guard at the very end so it wraps the *wrapper* that Discord sees
-        return read_only_guard()(wrapper) if allow_mutation else wrapper
+        if allow_mutation:
+            return cast(
+                Callable[
+                    [Any, discord.Interaction, Any, Any], Coroutine[Any, Any, None]
+                ],
+                read_only_guard()(wrapper),
+            )
+        return wrapper
 
     return decorator
 
