@@ -113,4 +113,17 @@ try:
 except ValueError:  # DISCORD_TOKEN missing under CI / mypy
     settings = Settings(discord_token="dummy")
 
-__all__ = ["Settings", "BrowserConfig"]
+# Queue size constants
+INBOUND_QUEUE_MAXSIZE: int = 500  # e.g. inbound network frames (proxy)
+OUTBOUND_QUEUE_MAXSIZE: int = 200  # e.g. outbound frames to server / discord
+COMMAND_QUEUE_MAXSIZE: int = 100  # browser command queues per channel
+ALERTS_QUEUE_MAXSIZE: int = 200  # lifecycle alerts to owner
+
+__all__ = [
+    "Settings",
+    "BrowserConfig",
+    "INBOUND_QUEUE_MAXSIZE",
+    "OUTBOUND_QUEUE_MAXSIZE",
+    "COMMAND_QUEUE_MAXSIZE",
+    "ALERTS_QUEUE_MAXSIZE",
+]

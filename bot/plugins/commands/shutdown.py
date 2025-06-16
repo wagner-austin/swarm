@@ -30,7 +30,7 @@ class Shutdown(BaseDIClientCog):
 
         # 1️⃣.b Close all browser workers and associated Playwright resources
         try:
-            await browser_manager.close_all()
+            await browser_manager.aclose()
         except Exception:
             # Log internally – user sees generic shutdown msg already
             pass
