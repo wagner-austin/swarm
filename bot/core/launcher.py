@@ -33,6 +33,13 @@ async def launch_bot() -> None:
 
     _lifecycle_manager_instance = BotLifecycle(settings=global_settings)
 
+    # Expose singleton for alert helpers (bot.core.alerts)
+    from bot.core import (
+        lifecycle as _lc_mod,
+    )  # local import avoids circular import at top level
+
+    _lc_mod._lifecycle_singleton = _lifecycle_manager_instance
+
     loop = asyncio.get_running_loop()
 
     signals_to_handle: list[signal.Signals] = [signal.SIGINT]

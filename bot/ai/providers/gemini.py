@@ -16,6 +16,7 @@ from typing import Any, AsyncGenerator, AsyncIterator, List, Optional
 from bot.ai.contracts import LLMProvider, Message
 from bot.core.settings import settings
 from bot.core.exceptions import ModelOverloaded
+from bot.core import alerts
 
 # NOTE: We intentionally **do not** import the google-genai SDK at module load
 # time. Tests often monkey-patch `sys.modules` with stub packages before the
@@ -144,9 +145,11 @@ class _GeminiProvider(LLMProvider):
                 )
             except (self._genai.errors.ServerError, json.JSONDecodeError) as err:
                 if "overloaded" in str(err).lower() or "503" in str(err):
+                    alerts.alert("Gemini model overloaded – some requests dropped")
                     raise ModelOverloaded(
                         "Gemini model is currently overloaded. Please retry later."
                     ) from err
+                alerts.alert("Gemini error – some requests dropped")
                 raise
             return getattr(res, "text", str(res))
 

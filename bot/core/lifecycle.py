@@ -43,6 +43,8 @@ class BotLifecycle:
         self._bot: MyBot | None = None
         self._container: Container | None = None
         self._shutdown_event = asyncio.Event()
+        # Bounded queue for runtime alerts that should be forwarded to the bot owner.
+        self.alerts_q: asyncio.Queue[str] = asyncio.Queue(maxsize=200)
 
     @property
     def state(self) -> LifecycleState:
@@ -117,7 +119,20 @@ class BotLifecycle:
         self._set_state(LifecycleState.LOADING_EXTENSIONS)
         logger.info("Loading extensions...")
 
+        # Ensure critical AlertPump extension is loaded even if command package is skipped
+        try:
+            await self._bot.load_extension("bot.plugins.commands.alert_pump")
+        except commands.ExtensionAlreadyLoaded:
+            pass
+        except commands.ExtensionNotFound:
+            logger.error("AlertPump extension not found – runtime alerts disabled!")
+        except commands.ExtensionFailed as e:
+            logger.exception("AlertPump extension failed to load", exc_info=e)
+
         for ext_name in iter_submodules("bot.plugins.commands"):
+            # Skip since we loaded it explicitly
+            if ext_name == "bot.plugins.commands.alert_pump":
+                continue
             try:
                 await self._bot.load_extension(ext_name)
                 logger.info(f"Successfully loaded extension: {ext_name}")
@@ -194,3 +209,10 @@ class BotLifecycle:
 
     async def wait_for_shutdown(self) -> None:
         await self._shutdown_event.wait()
+
+
+# ------------------------------------------------------------------
+# Global access hook (used by bot.core.alerts.send_alert)
+# ------------------------------------------------------------------
+
+_lifecycle_singleton: "BotLifecycle | None" = None

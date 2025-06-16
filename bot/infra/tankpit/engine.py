@@ -52,7 +52,12 @@ class TankPitEngine:
                 # TODO: parse payload and update state. For now we just echo.
                 if direction == "RX":
                     # naive echo logic for proof-of-wiring
-                    await self._out.put(payload)
+                    try:
+                        self._out.put_nowait(payload)
+                    except asyncio.QueueFull:
+                        from bot.core import alerts
+
+                        alerts.alert("Proxy outbound queue overflow – dropping frame")
             except Exception as exc:  # pragma: no cover – dev aid
                 log.error("TankPitEngine error: %s", exc, exc_info=True)
             finally:
