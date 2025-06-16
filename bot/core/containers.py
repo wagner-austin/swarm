@@ -25,7 +25,8 @@ class Container(containers.DeclarativeContainer):
     browser_manager = providers.Object(browser_manager)
 
     # Mapping of LLM provider singletons discovered in bot.ai.providers
-    llm_providers = providers.Object(_ai_providers.all())
+    # Resolve the registry lazily so newly registered providers are seen.
+    llm_providers = providers.Callable(lambda: _ai_providers.all())
 
     # Proxy service
     # The default_port and cert_dir for ProxyService can be sourced from config.
@@ -40,7 +41,11 @@ class Container(containers.DeclarativeContainer):
             lambda cfg: Path(cfg.proxy_cert_dir),  # Path conversion is correct
             config,
         ),
-        addons=providers.Object([TankPitWSAddon]),
+        # Explicit list provider makes the "list-ness" clear and allows DI container
+        # to resolve each element individually if they become providers themselves.
+        addons=providers.List(
+            providers.Object(TankPitWSAddon),
+        ),
     )
 
 

@@ -42,8 +42,11 @@ class ProxyService:
         self._default_port = port
         self.port = port
         self.certdir = certdir or Path(".mitm_certs")
-        self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
-        self.out_q: asyncio.Queue[bytes] = asyncio.Queue()
+        # Bounded queues prevent unbounded memory growth under heavy load.
+        # Tuned based on typical traffic patterns: inbound frames larger and
+        # more frequent than outbound AI-crafted frames.
+        self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(maxsize=500)
+        self.out_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=200)
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
         self._addons: list[AddonProtocol] = addons or []

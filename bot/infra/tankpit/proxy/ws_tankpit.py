@@ -54,7 +54,12 @@ class TankPitWSAddon:  # Renamed from WSAddon
             return
         msg = flow.websocket.messages[-1]
         direction = "TX" if msg.from_client else "RX"
-        await self.in_q.put((direction, msg.content))
+        try:
+            self.in_q.put_nowait((direction, msg.content))
+        except asyncio.QueueFull:
+            from bot.core import alerts
+
+            alerts.alert("Proxy inbound queue overflow – dropping frame")
 
     # we also tick every 50 ms to flush bot frames → upstream
     async def running(self) -> None:

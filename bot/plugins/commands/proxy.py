@@ -35,7 +35,12 @@ class ProxyCog(
     @app_commands.command(name="status", description="Show proxy status")
     async def status(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(thinking=True, ephemeral=True)
-        await interaction.followup.send(self.svc.describe())
+        desc: str = self.svc.describe()
+        await interaction.followup.send(
+            f"{desc}\n"
+            f"📥 in-queue {self.svc.in_q.qsize()}/{self.svc.in_q.maxsize}  "
+            f"📤 out-queue {self.svc.out_q.qsize()}/{self.svc.out_q.maxsize}"
+        )
 
 
 async def setup(bot: commands.Bot) -> None:
