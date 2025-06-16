@@ -40,7 +40,7 @@ class Container(containers.DeclarativeContainer):
             lambda cfg: Path(cfg.proxy_cert_dir),  # Path conversion is correct
             config,
         ),
-        addon=providers.Object(TankPitWSAddon),  # Explicitly provide None for the addon
+        addons=providers.Object([TankPitWSAddon]),
     )
 
 

@@ -40,6 +40,14 @@ class TankPitWSAddon:  # Renamed from WSAddon
         self.in_q = inbound
         self.out_q = outbound
 
+        # Lazy-start the TankPit engine so unit tests that instantiate this addon
+        # outside of an asyncio loop keep working.
+        from bot.infra.tankpit.engine import TankPitEngine
+
+        loop = asyncio.get_running_loop()
+        self._engine = TankPitEngine(self.in_q, self.out_q)
+        loop.create_task(self._engine.start())
+
     # called whenever a WS frame passes the proxy
     async def websocket_message(self, flow: HTTPFlow) -> None:
         if not flow.websocket:

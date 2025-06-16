@@ -37,7 +37,7 @@ class ProxyService:
         port: int = 9000,
         *,
         certdir: Path | None = None,
-        addon: AddonProtocol | None = None,  # Added addon parameter
+        addons: list[AddonProtocol] | None = None,
     ):
         self._default_port = port
         self.port = port
@@ -46,7 +46,7 @@ class ProxyService:
         self.out_q: asyncio.Queue[bytes] = asyncio.Queue()
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
-        self._addon = addon  # Added this line
+        self._addons: list[AddonProtocol] = addons or []
         self._process: asyncio.subprocess.Process | None = None
 
     # ── public API ──────────────────────────────────────────────
@@ -71,15 +71,12 @@ class ProxyService:
             # .server is missing in type stubs
             cast(Any, self._dump).server = ProxyServer(pconf)
         # mitmproxy 9/10: DumpMaster listens automatically
-        # wire the addon
-        if self._addon is not None:
-            # Accept either a ready instance *or* a class/factory
-            addon_instance = (
-                self._addon(self.in_q, self.out_q)
-                if isinstance(self._addon, type)
-                else self._addon
+        # wire addons
+        for addon in self._addons:
+            instance = (
+                addon(self.in_q, self.out_q) if isinstance(addon, type) else addon
             )
-            self._dump.addons.add(addon_instance)  # type: ignore[no-untyped-call]
+            self._dump.addons.add(instance)  # type: ignore[no-untyped-call]
         # Ensure the certdir exists
         self.certdir.mkdir(parents=True, exist_ok=True)
         # run mitmproxy in the background
