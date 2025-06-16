@@ -26,6 +26,7 @@ dependencies = [
 
   # --- dependency injection ---
   "dependency-injector>=4.41",
+  "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

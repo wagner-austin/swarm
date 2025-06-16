@@ -2,23 +2,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.Cog
 from bot.core.settings import settings  # fully typed alias
-from bot.personalities import PERSONALITIES, persona_prompt, persona_visible
-from typing import Any, Optional as Opt, TYPE_CHECKING, cast
+from bot.ai.personas import (
+    PERSONALITIES,
+    prompt as persona_prompt,
+    visible as persona_visible,
+)
+from typing import cast
+import asyncio
 from bot.utils.history import ConversationHistory
-
-if TYPE_CHECKING:
-    from typing import (
-        Any as GeminiContent,
-        Any as GeminiPart,
-        Any as GeminiGenerateContentConfig,
-    )
-    from google import genai
-
-    # The following stubs shadow the google-genai types to avoid mypy errors.
-    class types:
-        Content = GeminiContent
-        Part = GeminiPart
-        GenerateContentConfig = GeminiGenerateContentConfig
+from bot.ai import providers as _providers
+from bot.core.exceptions import ModelOverloaded
 
 
 INTERNAL_ERROR = "An internal error occurred. Please try again later."
@@ -26,7 +19,7 @@ INTERNAL_ERROR = "An internal error occurred. Please try again later."
 
 # Static fallback list for autocomplete defaults
 _ALL_CHOICES = [
-    app_commands.Choice(name=k.capitalize(), value=k) for k in PERSONALITIES
+    app_commands.Choice(name=k.capitalize(), value=k) for k in PERSONALITIES.keys()
 ]
 
 # Global system instruction applied to every persona
@@ -37,7 +30,6 @@ class Chat(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         super().__init__()  # <-- no args
         self.bot = bot  # keep ref for future use
-        self._client: "Opt[genai.Client]" = None
         # Remember last selected personality per channel
         self._channel_persona: dict[int, str] = {}
         # Rolling conversation history per channel & persona (tunable)
@@ -47,17 +39,14 @@ class Chat(commands.Cog):
 
     async def cog_unload(self) -> None:
         """Clean up resources when the cog is unloaded."""
-        # Close the Gemini client if it exists
-        if self._client is not None:
-            # The Client doesn't have a close method, but we'll add this for future-proofing
-            if hasattr(self._client, "close"):
-                self._client.close()
+        # Nothing to clean up – providers manage their own lifecycle.
+        return
 
     @app_commands.command(
-        name="chat", description="Chat with Google Gemini (or clear history)"
+        name="chat", description="Chat with the configured LLM (or clear history)"
     )
     @app_commands.describe(
-        prompt="What should I ask Gemini?",
+        prompt="What should I ask?",
         clear="If true, reset conversation history instead",
         personality="Pick a persona",
     )
@@ -86,22 +75,15 @@ class Chat(commands.Cog):
             )
             return
 
-        GEMINI_API_KEY = settings.gemini_api_key
-        if not GEMINI_API_KEY:
-            await interaction.response.send_message(
-                "GEMINI_API_KEY is not configured.", ephemeral=True
-            )
-            return None
-
+        # Select provider configured in settings
+        provider_name: str = getattr(settings, "llm_provider", "gemini")
         try:
-            from google import genai
-            from google.genai import types
-        except ImportError:
+            provider = _providers.get(provider_name)
+        except KeyError:
             await interaction.response.send_message(
-                "google-genai package is not installed. Please run: pip install google-genai",
-                ephemeral=True,
+                f"LLM provider '{provider_name}' is not available.", ephemeral=True
             )
-            return None
+            return
 
         if prompt is None:
             prompt = "Hello!"
@@ -115,17 +97,16 @@ class Chat(commands.Cog):
             or 0
         )
 
-        if personality is not None:
-            # Store explicit choice for this channel
-            if channel_id_int is not None:
-                self._channel_persona[channel_id_int] = personality
+        if personality is not None and persona_visible(
+            personality, interaction.user.id
+        ):
+            # Explicit valid choice – remember it for this channel
+            self._channel_persona[channel_id_int] = personality
         else:
-            # Fallback to last remembered choice
-            personality = (
-                self._channel_persona.get(channel_id_int, "default")
-                if channel_id_int is not None
-                else "default"
-            )
+            # Either no choice or invalid/stale choice – fall back
+            personality = self._channel_persona.get(channel_id_int, "default")
+            if personality not in PERSONALITIES:
+                personality = "default"
 
         # Visibility check
         if not persona_visible(personality, interaction.user.id):
@@ -138,144 +119,78 @@ class Chat(commands.Cog):
 
         final_system_prompt = DEFAULT_SYSTEM_PROMPT + "\n\n" + persona_prompt_str
 
+        # Inform Discord we are processing (shows typing indicator)
+        await interaction.response.defer(thinking=True)
+
+        # Build chat history (excluding the system prompt – passed separately)
+        messages: list[dict[str, str]] = [
+            {"role": role, "content": content}
+            for u, a in self._history.get(channel_id_int, personality)
+            for role, content in (("user", u), ("assistant", a))
+        ]
+        messages.append({"role": "user", "content": prompt})
+
+        # Call the provider and collect its reply
+        model: str | None = getattr(settings, f"{provider_name}_model", None)
         try:
-            self._client = genai.Client(api_key=GEMINI_API_KEY)
-            model = settings.gemini_model
-
-            # Build message history for Gemini using previously computed `channel_id_int`
-            history_pairs = self._history.get(channel_id_int, personality)
-            contents: list[types.Content] = []
-            for user_msg, bot_msg in history_pairs:
-                contents.append(
-                    types.Content(
-                        role="user", parts=[types.Part.from_text(text=user_msg)]
-                    )
-                )
-                contents.append(
-                    types.Content(
-                        role="model", parts=[types.Part.from_text(text=bot_msg)]
-                    )
-                )
-
-            # Append current turn
-            contents.append(
-                types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
-            )
-
-            generate_content_config = types.GenerateContentConfig(
-                system_instruction=final_system_prompt,
-                response_mime_type="text/plain",
-            )
-            # Stream and collect the response with handling to prevent blocking Discord's heartbeat
-            response_text = ""
-            stream = self._client.models.generate_content_stream(
+            raw_reply = await provider.generate(
+                messages=messages,
+                stream=True,
                 model=model,
-                # list[Content] is too narrow for the parameter, cast to list[Any]
-                contents=cast(list[Any], contents),
-                config=generate_content_config,
+                system_prompt=final_system_prompt,
             )
-
-            # Add progress indicator for long-running responses
-            await interaction.response.defer(thinking=True)
-            progress_msg = cast(
-                discord.Message, await interaction.followup.send("*Thinking...")
+        except ModelOverloaded:
+            await interaction.followup.send(
+                "The language model is currently overloaded. Please try again in a moment.",
+                ephemeral=True,
             )
+            return
+        except Exception as exc:
+            await interaction.followup.send(f"LLM error: {exc}")
+            return
 
+        # Providers may still return an async iterator – normalise to a string
+        if isinstance(raw_reply, str):
+            response_text = raw_reply
+        else:
+            parts: list[str] = []
             try:
-                if hasattr(stream, "__aiter__"):  # real API
-                    buffer = ""
-                    last_update = (
-                        0.0  # Changed to float to match time.time() return type
-                    )
-                    import time
-                    import asyncio
-
-                    async for chunk in stream:
-                        text_fragment = getattr(chunk, "text", None)
-                        if text_fragment:
-                            buffer += text_fragment
-                        # Yield control every 100ms to prevent heartbeat blocking
-                        current_time = time.time()
-                        if current_time - last_update >= 1.0:
-                            # Update progress message every second to show activity
-                            dots = "." * (int(current_time) % 4 + 1)
-                            try:
-                                # In tests, progress_msg might not have an edit method
-                                if hasattr(progress_msg, "edit"):
-                                    await progress_msg.edit(content=f"*Thinking{dots}*")
-                            except Exception:
-                                # Silently continue if edit fails
-                                pass
-                            last_update = current_time
-                            # Yield control back to event loop
-                            await asyncio.sleep(0.1)
-                        response_text = buffer
-                    # --- FINAL SYNC -------------------------------------------------
-                    # Ensure we didn't miss the tail of the stream (<1 s since last update)
-                    response_text = buffer
-                else:  # the sync dummy used by tests
-                    for chunk in stream:
-                        text_fragment = getattr(chunk, "text", None)
-                        if text_fragment:
-                            response_text += text_fragment
-
-                # Delete the progress message when done
-                try:
-                    # In tests, progress_msg might not have a delete method
-                    if hasattr(progress_msg, "delete"):
-                        await progress_msg.delete()
-                except Exception:
-                    # Silently continue if delete fails
-                    pass
-            except Exception as e:
-                try:
-                    # In tests, progress_msg might not have an edit method
-                    if hasattr(progress_msg, "edit"):
-                        await progress_msg.edit(
-                            content=f"*Error while generating response: {e}*"
-                        )
-                except Exception:
-                    # Fallback to a regular message if edit fails
-                    await interaction.followup.send(
-                        f"*Error while generating response: {e}*"
-                    )
-                raise
-
-            # Handle Discord's 2000 character limit by splitting response into chunks
-            if not response_text:
-                await interaction.followup.send("[No response from Gemini]")
+                async for fragment in raw_reply:
+                    parts.append(fragment)
+            except ModelOverloaded:
+                await interaction.followup.send(
+                    "The language model is currently overloaded. Please try again in a moment.",
+                    ephemeral=True,
+                )
                 return
+            except Exception as exc:  # handle unforeseen provider errors mid-stream
+                await interaction.followup.send(f"LLM error: {exc}")
+                return
+            response_text = "".join(parts)
 
-            # Discord has a 2000 character limit
-            DISCORD_CHAR_LIMIT = (
-                settings.discord_chunk_size
-            )  # Using 1900 to leave some margin
+        # Handle Discord's character limit by splitting into chunks
+        if not response_text:
+            await interaction.followup.send("[No response]")
+            return
 
-            # If response is within limit, send it as a single message
-            if len(response_text) <= DISCORD_CHAR_LIMIT:
-                await interaction.followup.send(response_text)
-            else:
-                # Split into multiple messages
-                chunks = [
-                    response_text[i : i + DISCORD_CHAR_LIMIT]
-                    for i in range(0, len(response_text), DISCORD_CHAR_LIMIT)
-                ]
-                for i, chunk in enumerate(chunks):
-                    # Add part number for multiple chunks
-                    if len(chunks) > 1:
-                        prefix = f"[Part {i + 1}/{len(chunks)}] "
-                        # If adding prefix would exceed the limit, adjust the chunk
-                        if len(prefix) + len(chunk) > DISCORD_CHAR_LIMIT:
-                            chunk = chunk[: DISCORD_CHAR_LIMIT - len(prefix)]
-                        chunk = prefix + chunk
-                    await interaction.followup.send(chunk)
+        DISCORD_CHAR_LIMIT: int = settings.discord_chunk_size
+        if len(response_text) <= DISCORD_CHAR_LIMIT:
+            await interaction.followup.send(response_text)
+        else:
+            chunks = [
+                response_text[i : i + DISCORD_CHAR_LIMIT]
+                for i in range(0, len(response_text), DISCORD_CHAR_LIMIT)
+            ]
+            for idx, chunk in enumerate(chunks):
+                if len(chunks) > 1:
+                    prefix = f"[Part {idx + 1}/{len(chunks)}] "
+                    if len(prefix) + len(chunk) > DISCORD_CHAR_LIMIT:
+                        chunk = chunk[: DISCORD_CHAR_LIMIT - len(prefix)]
+                    chunk = prefix + chunk
+                await interaction.followup.send(chunk)
 
-            # save to history
-            self._history.record(
-                channel_id_int, personality, prompt or "", response_text
-            )
-        except Exception as e:
-            await interaction.followup.send(f"Gemini API error: {e}")
+        # Record the turn in history
+        self._history.record(channel_id_int, personality, prompt or "", response_text)
 
     @chat.autocomplete("personality")
     async def personality_autocomplete(
@@ -283,7 +198,7 @@ class Chat(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         visible = [
             app_commands.Choice(name=k.capitalize(), value=k)
-            for k in PERSONALITIES
+            for k in PERSONALITIES.keys()
             if persona_visible(k, interaction.user.id)
         ]
         if not current:
@@ -299,7 +214,9 @@ class Chat(commands.Cog):
         name="roundtable",
         description="Ask the same question to every available persona.",
     )
-    @app_commands.describe(prompt="What should I ask Gemini?")
+    @app_commands.describe(
+        prompt="What should I ask?",
+    )
     async def round_table(
         self,
         interaction: discord.Interaction,
@@ -310,79 +227,40 @@ class Chat(commands.Cog):
         if prompt is None:
             prompt = "Hello!"
 
-        GEMINI_API_KEY = settings.gemini_api_key
-        if not GEMINI_API_KEY:
-            await interaction.response.send_message(
-                "GEMINI_API_KEY is not configured.", ephemeral=True
-            )
-            return None
-
+        # Select provider based on settings
+        provider_name: str = getattr(settings, "llm_provider", "gemini")
         try:
-            from google import genai
-            from google.genai import types
-        except ImportError:
+            provider = _providers.get(provider_name)
+        except KeyError:
             await interaction.response.send_message(
-                "google-genai package is not installed. Please run: pip install google-genai",
-                ephemeral=True,
+                f"LLM provider '{provider_name}' is not available.", ephemeral=True
             )
-            return None
-
-        import asyncio
+            return
 
         await interaction.response.defer(thinking=True)
 
         async def _ask_persona(
             name: str, persona_prompt: str
         ) -> tuple[str, str | None, Exception | None]:
-            """Run blocking Gemini calls in a thread to avoid event-loop stalls."""
-
-            def _sync_call() -> str:
-                client = genai.Client(api_key=GEMINI_API_KEY)
-                # Build conversation history for this channel & persona
+            """Generate a reply for *name* using the shared provider."""
+            try:
                 chan_id: int = interaction.channel_id or 0
                 history_pairs = self._history.get(chan_id, name)
-                contents: list[types.Content] = []
-                for user_msg, bot_msg in history_pairs:
-                    contents.append(
-                        types.Content(
-                            role="user", parts=[types.Part.from_text(text=user_msg)]
-                        )
-                    )
-                    contents.append(
-                        types.Content(
-                            role="model", parts=[types.Part.from_text(text=bot_msg)]
-                        )
-                    )
-
-                # Append current user prompt
-                contents.append(
-                    types.Content(
-                        role="user", parts=[types.Part.from_text(text=prompt)]
-                    )
-                )
-                config = types.GenerateContentConfig(
-                    system_instruction=DEFAULT_SYSTEM_PROMPT + "\n\n" + persona_prompt,
-                    response_mime_type="text/plain",
-                )
-                stream = client.models.generate_content_stream(
-                    model=settings.gemini_model,
-                    # list[Content] is too narrow for the parameter, cast to list[Any]
-                    contents=cast(list[Any], contents),
-                    config=config,
-                )
-
-                text_accum = ""
-                # google-genai stream may be sync iterable; iterate normally.
-                for chunk in stream:
-                    text_fragment = getattr(chunk, "text", None)
-                    if text_fragment:
-                        text_accum += text_fragment
-                return text_accum or "[No response]"
-
-            try:
-                response_text: str = await asyncio.to_thread(_sync_call)
-                return (name, response_text, None)
-            except Exception as exc:  # pragma: no cover
+                messages = [
+                    {
+                        "role": "system",
+                        "content": DEFAULT_SYSTEM_PROMPT + "\n\n" + persona_prompt,
+                    },
+                    *(
+                        {"role": r, "content": c}
+                        for pair in history_pairs
+                        for r, c in (("user", pair[0]), ("assistant", pair[1]))
+                    ),
+                    {"role": "user", "content": prompt},
+                ]
+                response_text = await provider.generate(messages=messages)
+                return (name, cast(str, response_text), None)
+            except Exception as exc:
                 return (name, None, exc)
 
         # launch tasks only for visible personas

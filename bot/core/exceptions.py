@@ -13,6 +13,12 @@ class DomainError(Exception):
         super().__init__(f"[DomainError] {message}")
 
 
+class ModelOverloaded(DomainError):
+    """Raised when the selected LLM model is temporarily overloaded/unavailable."""
+
+    pass
+
+
 class BotError(DomainError):
     """Generic, non-domain-specific error raised by core helpers."""
 
