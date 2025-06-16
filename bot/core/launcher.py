@@ -6,8 +6,12 @@ import os
 import signal
 from typing import Callable
 
+from bot.core.logger_setup import setup_logging
 from bot.core.settings import settings as global_settings
 from bot.core.lifecycle import BotLifecycle
+
+# Ensure logging is configured before any loggers are fetched
+setup_logging()
 
 logger = logging.getLogger(__name__)
 

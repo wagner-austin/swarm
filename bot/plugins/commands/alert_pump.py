@@ -14,7 +14,7 @@ import discord
 from discord.ext import commands
 from typing import cast
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------+
 #  Tunables – can be overridden in tests or future settings                  +
@@ -44,7 +44,7 @@ class AlertPump(commands.Cog):
                 pass
         lifecycle = getattr(self.bot, "lifecycle", None)
         if lifecycle is None or not hasattr(lifecycle, "alerts_q"):
-            log.warning(
+            logger.warning(
                 "AlertPump loaded but lifecycle.alerts_q not available – disabled"
             )
             return  # cannot proceed without a queue
@@ -87,10 +87,10 @@ class AlertPump(commands.Cog):
                         app_info = await self.bot.application_info()
                         owner = app_info.owner
                     except Exception as exc:
-                        log.error("Cannot resolve bot owner: %s", exc)
+                        logger.error("Cannot resolve bot owner: %s", exc)
 
                 if owner is None:
-                    log.warning("Cannot send alert – owner unavailable: %s", msg)
+                    logger.warning("Cannot send alert – owner unavailable: %s", msg)
                 else:
                     await self._send_dm_with_retry(owner, f"⚠️ **Bot alert:** {msg}")
             finally:
@@ -116,14 +116,14 @@ class AlertPump(commands.Cog):
             except discord.HTTPException as exc:
                 attempt += 1
                 if attempt >= MAX_RETRY_ATTEMPTS:
-                    log.error(
+                    logger.error(
                         "Alert DM failed after %s attempts – giving up: %s",
                         attempt,
                         exc,
                     )
                     return
 
-                log.warning(
+                logger.warning(
                     "Alert DM attempt %s/%s failed (%s) – retrying in %.1fs",
                     attempt,
                     MAX_RETRY_ATTEMPTS,

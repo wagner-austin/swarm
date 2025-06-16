@@ -37,7 +37,9 @@ async def test_web_cog_start_command_success(
     """Test the /web start command for a successful URL navigation."""
     # Arrange
     # Patch runtime.enqueue instead of using a runner instance
-    enqueue_patch = patch("bot.browser.runtime.runtime.enqueue", new_callable=AsyncMock)
+    enqueue_patch = patch(
+        "bot.plugins.commands.web.BrowserRuntime.enqueue", new_callable=AsyncMock
+    )
     mock_enqueue = enqueue_patch.start()
 
     from bot.plugins.commands.web import Web as WebCog
@@ -62,7 +64,9 @@ async def test_web_cog_start_command_invalid_url(
     """Test the /web start command with an invalid URL."""
     # Arrange
     # Patch runtime.enqueue instead of using a runner instance
-    enqueue_patch = patch("bot.browser.runtime.runtime.enqueue", new_callable=AsyncMock)
+    enqueue_patch = patch(
+        "bot.plugins.commands.web.BrowserRuntime.enqueue", new_callable=AsyncMock
+    )
     mock_enqueue = enqueue_patch.start()
 
     from bot.plugins.commands.web import Web as WebCog
@@ -89,7 +93,9 @@ async def test_web_cog_click_command_success(
     """Test the /web click command."""
     # Arrange
     # Patch runtime.enqueue instead of using a runner instance
-    enqueue_patch = patch("bot.browser.runtime.runtime.enqueue", new_callable=AsyncMock)
+    enqueue_patch = patch(
+        "bot.plugins.commands.web.BrowserRuntime.enqueue", new_callable=AsyncMock
+    )
     mock_enqueue = enqueue_patch.start()
 
     from bot.plugins.commands.web import Web as WebCog

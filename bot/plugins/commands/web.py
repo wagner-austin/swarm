@@ -17,13 +17,13 @@ from discord.ext import commands
 
 from bot.core.settings import settings
 
-from bot.browser.runtime import runtime
+from bot.browser.runtime import BrowserRuntime
 from discord.ext.commands import Bot
 from bot.utils.urls import validate_and_normalise_web_url
 
 
 # --- validation helpers for this cog -------------------------------------
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Type parameters for decorator function signatures
 P = ParamSpec("P")  # for parameters
@@ -126,7 +126,7 @@ def browser_command(
 
             # Queue the operation
             try:
-                await runtime.enqueue(chan, op, *op_args)
+                await self.runtime.enqueue(chan, op, *op_args)
                 if success_msg:
                     await safe_followup(interaction, success_msg)
             except asyncio.QueueFull:
@@ -155,17 +155,12 @@ def browser_command(
 
 
 class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
-    def __init__(self, bot: Bot) -> None:
-        """Create a new *Web* cog.
-
-        Parameters
-        ----------
-        bot:
-            The hosting :class:`discord.ext.commands.Bot` instance.
-        runtime is global – no per-cog runner is required.
-        """
-
+    def __init__(self, bot: Bot) -> None:  # noqa: D401  (imperative)
+        super().__init__()
         self.bot = bot
+        # Resolve DI singleton for browser runtime
+        # The bot is always started with a DI container attached in discord_runner
+        self.runtime: BrowserRuntime = bot.container.browser_runtime()  # type: ignore[attr-defined]
 
     @app_commands.command(
         name="start", description="Start a browser session with an optional URL."
@@ -348,7 +343,9 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 # Enqueue the screenshot action and wait until the browser worker
                 # signals completion.  *enqueue()* returns a Future that resolves
                 # when the underlying Playwright operation has finished.
-                cmd_future = await runtime.enqueue(chan, "screenshot", screenshot_path)
+                cmd_future = await self.runtime.enqueue(
+                    chan, "screenshot", screenshot_path
+                )
                 await cmd_future  # ensures the file has been written
                 if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
                     await safe_followup(
@@ -372,7 +369,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                     try:
                         screenshot_path.unlink()
                     except Exception as e:
-                        log.error(f"Error deleting screenshot: {e}")
+                        logger.error(f"Error deleting screenshot: {e}")
 
         # We should schedule this to run after the browser action completes
         # For now, we'll use asyncio.create_task, but a better implementation could
@@ -385,7 +382,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     async def status(self, interaction: discord.Interaction) -> None:
         """Shows information about the browser instance for the current channel."""
         # First check if browsers exist
-        rows = runtime.status()
+        rows = self.runtime.status()
 
         # If we have active browsers, perform health check and attempt to heal
         if rows:
@@ -397,7 +394,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                         # This will trigger the self-healing mechanism if browser is closed
                         # We use a 2-second timeout to avoid blocking if there are issues
                         await asyncio.wait_for(
-                            runtime.enqueue(chan, "health_check"), timeout=2.0
+                            self.runtime.enqueue(chan, "health_check"), timeout=2.0
                         )
                     except asyncio.TimeoutError:
                         # If timeout occurs, continue with other channels
@@ -409,7 +406,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 pass  # Don't let health check errors prevent status display
 
             # Re-fetch status now that we've attempted healing
-            rows = runtime.status()
+            rows = self.runtime.status()
 
         # Display status information
         if not rows:
@@ -438,7 +435,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         assert chan is not None
 
         # First check if a browser exists for this channel
-        rows = [r for r in runtime.status() if r["channel"] == chan]
+        rows = [r for r in self.runtime.status() if r["channel"] == chan]
         if not rows:
             await interaction.response.send_message(
                 "No browser running for this channel.", ephemeral=True
@@ -449,7 +446,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
         try:
             # Close the browser for this channel
-            await runtime.close_channel(chan)
+            await self.runtime.close_channel(chan)
             await safe_followup(
                 interaction, "✅ Browser closed successfully.", ephemeral=True
             )
@@ -469,7 +466,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         # The decorator already enforces permissions; no extra checks needed
 
         # Check if there are any active browsers
-        rows = runtime.status()
+        rows = self.runtime.status()
         if not rows:
             await interaction.response.send_message(
                 "No active browser instances to close.", ephemeral=True
@@ -480,7 +477,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
         try:
             # Close all browsers
-            await runtime.close_all()
+            await self.runtime.close_all()
             await safe_followup(
                 interaction,
                 f"✅ Successfully closed {len(rows)} browser instance(s).",

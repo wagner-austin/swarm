@@ -21,10 +21,20 @@ class BrowserConfig(BaseModel):
 
     @field_validator("visible")
     @classmethod
-    def _exclusive_with_headless(cls, v: bool, info: ValidationInfo) -> bool:
+    def _exclusive_with_headless(cls, v: bool, info: ValidationInfo) -> bool:  # noqa: D401
+        """Prevent `visible` and `headless` from both being True."""
         if v and info.data.get("headless"):
             raise ValueError("`visible=True` and `headless=True` cannot both be set")
         return v
+
+
+class QueueConfig(BaseModel):
+    inbound: int = 500  # inbound frames (proxy)
+    outbound: int = 200  # outbound frames (AI → server)
+    command: int = 100  # browser command queue per channel
+    alerts: int = 200  # lifecycle → owner DM
+
+    model_config = {"extra": "ignore"}
 
 
 class Settings(BaseSettings):
@@ -75,6 +85,7 @@ class Settings(BaseSettings):
     )
 
     browser: BrowserConfig = BrowserConfig()
+    queues: QueueConfig = QueueConfig()
 
     # --- URL guard‑rails ---
     allowed_hosts: list[str] = []  # e.g. ["github.com", "docs.python.org"]
@@ -113,17 +124,8 @@ try:
 except ValueError:  # DISCORD_TOKEN missing under CI / mypy
     settings = Settings(discord_token="dummy")
 
-# Queue size constants
-INBOUND_QUEUE_MAXSIZE: int = 500  # e.g. inbound network frames (proxy)
-OUTBOUND_QUEUE_MAXSIZE: int = 200  # e.g. outbound frames to server / discord
-COMMAND_QUEUE_MAXSIZE: int = 100  # browser command queues per channel
-ALERTS_QUEUE_MAXSIZE: int = 200  # lifecycle alerts to owner
-
 __all__ = [
     "Settings",
     "BrowserConfig",
-    "INBOUND_QUEUE_MAXSIZE",
-    "OUTBOUND_QUEUE_MAXSIZE",
-    "COMMAND_QUEUE_MAXSIZE",
-    "ALERTS_QUEUE_MAXSIZE",
+    "QueueConfig",
 ]

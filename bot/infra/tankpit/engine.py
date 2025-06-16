@@ -14,7 +14,7 @@ import asyncio
 import logging
 from typing import Tuple
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _DirFrame = Tuple[str, bytes]
 
@@ -42,7 +42,7 @@ class TankPitEngine:
     async def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._run())
-            log.info("TankPitEngine: background task started")
+            logger.info("TankPitEngine: background task started")
 
     async def _run(self) -> None:
         """Main consume loop – placeholder implementation."""
@@ -59,6 +59,6 @@ class TankPitEngine:
 
                         alerts.alert("Proxy outbound queue overflow – dropping frame")
             except Exception as exc:  # pragma: no cover – dev aid
-                log.error("TankPitEngine error: %s", exc, exc_info=True)
+                logger.error("TankPitEngine error: %s", exc, exc_info=True)
             finally:
                 self._in.task_done()
