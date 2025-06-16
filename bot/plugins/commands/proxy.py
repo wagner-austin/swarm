@@ -1,6 +1,7 @@
 import logging
-from bot.plugins.base_di import BaseDIClientCog  # <- move here
 import discord
+from bot.utils.discord_interactions import safe_defer, safe_followup
+from bot.plugins.base_di import BaseDIClientCog  # <- move here
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.GroupCog
 
@@ -23,23 +24,24 @@ class ProxyCog(
 
     @app_commands.command(name="start", description="Start the proxy")
     async def start(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await safe_defer(interaction, thinking=True, ephemeral=True)
 
-        await interaction.followup.send(await self.svc.start())
+        await safe_followup(interaction, await self.svc.start())
 
     @app_commands.command(name="stop", description="Stop the proxy")
     async def stop(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(thinking=True, ephemeral=True)
-        await interaction.followup.send(await self.svc.stop())
+        await safe_defer(interaction, thinking=True, ephemeral=True)
+        await safe_followup(interaction, await self.svc.stop())
 
     @app_commands.command(name="status", description="Show proxy status")
     async def status(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await safe_defer(interaction, thinking=True, ephemeral=True)
         desc: str = self.svc.describe()
-        await interaction.followup.send(
+        await safe_followup(
+            interaction,
             f"{desc}\n"
             f"📥 in-queue {self.svc.in_q.qsize()}/{self.svc.in_q.maxsize}  "
-            f"📤 out-queue {self.svc.out_q.qsize()}/{self.svc.out_q.maxsize}"
+            f"📤 out-queue {self.svc.out_q.qsize()}/{self.svc.out_q.maxsize}",
         )
 
 

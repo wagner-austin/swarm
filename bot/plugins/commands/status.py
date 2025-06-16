@@ -8,6 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from bot.core import metrics
+from bot.utils.discord_interactions import safe_defer, safe_followup
 
 SPACER = " │ "  # visual separator in a single embed field
 
@@ -67,15 +68,9 @@ class Status(commands.Cog):
         )
 
         # 1) Acknowledge if we haven’t already (no harm if we’re late)
-        if not interaction.response.is_done():
-            try:
-                await interaction.response.defer(ephemeral=True)
-            except discord.HTTPException:
-                # If the gateway beat us by milliseconds, ignore the race
-                pass
+        await safe_defer(interaction, ephemeral=True)
 
-        # 2) ALWAYS deliver via follow-up – never risks a double-ack
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await safe_followup(interaction, embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

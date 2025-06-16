@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging.config
 import sys
 from textwrap import dedent
 
-from bot.core.logger_setup import DEFAULT_LOGGING_CONFIG
 
 __all__ = ["cli"]
 
@@ -70,8 +68,10 @@ def cli(argv: list[str] | None = None) -> None:  # noqa: D401
     # 1️⃣ Handle trivial flags **before** heavy imports.
     _build_parser().parse_known_args(argv)  # exits on -h/-V automatically
 
-    # 2️⃣ Configure logging & launch the real bot.
-    logging.config.dictConfig(DEFAULT_LOGGING_CONFIG)
+    # 2️⃣ Configure logging (idempotent) & launch the real bot.
+    from bot.core.logger_setup import setup_logging
+
+    setup_logging()
     from bot.core.main import main  # delayed import keeps --help fast
 
     asyncio.run(main())

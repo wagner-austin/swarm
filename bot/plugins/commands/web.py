@@ -6,7 +6,10 @@ import tempfile
 import time
 from pathlib import Path
 import functools
-from typing import Any, Callable, TypeVar, Optional, Coroutine, ParamSpec, cast
+from typing import Any, Callable, Coroutine, ParamSpec, TypeVar, Optional, cast
+
+# Import centralised Discord interaction helpers
+from bot.utils.discord_interactions import safe_followup, safe_defer
 
 import discord
 from discord import app_commands
@@ -110,10 +113,10 @@ def browser_command(
 
             if defer_ephemeral:
                 # Ephemeral spinner (e.g. /click, /fill…)
-                await interaction.response.defer(thinking=True, ephemeral=True)
+                await safe_defer(interaction, thinking=True, ephemeral=True)
             else:
                 # Regular spinner (e.g. /start, /open…)
-                await interaction.response.defer(thinking=True)
+                await safe_defer(interaction, thinking=True)
 
             # Unpack operation details
             op, op_args, success_msg = result
@@ -126,15 +129,16 @@ def browser_command(
             try:
                 await self._runner.enqueue(chan, op, *op_args)
                 if success_msg:
-                    await interaction.followup.send(success_msg)
+                    await safe_followup(interaction, success_msg)
             except asyncio.QueueFull:
-                await interaction.followup.send(
+                await safe_followup(
+                    interaction,
                     "❌ The browser command queue is full. Please try again later.",
                     ephemeral=True,
                 )
             except Exception as exc:
-                await interaction.followup.send(
-                    f"❌ {type(exc).__name__}: {exc}", ephemeral=True
+                await safe_followup(
+                    interaction, f"❌ {type(exc).__name__}: {exc}", ephemeral=True
                 )
             return
 
@@ -350,7 +354,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         # show “The application did not respond”.  We defer **before** kicking
         # off the asynchronous browser work.
         if not interaction.response.is_done():
-            await interaction.response.defer(thinking=True, ephemeral=True)
+            await safe_defer(interaction, thinking=True, ephemeral=True)
 
         async def process_screenshot() -> None:
             try:
@@ -362,18 +366,18 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 )
                 await cmd_future  # ensures the file has been written
                 if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
-                    await _safe_followup(
+                    await safe_followup(
                         interaction,
-                        content="✔️ Screenshot captured:",
+                        "✔️ Screenshot captured:",
                         file=discord.File(screenshot_path, filename=actual_filename),
                     )
                 else:
-                    await _safe_followup(
+                    await safe_followup(
                         interaction,
                         "❌ Failed to capture screenshot (empty or missing file).",
                     )
             except Exception as e:
-                await _safe_followup(
+                await safe_followup(
                     interaction,
                     f"❌ Error sending screenshot: {e}",
                 )
@@ -460,17 +464,19 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             )
             return
 
-        await interaction.response.defer(thinking=True)
+        await safe_defer(interaction, thinking=True)
 
         try:
             # Close the browser for this channel
             await browser_manager.close_channel(chan)
-            await interaction.followup.send(
-                "✅ Browser closed successfully.", ephemeral=True
+            await safe_followup(
+                interaction, "✅ Browser closed successfully.", ephemeral=True
             )
         except Exception as exc:
-            await interaction.followup.send(
-                f"❌ Error closing browser: {type(exc).__name__}: {exc}", ephemeral=True
+            await safe_followup(
+                interaction,
+                f"❌ Error closing browser: {type(exc).__name__}: {exc}",
+                ephemeral=True,
             )
 
     @app_commands.command(
@@ -489,74 +495,21 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             )
             return
 
-        await interaction.response.defer(thinking=True)
+        await safe_defer(interaction, thinking=True)
 
         try:
             # Close all browsers
             await browser_manager.close_all()
-            await interaction.followup.send(
+            await safe_followup(
+                interaction,
                 f"✅ Successfully closed {len(rows)} browser instance(s).",
                 ephemeral=True,
             )
         except Exception as exc:
-            await interaction.followup.send(
+            await safe_followup(
+                interaction,
                 f"❌ Error closing browsers: {type(exc).__name__}: {exc}",
                 ephemeral=True,
-            )
-
-
-# ---------------------------------------------------------------------------+
-#  Local helpers                                                             +
-# ---------------------------------------------------------------------------+
-
-
-async def _safe_followup(
-    interaction: discord.Interaction,
-    content: str = "",
-    *,
-    file: discord.File | None = None,
-) -> None:
-    """Send a follow-up or gracefully fall back when the webhook has expired.
-
-    Discord's type stubs expect *content* to be a ``str`` and *file* to be a
-    concrete :class:`discord.File`.  We therefore branch on *file*'s presence
-    to keep *mypy --strict* happy.
-    """
-    try:
-        if file is None:
-            await interaction.followup.send(content=content, ephemeral=True)
-        else:
-            await interaction.followup.send(
-                content=content,
-                file=file,
-                ephemeral=True,
-            )
-    except discord.NotFound:
-        # Webhook is gone – send to the channel instead (best effort)
-        try:
-            chan = interaction.channel
-            if chan is not None:
-                from typing import cast
-
-                messageable = cast(discord.abc.Messageable, chan)
-                if file is None:
-                    await messageable.send(content=content)
-                else:
-                    # The original discord.File's underlying fp may have been closed
-                    # during the failed webhook send. Re-create a fresh File object
-                    # from the original file path to avoid "I/O operation on closed file".
-                    try:
-                        file_path = Path(file.fp.name)  # type: ignore[attr-defined]
-                        fresh_file = discord.File(file_path, filename=file.filename)
-                        await messageable.send(content=content, file=fresh_file)
-                    except Exception:
-                        # Fall back to message without attachment if file could not be re-read
-                        await messageable.send(content=f"{content} (attachment failed)")
-        except Exception as inner_exc:  # pragma: no cover – log fallback failure
-            log.error(
-                "Failed to send fallback screenshot message: %s",
-                inner_exc,
-                exc_info=True,
             )
 
 

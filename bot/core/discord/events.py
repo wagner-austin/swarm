@@ -25,7 +25,7 @@ def register_event_handlers(bot: MyBot) -> None:
     async def on_ready() -> None:
         """Called when the bot is done preparing the data received from Discord."""
         # Matches the version from discord_runner.py before refactor
-        logger.info(f"Bot '{bot.user}' connected – syncing slash commands…")
+        logger.info(f"[bold green]✅ {bot.user} is LIVE[/] – syncing slash commands …")
 
         # 1️⃣ GLOBAL → needed for DM availability everywhere
         await bot.tree.sync()
@@ -94,25 +94,33 @@ def register_event_handlers(bot: MyBot) -> None:
     ) -> None:
         # Using CheckFailure and CommandOnCooldown imported at the top
         if isinstance(error, CheckFailure):
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    "🚫 You don’t have permission to use that command.",
-                    ephemeral=True,
-                )
+            from bot.utils.discord_interactions import safe_send
+
+            await safe_send(
+                interaction,
+                "🚫 You don’t have permission to use that command.",
+                ephemeral=True,
+            )
             return
 
         if isinstance(error, CommandOnCooldown):
-            await interaction.response.send_message(
-                f"⏱️ Cooldown – try again in {error.retry_after:.1f}s", ephemeral=True
+            from bot.utils.discord_interactions import safe_send
+
+            await safe_send(
+                interaction,
+                f"⏱️ Cooldown – try again in {error.retry_after:.1f}s",
+                ephemeral=True,
             )
             return
 
         logger.error(f"Unhandled app command error: {error}", exc_info=error)
-        if not interaction.response.is_done():
-            await interaction.response.send_message(
-                "⚙️ An unexpected error occurred. Please try again later.",
-                ephemeral=True,
-            )
+        from bot.utils.discord_interactions import safe_send
+
+        await safe_send(
+            interaction,
+            "⚙️ An unexpected error occurred. Please try again later.",
+            ephemeral=True,
+        )
 
     @bot.event
     async def on_message(message: discord.Message) -> None:

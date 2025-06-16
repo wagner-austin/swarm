@@ -1,5 +1,6 @@
 import asyncio
 import discord
+from bot.utils.discord_interactions import safe_send
 from discord.ext import commands
 from discord import app_commands
 from bot.core.browser_manager import browser_manager
@@ -17,7 +18,7 @@ class Shutdown(BaseDIClientCog):
     )
     async def shutdown(self, interaction: discord.Interaction) -> None:
         """Cleanly shut the bot down (owner-only)."""
-        await interaction.response.send_message("Shutting down...")
+        await safe_send(interaction, "Shutting down...")
 
         bot = interaction.client  # Get the bot instance
 
