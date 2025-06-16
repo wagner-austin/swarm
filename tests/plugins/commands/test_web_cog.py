@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from typing import Any, cast
 
 import discord
@@ -36,11 +36,13 @@ async def test_web_cog_start_command_success(
 ) -> None:
     """Test the /web start command for a successful URL navigation."""
     # Arrange
-    mock_runner_instance = AsyncMock()
+    # Patch runtime.enqueue instead of using a runner instance
+    enqueue_patch = patch("bot.browser.runtime.runtime.enqueue", new_callable=AsyncMock)
+    mock_enqueue = enqueue_patch.start()
 
     from bot.plugins.commands.web import Web as WebCog
 
-    cog = WebCog(mock_bot, runner=mock_runner_instance)
+    cog = WebCog(mock_bot)
     test_url = "http://example.com"
 
     # Act
@@ -48,9 +50,7 @@ async def test_web_cog_start_command_success(
 
     # Assert
     mock_interaction.response.defer.assert_awaited_once_with(thinking=True)
-    mock_runner_instance.enqueue.assert_awaited_once_with(
-        mock_interaction.channel_id, "goto", test_url
-    )
+    mock_enqueue.assert_awaited_once_with(mock_interaction.channel_id, "goto", test_url)
     mock_interaction.followup.send.assert_awaited_once_with(
         f"🟢 Started browser and navigated to **{test_url}**"
     )
@@ -61,11 +61,13 @@ async def test_web_cog_start_command_invalid_url(
 ) -> None:
     """Test the /web start command with an invalid URL."""
     # Arrange
-    mock_runner_instance = AsyncMock()
+    # Patch runtime.enqueue instead of using a runner instance
+    enqueue_patch = patch("bot.browser.runtime.runtime.enqueue", new_callable=AsyncMock)
+    mock_enqueue = enqueue_patch.start()
 
     from bot.plugins.commands.web import Web as WebCog
 
-    cog = WebCog(mock_bot, runner=mock_runner_instance)
+    cog = WebCog(mock_bot)
     invalid_url = "notaurl"  # Not a valid URL format
 
     # Act
@@ -76,7 +78,7 @@ async def test_web_cog_start_command_invalid_url(
         f"❌ Invalid URL: '{invalid_url}' does not look like a valid host. Please include a scheme (e.g., http:// or https://).",
         ephemeral=True,
     )
-    mock_runner_instance.enqueue.assert_not_called()
+    mock_enqueue.assert_not_called()
     mock_interaction.response.defer.assert_not_called()
     mock_interaction.followup.send.assert_not_called()
 
@@ -86,11 +88,13 @@ async def test_web_cog_click_command_success(
 ) -> None:
     """Test the /web click command."""
     # Arrange
-    mock_runner_instance = AsyncMock()
+    # Patch runtime.enqueue instead of using a runner instance
+    enqueue_patch = patch("bot.browser.runtime.runtime.enqueue", new_callable=AsyncMock)
+    mock_enqueue = enqueue_patch.start()
 
     from bot.plugins.commands.web import Web as WebCog
 
-    cog = WebCog(mock_bot, runner=mock_runner_instance)
+    cog = WebCog(mock_bot)
     test_selector = "#myButton"
 
     # Act
@@ -100,7 +104,7 @@ async def test_web_cog_click_command_success(
     mock_interaction.response.defer.assert_awaited_once_with(
         thinking=True, ephemeral=True
     )
-    mock_runner_instance.enqueue.assert_awaited_once_with(
+    mock_enqueue.assert_awaited_once_with(
         mock_interaction.channel_id, "click", test_selector
     )
     mock_interaction.followup.send.assert_awaited_once_with(

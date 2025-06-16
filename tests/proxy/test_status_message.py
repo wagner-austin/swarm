@@ -21,6 +21,6 @@ async def test_status_string(monkeypatch: pytest.MonkeyPatch) -> None:
 
     await svc.start()
     text = svc.describe()
-    assert text.startswith("running on http://127.0.0.1:9000")
+    assert text.startswith(f"running on http://127.0.0.1:{svc.port}")
     assert "0 inbound" in text and "0 outbound" in text
     await svc.stop()
