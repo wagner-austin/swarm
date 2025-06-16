@@ -15,6 +15,8 @@ import asyncio
 from collections import defaultdict
 from typing import Any, Dict
 
+from bot.core.settings import COMMAND_QUEUE_MAXSIZE
+
 from .engine import BrowserEngine
 from .types import Command
 
@@ -58,7 +60,7 @@ class BrowserRuntime:
                 await ctx.engine.start()
 
             if ctx.queue is None:
-                ctx.queue = asyncio.Queue(maxsize=100)
+                ctx.queue = asyncio.Queue(maxsize=COMMAND_QUEUE_MAXSIZE)
                 ctx.task = asyncio.create_task(self._worker(channel_id))
 
             fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
