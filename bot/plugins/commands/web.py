@@ -499,7 +499,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
         try:
             # Close all browsers
-            await browser_manager.close_all()
+            await browser_manager.aclose()
             await safe_followup(
                 interaction,
                 f"✅ Successfully closed {len(rows)} browser instance(s).",

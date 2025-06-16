@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from bot.core.settings import COMMAND_QUEUE_MAXSIZE
 from typing import Dict, Any, TypeVar  # Using Any for asyncio.Task generic type
 
 # Assuming Command is already defined in command.py
@@ -23,7 +24,7 @@ class BrowserWorkerRegistry:
     def __init__(self) -> None:
         self._active_worker_tasks: Dict[int, asyncio.Task[Any]] = {}
         self._command_queues: Dict[int, asyncio.Queue[Command | object]] = defaultdict(
-            lambda: asyncio.Queue(maxsize=100)
+            lambda: asyncio.Queue(maxsize=COMMAND_QUEUE_MAXSIZE)
         )  # Added maxsize for safety
         self._lock = asyncio.Lock()
 
@@ -34,7 +35,9 @@ class BrowserWorkerRegistry:
         async with self._lock:
             # Ensure queue is created if it doesn't exist while under lock
             if channel_id not in self._command_queues:
-                self._command_queues[channel_id] = asyncio.Queue(maxsize=100)
+                self._command_queues[channel_id] = asyncio.Queue(
+                    maxsize=COMMAND_QUEUE_MAXSIZE
+                )
             return self._command_queues[channel_id]
 
     async def add_worker_task(self, channel_id: int, task: asyncio.Task[Any]) -> None:

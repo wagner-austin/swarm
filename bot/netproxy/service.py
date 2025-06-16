@@ -10,6 +10,7 @@ Start/stop a TLS-MITM proxy on localhost:*port*.
 from __future__ import annotations
 import asyncio
 import logging
+from bot.core.settings import INBOUND_QUEUE_MAXSIZE, OUTBOUND_QUEUE_MAXSIZE
 from pathlib import Path
 from mitmproxy import options, proxy
 from mitmproxy.http import HTTPFlow  # For WebSocket flow type hint
@@ -45,8 +46,10 @@ class ProxyService:
         # Bounded queues prevent unbounded memory growth under heavy load.
         # Tuned based on typical traffic patterns: inbound frames larger and
         # more frequent than outbound AI-crafted frames.
-        self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(maxsize=500)
-        self.out_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=200)
+        self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(
+            maxsize=INBOUND_QUEUE_MAXSIZE
+        )
+        self.out_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=OUTBOUND_QUEUE_MAXSIZE)
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
         self._addons: list[AddonProtocol] = addons or []

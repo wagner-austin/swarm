@@ -82,7 +82,7 @@ class BrowserManager:
             return tasks
 
     # graceful shutdown -----------------------------------------------------
-    async def close_all(self) -> None:
+    async def aclose(self) -> None:
         async with self._lock:
             tasks = list(self._runners.values())
             self._runners.clear()
