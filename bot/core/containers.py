@@ -4,6 +4,7 @@ from pathlib import Path
 from bot.core.settings import Settings
 
 from bot.netproxy.service import ProxyService
+from bot.browser.runtime import BrowserRuntime
 from bot.infra.tankpit.proxy.ws_tankpit import TankPitWSAddon
 from bot.ai import providers as _ai_providers
 
@@ -27,6 +28,7 @@ class Container(containers.DeclarativeContainer):
     # Proxy service
     # The default_port and cert_dir for ProxyService can be sourced from config.
     # The 'addon' parameter defaults to None as per ProxyService.__init__ signature.
+    # Proxy service
     proxy_service: providers.Singleton["ProxyService"] = providers.Singleton(
         ProxyService,
         port=providers.Callable(
@@ -42,6 +44,11 @@ class Container(containers.DeclarativeContainer):
         addons=providers.List(
             providers.Object(TankPitWSAddon),
         ),
+    )
+
+    # Browser runtime – one process-wide instance wired through DI
+    browser_runtime: providers.Singleton["BrowserRuntime"] = providers.Singleton(
+        BrowserRuntime
     )
 
 

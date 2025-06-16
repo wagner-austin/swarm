@@ -27,7 +27,7 @@ __all__ = [
     "safe_followup",
 ]
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -134,7 +134,7 @@ async def safe_send(
         kwargs.pop("ephemeral", None)
         await target.send(content or "", **kwargs)
     except Exception:  # pragma: no cover – log and swallow
-        log.exception("Final channel send fallback failed.")
+        logger.exception("Final channel send fallback failed.")
 
 
 async def safe_followup(

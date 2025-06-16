@@ -10,7 +10,7 @@ Start/stop a TLS-MITM proxy on localhost:*port*.
 from __future__ import annotations
 import asyncio
 import logging
-from bot.core.settings import INBOUND_QUEUE_MAXSIZE, OUTBOUND_QUEUE_MAXSIZE
+from bot.core.settings import settings
 from pathlib import Path
 from mitmproxy import options, proxy
 from mitmproxy.http import HTTPFlow  # For WebSocket flow type hint
@@ -24,7 +24,7 @@ from mitmproxy.tools.dump import DumpMaster
 
 # Removed: from .addon import WSAddon
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -47,9 +47,11 @@ class ProxyService:
         # Tuned based on typical traffic patterns: inbound frames larger and
         # more frequent than outbound AI-crafted frames.
         self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(
-            maxsize=INBOUND_QUEUE_MAXSIZE
+            maxsize=settings.queues.inbound
         )
-        self.out_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=OUTBOUND_QUEUE_MAXSIZE)
+        self.out_q: asyncio.Queue[bytes] = asyncio.Queue(
+            maxsize=settings.queues.outbound
+        )
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
         self._addons: list[AddonProtocol] = addons or []
@@ -93,7 +95,7 @@ class ProxyService:
         try:
             self._task = asyncio.create_task(self._dump.run())  # spawn the coroutine
             await asyncio.sleep(0)  # let it start; surfaces import errors fast
-            log.info(
+            logger.info(
                 f"ProxyService: mitmproxy task created, listening on http://127.0.0.1:{self.port}"
             )
         except Exception:
@@ -112,12 +114,12 @@ class ProxyService:
 
         # Check if proxy is not running but may have been started before
         if not self._dump:
-            log.info("ProxyService: No active mitmproxy instance to stop.")
+            logger.info("ProxyService: No active mitmproxy instance to stop.")
             self._task = None
             self.port = self._default_port
             return "Proxy not running."
 
-        log.info("ProxyService: Shutting down mitmproxy.")
+        logger.info("ProxyService: Shutting down mitmproxy.")
         assert self._dump is not None  # Ensured by the checks above
         self._dump.shutdown()  # type: ignore[no-untyped-call] # tell mitmproxy to stop
         if self._task:
@@ -127,17 +129,17 @@ class ProxyService:
                     # wait up to 3 s so the OS definitely releases the socket
                     await asyncio.wait_for(self._task, timeout=3)
                 except asyncio.CancelledError:
-                    log.info("ProxyService: mitmproxy task cancelled as expected.")
+                    logger.info("ProxyService: mitmproxy task cancelled as expected.")
                     # pass # Expected, no specific action needed beyond logging
                 except Exception as e:  # Catch other errors during await
-                    log.error(
+                    logger.error(
                         f"ProxyService: Error awaiting mitmproxy task after cancellation: {e}"
                     )
             elif self._task.exception():  # If task is done and has an exception, log it
                 try:
                     self._task.result()  # This will re-raise the exception
                 except Exception as e:
-                    log.error(
+                    logger.error(
                         f"ProxyService: mitmproxy task had already finished with an error: {e}"
                     )
             # If task is done without exception, it's fine.
@@ -148,7 +150,7 @@ class ProxyService:
         # reset to the *original* preferred port so the next call to start()
         # tries the same number first (nice for humans, harmless for tests).
         self.port = self._default_port
-        log.info("ProxyService: mitmproxy stopped.")
+        logger.info("ProxyService: mitmproxy stopped.")
         return "Proxy stopped."
 
     # convenience helper for unit tests
@@ -181,7 +183,7 @@ class ProxyService:
         """Gracefully stop the mitmproxy service.
         This method ensures that the existing stop() logic is awaited.
         """
-        log.info("ProxyService: aclose() called. Initiating shutdown via stop().")
+        logger.info("ProxyService: aclose() called. Initiating shutdown via stop().")
         await self.stop()
         # If self._process was intended for a different way of running mitmproxy (e.g., external subprocess),
         # and if that way could co-exist or be an alternative, then the original logic for self._process
@@ -193,7 +195,7 @@ class ProxyService:
         # await self._process.wait()
         # self._process = None
         # For now, we assume self.stop() handles all necessary cleanup for the current start() implementation.
-        log.info("ProxyService: aclose() completed.")
+        logger.info("ProxyService: aclose() completed.")
 
 
 # ------------------------------------------------------------------

@@ -3,7 +3,7 @@ import discord
 from bot.utils.discord_interactions import safe_send
 from discord.ext import commands
 from discord import app_commands
-from bot.browser.runtime import runtime
+from bot.browser.runtime import BrowserRuntime
 
 from bot.plugins.base_di import BaseDIClientCog
 
@@ -12,6 +12,7 @@ class Shutdown(BaseDIClientCog):
     def __init__(self, bot: commands.Bot) -> None:
         BaseDIClientCog.__init__(self, bot)
         self.bot = bot
+        self.runtime: BrowserRuntime = bot.container.browser_runtime()  # type: ignore[attr-defined]
 
     @app_commands.command(
         name="shutdown", description="Cleanly shut the bot down (owner only)."
@@ -30,7 +31,7 @@ class Shutdown(BaseDIClientCog):
 
         # 1️⃣.b Close all browser engines
         try:
-            await runtime.close_all()
+            await self.runtime.close_all()
         except Exception:
             # Log internally – user sees generic shutdown msg already
             pass

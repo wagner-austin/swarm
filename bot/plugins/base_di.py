@@ -25,6 +25,8 @@ class BaseDIClientCog(commands.Cog):
                 "or attach a Container in your test fixture."
             )
         self.container = bot.container
+        # Commonly-used services shortcut
+        self.runtime = self.container.browser_runtime()
         logging.getLogger(__name__).debug(
             "[BaseDIClientCog] container resolved: %s", type(self.container).__name__
         )

@@ -14,7 +14,7 @@ import logging
 import time
 
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def send_alert(message: str) -> None:
@@ -28,7 +28,7 @@ async def send_alert(message: str) -> None:
 
     lifecycle = _lifecycle_singleton  # noqa: SLF001 – internal helper
     if lifecycle is None or not hasattr(lifecycle, "alerts_q"):
-        log.warning("Alert not sent – lifecycle not ready: %s", message)
+        logger.warning("Alert not sent – lifecycle not ready: %s", message)
         return
 
     q: asyncio.Queue[str] = lifecycle.alerts_q
@@ -36,7 +36,7 @@ async def send_alert(message: str) -> None:
     try:
         q.put_nowait(message)
     except asyncio.QueueFull:
-        log.warning("alerts_q is full; dropping alert: %s", message)
+        logger.warning("alerts_q is full; dropping alert: %s", message)
         # Emit a throttled overflow notice so the owner knows messages were lost
         now = time.monotonic()
         last: float = getattr(send_alert, "_last_overflow_notice", 0.0)
@@ -55,7 +55,7 @@ def alert(message: str) -> None:  # convenience wrapper, non-awaitable
         loop = asyncio.get_running_loop()
     except RuntimeError:
         # Not in an event-loop context yet; log and bail.
-        log.warning("alert() called too early, dropping: %s", message)
+        logger.warning("alert() called too early, dropping: %s", message)
         return
     loop.create_task(send_alert(message))
 

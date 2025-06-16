@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from bot.core.settings import ALERTS_QUEUE_MAXSIZE
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
@@ -45,7 +44,9 @@ class BotLifecycle:
         self._container: Container | None = None
         self._shutdown_event = asyncio.Event()
         # Bounded queue for runtime alerts that should be forwarded to the bot owner.
-        self.alerts_q: asyncio.Queue[str] = asyncio.Queue(maxsize=ALERTS_QUEUE_MAXSIZE)
+        self.alerts_q: asyncio.Queue[str] = asyncio.Queue(
+            maxsize=settings.queues.alerts
+        )
 
     @property
     def state(self) -> LifecycleState:

@@ -15,7 +15,7 @@ import asyncio
 from collections import defaultdict
 from typing import Any, Dict
 
-from bot.core.settings import COMMAND_QUEUE_MAXSIZE
+from bot.core.settings import settings
 
 from .engine import BrowserEngine
 from .types import Command
@@ -60,7 +60,7 @@ class BrowserRuntime:
                 await ctx.engine.start()
 
             if ctx.queue is None:
-                ctx.queue = asyncio.Queue(maxsize=COMMAND_QUEUE_MAXSIZE)
+                ctx.queue = asyncio.Queue(maxsize=settings.queues.command)
                 ctx.task = asyncio.create_task(self._worker(channel_id))
 
             fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
@@ -127,7 +127,4 @@ class BrowserRuntime:
                 ctx.queue.task_done()
 
 
-# Public singleton instance for application code
-runtime = BrowserRuntime()
-
-__all__ = ["runtime", "BrowserRuntime"]
+__all__ = ["BrowserRuntime"]
