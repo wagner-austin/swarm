@@ -53,16 +53,39 @@ class Chat(commands.Cog):
             if hasattr(self._client, "close"):
                 self._client.close()
 
-    @app_commands.command(name="chat", description="Chat with Google Gemini")
+    @app_commands.command(
+        name="chat", description="Chat with Google Gemini (or clear history)"
+    )
     @app_commands.describe(
-        prompt="What should I ask Gemini?", personality="Pick a persona"
+        prompt="What should I ask Gemini?",
+        clear="If true, reset conversation history instead",
+        personality="Pick a persona",
     )
     async def chat(
         self,
         interaction: discord.Interaction,
         prompt: str | None = None,
+        clear: bool = False,
         personality: str | None = None,
     ) -> None:
+        # Handle clearing history first
+        if clear:
+            chan_id_clear: int = interaction.channel_id or 0
+            if personality is not None and not persona_visible(
+                personality, interaction.user.id
+            ):
+                await interaction.response.send_message(
+                    "You are not allowed to use that persona.", ephemeral=True
+                )
+                return
+
+            self._history.clear(chan_id_clear, personality)
+            target = f" for **{personality}**" if personality else ""
+            await interaction.response.send_message(
+                f"Chat history{target} cleared.", ephemeral=True
+            )
+            return
+
         GEMINI_API_KEY = settings.gemini_api_key
         if not GEMINI_API_KEY:
             await interaction.response.send_message(
@@ -84,7 +107,7 @@ class Chat(commands.Cog):
             prompt = "Hello!"
 
         # Determine which personality prompt to use
-        chan_id: int = int(
+        channel_id_int: int = int(
             (
                 getattr(interaction, "channel_id", None)
                 or (interaction.channel.id if interaction.channel else 0)
@@ -94,13 +117,13 @@ class Chat(commands.Cog):
 
         if personality is not None:
             # Store explicit choice for this channel
-            if chan_id is not None:
-                self._channel_persona[chan_id] = personality
+            if channel_id_int is not None:
+                self._channel_persona[channel_id_int] = personality
         else:
             # Fallback to last remembered choice
             personality = (
-                self._channel_persona.get(chan_id, "default")
-                if chan_id is not None
+                self._channel_persona.get(channel_id_int, "default")
+                if channel_id_int is not None
                 else "default"
             )
 
@@ -119,8 +142,8 @@ class Chat(commands.Cog):
             self._client = genai.Client(api_key=GEMINI_API_KEY)
             model = settings.gemini_model
 
-            # Build message history for Gemini using previously computed `chan_id`
-            history_pairs = self._history.get(chan_id, personality)
+            # Build message history for Gemini using previously computed `channel_id_int`
+            history_pairs = self._history.get(channel_id_int, personality)
             contents: list[types.Content] = []
             for user_msg, bot_msg in history_pairs:
                 contents.append(
@@ -248,11 +271,11 @@ class Chat(commands.Cog):
                     await interaction.followup.send(chunk)
 
             # save to history
-            self._history.record(chan_id, personality, prompt or "", response_text)
+            self._history.record(
+                channel_id_int, personality, prompt or "", response_text
+            )
         except Exception as e:
             await interaction.followup.send(f"Gemini API error: {e}")
-
-    # --------------------------- autocomplete ----------------------------
 
     @chat.autocomplete("personality")
     async def personality_autocomplete(
