@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, TypedDict, Any
 
 import yaml  # PyYAML (dev dependency already present)
-import base64
-import gzip
+
 
 from bot.core.settings import settings
 
@@ -37,7 +36,8 @@ __all__ = [
 
 class Persona(TypedDict):
     prompt: str
-    allowed_users: Optional[List[int]]
+    # allow list entries to be either int (YAML bare number) or str (quoted number)
+    allowed_users: Optional[List[int | str]]
 
 
 def _coerce(raw_map: Any) -> Dict[str, Persona]:
@@ -53,7 +53,7 @@ def _coerce(raw_map: Any) -> Dict[str, Persona]:
             # skip invalid entries quietly (matches earlier leniency)
             continue
         prompt: str = str(val["prompt"])
-        allowed: Optional[List[int]] = val.get("allowed_users")
+        allowed: Optional[List[int | str]] = val.get("allowed_users")
         result[key] = {"prompt": prompt, "allowed_users": allowed}
     return result
 
@@ -123,23 +123,26 @@ def _populate(target: Dict[str, Persona]) -> None:
     _secret_env: str | None = os.getenv("BOT_SECRET_PERSONAS")
     if _secret_env:
         try:
-            target.update(_coerce(yaml.safe_load(_secret_env) or {}))
+            _env_raw: str = _secret_env.replace(
+                "${OWNER_ID}", str(settings.owner_id or "")
+            )
+            target.update(_coerce(yaml.safe_load(_env_raw) or {}))
         except Exception:
             # Fail soft – malformed env secrets shouldn't crash the bot
             pass
 
-    # compressed secret variant (gzip + base64) – supports larger YAML within Fly 4 KB limit
-    _secret_b64: str | None = os.getenv("BOT_SECRET_PERSONAS_GZIP_B64")
-    if _secret_b64:
+    # runtime secret file mounted by Fly (highest precedence)
+    _runtime_secret_file: Path = Path("/secrets") / "BOT_SECRET_PERSONAS"
+    if _runtime_secret_file.exists():
         try:
-            _decoded: bytes = base64.b64decode(_secret_b64)
-            _yaml_bytes: bytes = gzip.decompress(_decoded)
-            target.update(_coerce(yaml.safe_load(_yaml_bytes) or {}))
+            _runtime_raw: str = _runtime_secret_file.read_text("utf-8").replace(
+                "${OWNER_ID}", str(settings.owner_id or "")
+            )
+            target.update(_coerce(yaml.safe_load(_runtime_raw) or {}))
         except Exception:
-            # Fail soft – malformed or undecodable secret shouldn't crash the bot
             pass
 
-    # secrets file (highest precedence)
+    # operator secrets file (local dev) – precedence just below runtime secret
     if _SECRET_FILE.exists():
         target.update(_load(_SECRET_FILE))
 
@@ -189,7 +192,8 @@ def visible(name: str, user_id: int) -> bool:
     if persona is None:
         return False
     allowed = persona.get("allowed_users")
-    return allowed is None or user_id in allowed
+    # accept both ints and strings for user IDs to tolerate quoted YAML scalars in Fly secrets
+    return allowed is None or str(user_id) in (str(uid) for uid in allowed)
 
 
 __all__ = ["PERSONALITIES", "prompt", "visible", "Persona"]

@@ -5,6 +5,15 @@
         savecode savecode-test deploy logs secrets personas
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Windows shell fix – use Git sh so recipes support $(...) and pipes
+# ---------------------------------------------------------------------------
+ifeq ($(OS),Windows_NT)
+SHELL := sh
+.SHELLFLAGS := -c
+endif
+
+# ---------------------------------------------------------------------------
 # Tooling helpers
 # ---------------------------------------------------------------------------
 POETRY  := poetry             # centralised Poetry command (override with POETRY=…)
@@ -64,13 +73,28 @@ secrets: install               ## upload .env values to Fly (idempotent)
 	@echo "🔐  Syncing secrets with Fly …"
 	@$(PYTHON) scripts/sync_secrets.py
 
-# Upload personas.yaml as Fly secret
-PERSONAS_FILE := /c/Users/Test/.config/discord-bot/secrets/personas.yaml
+# Upload personas.yaml as Fly secret (defaults to ~/.config/discord-bot/secrets/personas.yaml)
+PERSONAS_FILE ?= $(HOME)/.config/discord-bot/secrets/personas.yaml
 
-.PHONY: personas
-personas:	## upload (compressed) personas.yaml as BOT_SECRET_PERSONAS secret
+.PHONY: personas personas-win personas-posix
+# upload personas.yaml as the BOT_SECRET_PERSONAS secret (plain YAML text)
+
+ifeq ($(OS),Windows_NT)
+# -------------------- Windows PowerShell implementation --------------------
+personas: personas-win
+
+personas-win:
+	powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/update_personas.ps1
+else
+# -------------------------- Standard POSIX shell ---------------------------
+personas: personas-posix
+
+personas-posix:
 	@echo "🚀  Updating personas secret …"
-	fly secrets set BOT_SECRET_PERSONAS_GZIP_B64="$$(gzip -c $(PERSONAS_FILE) | base64 -w0)"
+	@test -s "$(PERSONAS_FILE)" || (echo "❌  Personas file missing or empty: $(PERSONAS_FILE)"; exit 1)
+	@fly secrets unset BOT_SECRET_PERSONAS || true
+	@fly secrets set BOT_SECRET_PERSONAS="$$$(cat "$(PERSONAS_FILE)")"
+endif
 
 # Build & deploy current code to Fly
 deploy: secrets personas         ## build & deploy current code to Fly

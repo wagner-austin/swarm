@@ -64,9 +64,20 @@ class RedisBackend(HistoryBackend):
 
     async def clear(self, channel: int, persona: str | None = None) -> None:  # noqa: D401
         if persona is None:
-            # Wildcard delete
-            keys = await cast(Any, self._r).keys(f"history:{channel}:*")
-            if keys:
-                await cast(Any, self._r).delete(*keys)
+            # Wildcard delete using SCAN to avoid blocking KEYS.  Handle both async and sync iterators gracefully.
+            pattern = f"history:{channel}:*"
+            try:
+                iterator = cast(Any, self._r).scan_iter(match=pattern)
+                if hasattr(iterator, "__aiter__"):
+                    async for key in iterator:
+                        await cast(Any, self._r).delete(key)
+                else:  # Fallback for sync generator
+                    for key in iterator:
+                        await cast(Any, self._r).delete(key)
+            except Exception:
+                # Fallback to KEYS if SCAN not available or fails
+                keys = await cast(Any, self._r).keys(pattern)
+                if keys:
+                    await cast(Any, self._r).delete(*keys)
         else:
             await cast(Any, self._r).delete(self._key(channel, persona))
