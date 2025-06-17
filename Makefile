@@ -2,7 +2,7 @@
 # Run `make help` to see available targets.
 
 .PHONY: install shell lint format test clean run build help \
-        savecode savecode-test deploy logs secrets
+        savecode savecode-test deploy logs secrets personas
 
 # ---------------------------------------------------------------------------
 # Tooling helpers
@@ -64,9 +64,17 @@ secrets: install               ## upload .env values to Fly (idempotent)
 	@echo "🔐  Syncing secrets with Fly …"
 	@$(PYTHON) scripts/sync_secrets.py
 
+# Upload personas.yaml as Fly secret
+PERSONAS := $(HOME)/.config/discord-bot/secrets/personas.yaml
+
+.PHONY: personas
+personas:              ## upload personas.yaml as BOT_SECRET_PERSONAS secret
+	@echo "🚀  Updating personas secret …"
+	fly secrets set BOT_SECRET_PERSONAS="$$(cat $(PERSONAS))"
+
 # Build & deploy current code to Fly
-deploy: secrets         ## build & deploy current code to Fly
-	flyctl deploy --remote-only
+deploy: secrets personas         ## build & deploy current code to Fly
+	fly deploy --remote-only --build-arg BUILDKIT_PROGRESS=plain
 
 # Tail live Fly logs
 logs:                        ## tail live Fly logs
