@@ -31,6 +31,7 @@ dependencies = [
   # --- dependency injection ---
   "dependency-injector>=4.41",
   "PyYAML>=6.0",
+  "redis[asyncio]>=5",
 ]
 
 [project.optional-dependencies]

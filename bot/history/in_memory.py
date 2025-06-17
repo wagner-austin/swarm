@@ -24,7 +24,7 @@ class MemoryBackend(HistoryBackend):
 
     async def recent(self, channel: int, persona: str) -> List[Turn]:
         buf: Deque[Turn] = self._store[channel][persona]
-        # Oldest first so higher-level code can stream messages chronologically
+        # Oldest first so higher-level code can stream messages chronologically.
         return list(buf)
 
     async def clear(self, channel: int, persona: str | None = None) -> None:  # noqa: D401

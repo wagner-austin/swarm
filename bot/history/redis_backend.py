@@ -1,28 +1,50 @@
 from __future__ import annotations
 
 import json
-from typing import List
+from types import ModuleType
+from typing import Any, List, cast
 
+
+from .backends import (
+    HistoryBackend,
+    Turn,
+)  # must precede runtime code to satisfy ruff E402
+
+redis_async: ModuleType | None
 try:
-    import aioredis
+    import redis.asyncio as _redis_mod
+
+    redis_async = _redis_mod
 except ModuleNotFoundError:  # pragma: no cover – optional dependency
-    aioredis = None
+    redis_async = None
 
+# Using `Any` for Redis client type avoids mismatches with stubs that declare
+# sync return types (ints, lists) even for async API. This keeps `mypy --strict`
+# happy without sprinkling type: ignore comments.
 
-from .backends import HistoryBackend, Turn
+# Using `Any` for Redis client type avoids mismatches with stubs that declare
+# sync return types (ints, lists) even for async API. This keeps `mypy --strict`
+# happy without sprinkling type: ignore comments.
+RedisT = Any
+
+_redis: ModuleType | None = redis_async
 
 
 class RedisBackend(HistoryBackend):
     """Redis-based implementation of :class:`HistoryBackend`."""
 
     def __init__(self, url: str, max_turns: int) -> None:
-        if aioredis is None:
+        if _redis is None:
             raise ImportError(
-                "aioredis dependency required for RedisBackend but not installed.\nInstall via `pip install aioredis`. "
+                "Redis backend selected but optional 'redis' package is not installed.\n"
+                "Install via `pip install redis[asyncio]` or disable REDIS_ENABLED."
             )
         self._max_turns = max_turns
-        # Decode responses (str) so we get strings not bytes
-        self._r: aioredis.Redis[str] = aioredis.from_url(url, decode_responses=True)
+        # Decode responses (str) so we get strings not bytes.  Cast keeps mypy strict happy.
+        self._r: RedisT = cast(
+            RedisT,
+            _redis.from_url(url, encoding="utf-8", decode_responses=True),
+        )
 
     # Internal helper -----------------------------------------------------
     def _key(self, channel: int, persona: str) -> str:
@@ -31,22 +53,20 @@ class RedisBackend(HistoryBackend):
     # Backend API ---------------------------------------------------------
     async def record(self, channel: int, persona: str, turn: Turn) -> None:  # noqa: D401
         key: str = self._key(channel, persona)
-        await self._r.rpush(key, json.dumps(turn))
+        await cast(Any, self._r).rpush(key, json.dumps(turn))
         # Trim to last N items (-N to -1 keeps last N)
-        await self._r.ltrim(key, -self._max_turns, -1)
+        await cast(Any, self._r).ltrim(key, -self._max_turns, -1)
 
     async def recent(self, channel: int, persona: str) -> List[Turn]:
         key: str = self._key(channel, persona)
-        raw: List[str] = await self._r.lrange(key, -self._max_turns, -1)
-        from typing import cast
-
+        raw: List[str] = await cast(Any, self._r).lrange(key, -self._max_turns, -1)
         return cast(List[Turn], [tuple(json.loads(t)) for t in raw])
 
     async def clear(self, channel: int, persona: str | None = None) -> None:  # noqa: D401
         if persona is None:
             # Wildcard delete
-            keys = await self._r.keys(f"history:{channel}:*")
+            keys = await cast(Any, self._r).keys(f"history:{channel}:*")
             if keys:
-                await self._r.delete(*keys)
+                await cast(Any, self._r).delete(*keys)
         else:
-            await self._r.delete(self._key(channel, persona))
+            await cast(Any, self._r).delete(self._key(channel, persona))

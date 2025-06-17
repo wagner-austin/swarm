@@ -26,7 +26,10 @@ class HistoryBackend(ABC):
 
     @abstractmethod
     async def recent(self, channel: int, persona: str) -> List[Turn]:
-        """Return the *max_turns* most-recent turns (oldest first)."""
+        """Return buffered turns for *channel*/*persona* (oldest first).
+
+        The concrete backend decides how many turns to retain based on the
+        *max_turns* value provided to its constructor."""
 
     @abstractmethod
     async def clear(self, channel: int, persona: str | None = None) -> None:
