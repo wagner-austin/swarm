@@ -14,7 +14,7 @@ dependencies = [
   "pydantic>=2",
   "pydantic-settings",
 
-  "playwright>=1.44",   # single install; run `playwright install chromium` post-deploy
+  "playwright (>=1.44,<2.0)",   # single install; run `playwright install chromium` post-deploy
   "discord.py>=2.3",
 
   # --- proxy and websocket support ---
