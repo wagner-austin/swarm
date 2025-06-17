@@ -20,9 +20,8 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock* ./
 
 # Install *locked* production dependencies directly into the system site-packages (no venv)
-# Install locked production deps via requirements.txt (avoids Poetry metadata requirements)
-RUN poetry export --only main --without-hashes -f requirements.txt | \
-    pip install --no-cache-dir -r /dev/stdin
+ENV POETRY_VIRTUALENVS_CREATE=false
+RUN poetry install --only main --no-root --no-ansi --no-interaction
 
 # Copy the source code in a late layer so it changes often without invalidating
 # the heavy dependency layers.
