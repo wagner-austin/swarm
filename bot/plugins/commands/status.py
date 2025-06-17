@@ -8,7 +8,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from bot.core import metrics
-from bot.utils.discord_interactions import safe_defer, safe_followup
+from bot.utils.discord_interactions import safe_followup
+from bot.plugins.commands.decorators import background_app_command
 
 SPACER = " │ "  # visual separator in a single embed field
 
@@ -22,6 +23,7 @@ class Status(commands.Cog):
         name="status", description="Shows bot uptime and message counters (owner-only)."
     )
     @app_commands.default_permissions(administrator=True)  # superset of owner
+    @background_app_command(defer_ephemeral=True)
     async def status(self, interaction: discord.Interaction) -> None:
         """Reply with wall-clock uptime and traffic counters."""
         s = metrics.get_stats()
@@ -66,9 +68,6 @@ class Status(commands.Cog):
             ),
             inline=False,
         )
-
-        # 1) Acknowledge if we haven’t already (no harm if we’re late)
-        await safe_defer(interaction, ephemeral=True)
 
         await safe_followup(interaction, embed=embed, ephemeral=True)
 

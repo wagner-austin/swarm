@@ -39,6 +39,7 @@ async def safe_defer(
     *,
     thinking: bool = True,
     ephemeral: bool = False,
+    _ignore: tuple[int, ...] = (10062, 10015, 40060),
 ) -> None:
     """Safely defer an *interaction* without raising if it has expired.
 
@@ -58,8 +59,10 @@ async def safe_defer(
             except Exception:
                 pass
     except discord.HTTPException as exc:
-        # 40060 = interaction already acknowledged; safe to ignore
-        if getattr(exc, "code", None) != 40060:
+        # Silently swallow common interaction/webhook expiry errors so that
+        # higher-level logic can surface the *real* cause instead of a nested
+        # defer failure.
+        if getattr(exc, "code", None) not in _ignore:
             raise
     except discord.NotFound:
         # Interaction expired – silently ignore so the caller can decide on a
@@ -109,7 +112,7 @@ async def safe_send(
             # If the exception is *unknown interaction* or *already
             # acknowledged*, fall through to the next strategy.  Otherwise
             # propagate.
-            if exc.code not in (10062, 40060):
+            if exc.code not in (10062, 10015, 40060):
                 raise
             # fall through
 
@@ -118,7 +121,7 @@ async def safe_send(
         await interaction.followup.send(content or "", **kwargs)
         return
     except discord.HTTPException as exc:
-        if exc.code not in (10062, 40060):
+        if exc.code not in (10062, 10015, 40060):
             raise
         # The follow-up failed (likely because the token is expired) – as a
         # last resort fall back to the interaction's channel.

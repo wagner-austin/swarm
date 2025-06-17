@@ -10,6 +10,7 @@ from typing import Any, Callable, Coroutine, ParamSpec, TypeVar, Optional, cast
 
 # Import centralised Discord interaction helpers
 from bot.utils.discord_interactions import safe_followup, safe_defer
+from bot.plugins.commands.decorators import background_app_command
 
 import discord
 from discord import app_commands
@@ -429,6 +430,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         name="close", description="Close the browser for this channel"
     )
     @read_only_guard()  # replaces manual guard
+    @background_app_command(defer_ephemeral=False)
     async def close(self, interaction: discord.Interaction) -> None:
         """Closes the browser instance for the current channel."""
         chan = interaction.channel_id
@@ -441,8 +443,6 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 "No browser running for this channel.", ephemeral=True
             )
             return
-
-        await safe_defer(interaction, thinking=True)
 
         try:
             # Close the browser for this channel
@@ -461,6 +461,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         name="closeall", description="Close all browser instances (admin only)"
     )
     @app_commands.default_permissions(administrator=True)
+    @background_app_command(defer_ephemeral=True)
     async def closeall(self, interaction: discord.Interaction) -> None:
         """Closes all browser instances across all channels (admin only)."""
         # The decorator already enforces permissions; no extra checks needed
@@ -472,8 +473,6 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 "No active browser instances to close.", ephemeral=True
             )
             return
-
-        await safe_defer(interaction, thinking=True)
 
         try:
             # Close all browsers
