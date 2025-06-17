@@ -21,7 +21,8 @@ COPY pyproject.toml poetry.lock* ./
 
 # Install *locked* production dependencies directly into the system site-packages (no venv)
 ENV POETRY_VIRTUALENVS_CREATE=false
-RUN poetry install --only main --no-root --no-ansi --no-interaction
+# install default (prod) deps, skip the dev group
+RUN poetry install --no-root --no-ansi --no-interaction --without dev
 
 # Copy the source code in a late layer so it changes often without invalidating
 # the heavy dependency layers.
