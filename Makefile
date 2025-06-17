@@ -74,7 +74,7 @@ personas:              ## upload personas.yaml as BOT_SECRET_PERSONAS secret
 
 # Build & deploy current code to Fly
 deploy: secrets personas         ## build & deploy current code to Fly
-	fly deploy --remote-only --build-arg BUILDKIT_PROGRESS=plain
+	fly deploy --remote-only --no-cache --build-arg BUILDKIT_PROGRESS=plain
 
 # Tail live Fly logs
 logs:                        ## tail live Fly logs
