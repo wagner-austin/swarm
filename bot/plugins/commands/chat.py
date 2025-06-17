@@ -82,7 +82,8 @@ class Chat(commands.Cog):
             await self._history.clear(chan_id_clear, personality)
             target = f" for **{personality}**" if personality else ""
             await interaction.response.send_message(
-                f"Chat history{target} cleared.", ephemeral=True
+                f"Chat history{target} cleared.",
+                ephemeral=True,
             )
             return
 
@@ -117,9 +118,10 @@ class Chat(commands.Cog):
             self._channel_persona[channel_id_int] = personality
         else:
             # Either no choice or invalid/stale choice – fall back
-            personality = self._channel_persona.get(channel_id_int, "default")
+            # Fallback to default persona
+            personality = self._channel_persona.get(channel_id_int, "Default")
             if personality not in PERSONALITIES:
-                personality = "default"
+                personality = "Default"
 
         # Visibility check
         if not persona_visible(personality, interaction.user.id):

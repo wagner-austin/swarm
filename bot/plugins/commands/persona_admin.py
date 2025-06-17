@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, cast
 
 import discord
 import yaml
@@ -122,8 +122,11 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
         IDs.  If omitted the persona is visible to everyone.
         """
 
-        users: Optional[List[int]] = (
-            [int(u) for u in allowed_users.split(",")] if allowed_users else None
+        from typing import cast
+
+        users: Optional[List[int | str]] = cast(
+            Optional[List[int | str]],
+            ([int(u) for u in allowed_users.split(",")] if allowed_users else None),
         )
         _write_yaml(name, {"prompt": prompt_text, "allowed_users": users})
 
@@ -216,11 +219,17 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
                     new_prompt = self.prompt_input.value or None
                     new_users_raw = self.users_input.value or None
                     new_users = (
-                        [int(u.strip()) for u in new_users_raw.split(",") if u.strip()]
+                        cast(
+                            List[int | str],
+                            [
+                                int(u.strip())
+                                for u in new_users_raw.split(",")
+                                if u.strip()
+                            ],
+                        )
                         if new_users_raw
                         else None
                     )
-                    from typing import cast
 
                     data: Persona = cast(
                         Persona,
@@ -242,8 +251,11 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
         if prompt_text is not None:
             current["prompt"] = prompt_text
         if allowed_users is not None:
-            current["allowed_users"] = (
-                [int(u) for u in allowed_users.split(",")] if allowed_users else None
+            from typing import cast as _cast
+
+            current["allowed_users"] = _cast(
+                Optional[List[int | str]],
+                ([int(u) for u in allowed_users.split(",")]),
             )
 
         _write_yaml(name, current)
