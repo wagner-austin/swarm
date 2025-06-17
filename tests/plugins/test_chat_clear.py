@@ -31,7 +31,7 @@ async def test_chat_clear_flag() -> None:
     # ------------------------------------------------------------------
     chan_id = 1234
     persona = "default"
-    cog._history.record(chan_id, persona, "hello", "hi!")
+    await cog._history.record(chan_id, persona, ("hello", "hi!"))
 
     # Stub interaction with matching channel_id
     ix = StubInteraction(bot=bot)
@@ -43,7 +43,7 @@ async def test_chat_clear_flag() -> None:
     await cast(Any, cog.chat.callback)(cog, ix, None, True, None)
 
     # History for that channel should now be empty
-    assert cog._history.get(chan_id, persona) == []
+    assert await cog._history.recent(chan_id, persona) == []
 
     # A confirmation message should have been sent
     ix.response.send_message.assert_awaited_once()
