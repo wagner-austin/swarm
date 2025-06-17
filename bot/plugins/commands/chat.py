@@ -10,7 +10,8 @@ from bot.ai.personas import (
 from typing import cast
 
 # Centralized interaction helpers
-from bot.utils.discord_interactions import safe_defer, safe_followup
+from bot.utils.discord_interactions import safe_followup, safe_send
+from bot.plugins.commands.decorators import background_app_command
 import asyncio
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
@@ -57,6 +58,7 @@ class Chat(commands.Cog):
         clear="If true, reset conversation history instead",
         personality="Pick a persona",
     )
+    @background_app_command(defer_ephemeral=False)
     async def chat(
         self,
         interaction: discord.Interaction,
@@ -70,8 +72,10 @@ class Chat(commands.Cog):
             if personality is not None and not persona_visible(
                 personality, interaction.user.id
             ):
-                await interaction.response.send_message(
-                    "You are not allowed to use that persona.", ephemeral=True
+                await safe_send(
+                    interaction,
+                    "You are not allowed to use that persona.",
+                    ephemeral=True,
                 )
                 return
 
@@ -87,8 +91,10 @@ class Chat(commands.Cog):
         try:
             provider = _providers.get(provider_name)
         except KeyError:
-            await interaction.response.send_message(
-                f"LLM provider '{provider_name}' is not available.", ephemeral=True
+            await safe_send(
+                interaction,
+                f"LLM provider '{provider_name}' is not available.",
+                ephemeral=True,
             )
             return
 
@@ -117,8 +123,8 @@ class Chat(commands.Cog):
 
         # Visibility check
         if not persona_visible(personality, interaction.user.id):
-            await interaction.response.send_message(
-                "You are not allowed to use that persona.", ephemeral=True
+            await safe_send(
+                interaction, "You are not allowed to use that persona.", ephemeral=True
             )
             return
 
@@ -127,7 +133,6 @@ class Chat(commands.Cog):
         final_system_prompt = DEFAULT_SYSTEM_PROMPT + "\n\n" + persona_prompt_str
 
         # Inform Discord we are processing (shows typing indicator)
-        await safe_defer(interaction, thinking=True)
 
         # Build chat history (excluding the system prompt – passed separately)
         messages: list[dict[str, str]] = [
@@ -228,6 +233,7 @@ class Chat(commands.Cog):
     @app_commands.describe(
         prompt="What should I ask?",
     )
+    @background_app_command(defer_ephemeral=False)
     async def round_table(
         self,
         interaction: discord.Interaction,
@@ -243,12 +249,12 @@ class Chat(commands.Cog):
         try:
             provider = _providers.get(provider_name)
         except KeyError:
-            await interaction.response.send_message(
-                f"LLM provider '{provider_name}' is not available.", ephemeral=True
+            await safe_send(
+                interaction,
+                f"LLM provider '{provider_name}' is not available.",
+                ephemeral=True,
             )
             return
-
-        await safe_defer(interaction, thinking=True)
 
         async def _ask_persona(
             name: str, persona_prompt: str
@@ -281,9 +287,7 @@ class Chat(commands.Cog):
             if persona_visible(n, interaction.user.id)
         ]
         if not visible_items:
-            await interaction.response.send_message(
-                "No personas available.", ephemeral=True
-            )
+            await safe_send(interaction, "No personas available.", ephemeral=True)
             return
 
         tasks = [

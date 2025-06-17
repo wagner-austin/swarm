@@ -81,6 +81,15 @@ logs:                        ## tail live Fly logs
 	flyctl logs -a discord-bot
 
 # ---------------------------------------------------------------------------
+# Docker / Redis helpers
+# ---------------------------------------------------------------------------
+compose-up:            ## start local dev services via docker compose (Redis)
+	docker compose up -d
+
+compose-down:          ## stop and remove docker compose services
+	docker compose down
+
+# ---------------------------------------------------------------------------
 # Misc helpers
 # ---------------------------------------------------------------------------
 run: install                ## launch the Discord bot (sync with pyproject script)

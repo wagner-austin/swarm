@@ -9,6 +9,8 @@ import logging
 import logging.config
 import copy
 import warnings
+import collections
+from typing import Deque, Tuple
 
 
 def merge_dicts(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
@@ -45,6 +47,7 @@ DEFAULT_LOGGING_CONFIG: Dict[str, Any] = {
         "rich": {"datefmt": "%Y-%m-%d %H:%M:%S"},
         "default": {"format": "%(asctime)s [%(levelname)s] %(message)s"},
     },
+    "filters": {"dedupe": {"()": "bot.core.logger_setup._DuplicateFilter"}},
     "handlers": {
         "rich": {
             "class": "rich.logging.RichHandler",
@@ -52,6 +55,7 @@ DEFAULT_LOGGING_CONFIG: Dict[str, Any] = {
             "rich_tracebacks": True,
             "show_path": False,
             "formatter": "rich",
+            "filters": ["dedupe"],
         },
     },
     "root": {
@@ -60,7 +64,24 @@ DEFAULT_LOGGING_CONFIG: Dict[str, Any] = {
     },
 }
 
+
 # Sentinel to avoid multiple configuration attempts
+# Suppress duplicate exception log entries in quick succession (same message & traceback)
+class _DuplicateFilter(logging.Filter):
+    """Filter that drops consecutive duplicate (msg, exc_text) records."""
+
+    def __init__(self, window: int = 20) -> None:
+        super().__init__()
+        self._recent: Deque[Tuple[str, str]] = collections.deque(maxlen=window)
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
+        key = (record.getMessage(), getattr(record, "exc_text", ""))
+        if key in self._recent:
+            return False
+        self._recent.append(key)
+        return True
+
+
 _CONFIGURED: bool = False
 
 
