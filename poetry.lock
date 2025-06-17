@@ -3484,4 +3484,4 @@ discord = ["discord.py"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "ada3a0e3f43d96889b7fd9f066b751aefc7ca0bf318aa1f3ed53bb2d4c6fc927"
+content-hash = "34b3e2dadd10dbff0721d04cbfde8a3b0d0831827f1b3b07df2d9db2aac0d9b1"
