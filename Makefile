@@ -70,7 +70,7 @@ PERSONAS := $(HOME)/.config/discord-bot/secrets/personas.yaml
 .PHONY: personas
 personas:              ## upload personas.yaml as BOT_SECRET_PERSONAS secret
 	@echo "🚀  Updating personas secret …"
-	fly secrets set BOT_SECRET_PERSONAS="$$(cat $(PERSONAS))"
+	fly secrets set BOT_SECRET_PERSONAS="$$(cat $${HOME}/.config/discord-bot/secrets/personas.yaml)"
 
 # Build & deploy current code to Fly
 deploy: secrets personas         ## build & deploy current code to Fly
