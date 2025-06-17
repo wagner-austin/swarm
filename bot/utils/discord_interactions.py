@@ -16,6 +16,7 @@ handlers when they need to defer, send, or follow-up to an interaction.
 from __future__ import annotations
 
 import logging
+from bot.core.settings import settings
 import inspect
 from typing import Any
 
@@ -85,6 +86,12 @@ async def safe_send(
     Any ``discord.HTTPException`` not related to codes *10062* or *40060* is
     re-raised so upstream handlers can decide the appropriate action.
     """
+
+    # Enforce Discord message length limits (settings.discord_chunk_size defaults to 1900)
+    if content and isinstance(content, str):
+        max_len: int = getattr(settings, "discord_chunk_size", 1900)
+        if len(content) > max_len:
+            content = content[: max_len - 1] + "…"
 
     from typing import cast
 

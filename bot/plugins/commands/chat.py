@@ -81,7 +81,8 @@ class Chat(commands.Cog):
 
             await self._history.clear(chan_id_clear, personality)
             target = f" for **{personality}**" if personality else ""
-            await interaction.response.send_message(
+            await safe_followup(
+                interaction,
                 f"Chat history{target} cleared.",
                 ephemeral=True,
             )
