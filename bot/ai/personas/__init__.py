@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, TypedDict, Any
 
 import yaml  # PyYAML (dev dependency already present)
+import base64
+import gzip
 
 from bot.core.settings import settings
 
@@ -124,6 +126,17 @@ def _populate(target: Dict[str, Persona]) -> None:
             target.update(_coerce(yaml.safe_load(_secret_env) or {}))
         except Exception:
             # Fail soft – malformed env secrets shouldn't crash the bot
+            pass
+
+    # compressed secret variant (gzip + base64) – supports larger YAML within Fly 4 KB limit
+    _secret_b64: str | None = os.getenv("BOT_SECRET_PERSONAS_GZIP_B64")
+    if _secret_b64:
+        try:
+            _decoded: bytes = base64.b64decode(_secret_b64)
+            _yaml_bytes: bytes = gzip.decompress(_decoded)
+            target.update(_coerce(yaml.safe_load(_yaml_bytes) or {}))
+        except Exception:
+            # Fail soft – malformed or undecodable secret shouldn't crash the bot
             pass
 
     # secrets file (highest precedence)

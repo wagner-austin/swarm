@@ -68,9 +68,9 @@ secrets: install               ## upload .env values to Fly (idempotent)
 PERSONAS := $(HOME)/.config/discord-bot/secrets/personas.yaml
 
 .PHONY: personas
-personas:              ## upload personas.yaml as BOT_SECRET_PERSONAS secret
+personas:              ## upload (compressed) personas.yaml as BOT_SECRET_PERSONAS secret
 	@echo "🚀  Updating personas secret …"
-	fly secrets set BOT_SECRET_PERSONAS="$$(cat $${HOME}/.config/discord-bot/secrets/personas.yaml)"
+		fly secrets set BOT_SECRET_PERSONAS="$$(gzip -c $(PERSONAS) | base64 -w0)"
 
 # Build & deploy current code to Fly
 deploy: secrets personas         ## build & deploy current code to Fly
