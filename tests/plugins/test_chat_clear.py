@@ -46,7 +46,7 @@ async def test_chat_clear_flag() -> None:
     assert await cog._history.recent(chan_id, persona) == []
 
     # A confirmation message should have been sent
-    ix.response.send_message.assert_awaited_once()
-    args, kwargs = ix.response.send_message.await_args
+    ix.followup.send.assert_awaited_once()
+    args, kwargs = ix.followup.send.await_args
     msg = kwargs.get("content") or (args[0] if args else "")
     assert "cleared" in msg.lower()
