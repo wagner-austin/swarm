@@ -2,6 +2,8 @@ from dependency_injector import containers, providers
 from pathlib import Path
 
 from bot.core.settings import Settings
+from bot.history.in_memory import MemoryBackend
+from bot.history.redis_backend import RedisBackend
 
 from bot.netproxy.service import ProxyService
 from bot.browser.runtime import BrowserRuntime
@@ -20,6 +22,16 @@ class Container(containers.DeclarativeContainer):
     # Configuration provider for application settings
     # The actual settings values will be loaded when accessed, typically from .env
     config = providers.Singleton(Settings)
+
+    # Conversation history backend (pluggable)
+    history_backend = providers.Singleton(
+        lambda cfg: (
+            RedisBackend(cfg.redis_url, cfg.conversation_max_turns)
+            if cfg.redis_enabled and cfg.redis_url
+            else MemoryBackend(cfg.conversation_max_turns)
+        ),
+        config,
+    )
 
     # Mapping of LLM provider singletons discovered in bot.ai.providers
     # Resolve the registry lazily so newly registered providers are seen.

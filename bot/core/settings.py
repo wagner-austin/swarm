@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     owner_id: Optional[int] = None
 
     # --- Tunable bot behaviour ---
+    # Redis history backend config
+    redis_enabled: bool = False  # Enable Redis-backed conversation history
+    redis_url: str | None = None  # Redis connection URL (e.g. redis://localhost:6379)
+
     conversation_max_turns: int = 8  # Rolling chat history length per channel + persona
     discord_chunk_size: int = 1900  # Characters per Discord message chunk
     gemini_model: str = "gemini-2.5-flash-preview-04-17"  # Default Gemini model name

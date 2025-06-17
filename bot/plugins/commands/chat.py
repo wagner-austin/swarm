@@ -12,7 +12,8 @@ from typing import cast
 # Centralized interaction helpers
 from bot.utils.discord_interactions import safe_defer, safe_followup
 import asyncio
-from bot.utils.history import ConversationHistory
+from bot.history.backends import HistoryBackend
+from bot.history.in_memory import MemoryBackend
 from bot.ai import providers as _providers
 from bot.core.exceptions import ModelOverloaded
 
@@ -30,15 +31,18 @@ DEFAULT_SYSTEM_PROMPT = "Always include your name at the beginning of a response
 
 
 class Chat(commands.Cog):
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(
+        self, bot: commands.Bot, history_backend: HistoryBackend | None = None
+    ) -> None:
         super().__init__()  # <-- no args
         self.bot = bot  # keep ref for future use
         # Remember last selected personality per channel
         self._channel_persona: dict[int, str] = {}
-        # Rolling conversation history per channel & persona (tunable)
-        self._history: ConversationHistory = ConversationHistory(
-            max_turns=settings.conversation_max_turns
-        )
+        # Conversation history backend (pluggable)
+        if history_backend is None:
+            # Fallback to in-memory if DI not wired (e.g. in tests)
+            history_backend = MemoryBackend(settings.conversation_max_turns)
+        self._history: HistoryBackend = history_backend
 
     async def cog_unload(self) -> None:
         """Clean up resources when the cog is unloaded."""
@@ -71,7 +75,7 @@ class Chat(commands.Cog):
                 )
                 return
 
-            self._history.clear(chan_id_clear, personality)
+            await self._history.clear(chan_id_clear, personality)
             target = f" for **{personality}**" if personality else ""
             await interaction.response.send_message(
                 f"Chat history{target} cleared.", ephemeral=True
@@ -128,7 +132,7 @@ class Chat(commands.Cog):
         # Build chat history (excluding the system prompt – passed separately)
         messages: list[dict[str, str]] = [
             {"role": role, "content": content}
-            for u, a in self._history.get(channel_id_int, personality)
+            for u, a in await self._history.recent(channel_id_int, personality)
             for role, content in (("user", u), ("assistant", a))
         ]
         messages.append({"role": "user", "content": prompt})
@@ -195,7 +199,9 @@ class Chat(commands.Cog):
                 await safe_followup(interaction, chunk)
 
         # Record the turn in history
-        self._history.record(channel_id_int, personality, prompt or "", response_text)
+        await self._history.record(
+            channel_id_int, personality, (prompt or "", response_text)
+        )
 
     @chat.autocomplete("personality")
     async def personality_autocomplete(
@@ -250,7 +256,7 @@ class Chat(commands.Cog):
             """Generate a reply for *name* using the shared provider."""
             try:
                 chan_id: int = interaction.channel_id or 0
-                history_pairs = self._history.get(chan_id, name)
+                history_pairs = await self._history.recent(chan_id, name)
                 messages = [
                     {
                         "role": "system",
@@ -322,7 +328,7 @@ class Chat(commands.Cog):
 
             # record turn in history
             chan_id: int = interaction.channel_id or 0
-            self._history.record(chan_id, name, prompt or "", safe_text)
+            await self._history.record(chan_id, name, (prompt or "", safe_text))
 
     # ------------------------------------------------------------------
     # /chat round-table
