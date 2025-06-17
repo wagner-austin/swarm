@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "bot"
 version = "0.1.0"
 description = "A modern Discord bot built with Python."
-authors = ["Austin Wagner <austin@example.com>"]
+authors = [{ name = "Austin Wagner", email = "austin@example.com" }]
 requires-python = ">=3.10"
 dependencies = [
 
@@ -16,7 +16,7 @@ dependencies = [
   "pydantic>=2",
   "pydantic-settings",
 
-  "playwright (>=1.44,<2.0)",   # single install; run `playwright install chromium` post-deploy
+  "playwright>=1.44,<2.0",   # single install; run `playwright install chromium` post-deploy
   "discord.py>=2.3",
 
   # --- proxy and websocket support ---
@@ -57,6 +57,12 @@ packages = { find = { where = [ "." ], include = ["bot*"] } }
 types-requests = "^2.32.0.20250602"
 
 # Expose CLI through `poetry run discord-bot`
+[tool.poetry]
+name = "bot"
+version = "0.1.0"
+description = "A modern Discord bot built with Python."
+authors = [{ name = "Austin Wagner", email = "austin@example.com" }]
+
 [tool.poetry.scripts]
 discord-bot = "bot.core.main:main"
 types-requests = "^2.32.0.20250602"
