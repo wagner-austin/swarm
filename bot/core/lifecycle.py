@@ -16,6 +16,7 @@ from bot.utils.module_discovery import iter_submodules
 from bot.core.discord.boot import MyBot
 from bot.core.discord.di import initialize_and_wire_container
 from bot.core.discord.events import register_event_handlers
+from bot.core import telemetry
 from bot.core.discord.proxy import start_proxy_service_if_enabled, stop_proxy_service
 
 if TYPE_CHECKING:
@@ -99,6 +100,9 @@ class BotLifecycle:
     async def _initialize_services_and_bot(self) -> None:
         self._set_state(LifecycleState.INITIALIZING_SERVICES)
         logger.info("Initializing services and bot instance...")
+
+        # 📈  Start Prometheus exporter before other services spin up
+        telemetry.start_exporter(self._settings.metrics_port)
 
         self._container = initialize_and_wire_container(
             app_settings=self._settings,

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from typing import Any, Dict
+from bot.core.telemetry import update_queue_gauge
 
 from bot.core.settings import settings
 
@@ -61,6 +62,7 @@ class BrowserRuntime:
 
             if ctx.queue is None:
                 ctx.queue = asyncio.Queue(maxsize=settings.queues.command)
+                update_queue_gauge(f"browser_cmd:{channel_id}", ctx.queue)
                 ctx.task = asyncio.create_task(self._worker(channel_id))
 
             fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
@@ -71,6 +73,7 @@ class BrowserRuntime:
                 "future": fut,
             }
             ctx.queue.put_nowait(cmd)
+            update_queue_gauge(f"browser_cmd:{channel_id}", ctx.queue)
             return fut
 
     async def close_channel(self, channel_id: int) -> None:
@@ -125,6 +128,13 @@ class BrowserRuntime:
                     cmd["future"].set_exception(exc)
             finally:
                 ctx.queue.task_done()
+                update_queue_gauge(f"browser_cmd:{channel_id}", ctx.queue)
 
 
-__all__ = ["BrowserRuntime"]
+# ---------------------------------------------------------------------+
+#  Public singleton – retained for backward compatibility               +
+# ---------------------------------------------------------------------+
+
+runtime = BrowserRuntime()
+
+__all__ = ["runtime", "BrowserRuntime"]

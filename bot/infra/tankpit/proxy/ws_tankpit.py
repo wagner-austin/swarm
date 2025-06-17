@@ -10,6 +10,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from mitmproxy import ctx, websocket
+from bot.core.telemetry import update_queue_gauge
 
 # ---------------------------------------------------------------------------+
 #  Binary‑frame opcode constant                                              +
@@ -56,6 +57,7 @@ class TankPitWSAddon:  # Renamed from WSAddon
         direction = "TX" if msg.from_client else "RX"
         try:
             self.in_q.put_nowait((direction, msg.content))
+            update_queue_gauge("proxy_in", self.in_q)
         except asyncio.QueueFull:
             from bot.core import alerts
 
@@ -101,3 +103,4 @@ class TankPitWSAddon:  # Renamed from WSAddon
                     ctx.log.error(f"Error in TankPitWSAddon running loop: {e}")  # type: ignore[no-untyped-call]
             finally:
                 self.out_q.task_done()
+                update_queue_gauge("proxy_out", self.out_q)

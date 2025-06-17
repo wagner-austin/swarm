@@ -20,6 +20,7 @@ from typing import (
     Protocol,
     runtime_checkable,
 )
+from bot.core.telemetry import update_queue_gauge
 from mitmproxy.tools.dump import DumpMaster
 
 # Removed: from .addon import WSAddon
@@ -52,6 +53,9 @@ class ProxyService:
         self.out_q: asyncio.Queue[bytes] = asyncio.Queue(
             maxsize=settings.queues.outbound
         )
+        # initialise gauges
+        update_queue_gauge("proxy_in", self.in_q)
+        update_queue_gauge("proxy_out", self.out_q)
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
         self._addons: list[AddonProtocol] = addons or []
@@ -67,8 +71,14 @@ class ProxyService:
         self.port = await pick_free_port(self.port)
 
         opts = options.Options(
-            listen_host="127.0.0.1", listen_port=self.port, confdir=str(self.certdir)
+            listen_host="127.0.0.1",
+            listen_port=self.port,
+            confdir=str(self.certdir),
         )
+        # Ignore *all* loop-back traffic so any localhost service bypasses the proxy.
+        LOOPBACK_RE: str = r"^(localhost|127\.0\.0\.1)(:\d+)?$"
+        cast(Any, opts).update(ignore_hosts=[LOOPBACK_RE])
+
         ProxyConfig: Any | None = getattr(proxy, "ProxyConfig", None)
         ProxyServer: Any | None = getattr(proxy, "ProxyServer", None)
         # Disable mitmproxy’s built-in "termlog" and "dumper" handlers to

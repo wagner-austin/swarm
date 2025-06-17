@@ -25,6 +25,13 @@ from types import ModuleType
 from typing import Dict, cast
 
 from bot.ai.contracts import LLMProvider
+from bot.core.telemetry import record_llm_call
+import time
+import functools
+import logging
+from typing import Any, Awaitable, Callable
+
+_log = logging.getLogger(__name__)
 
 _REGISTRY: Dict[str, LLMProvider] = {}
 
@@ -37,6 +44,33 @@ for _file in _pkg_path.iterdir():
     if hasattr(_mod, "provider"):
         prov = cast(LLMProvider, getattr(_mod, "provider"))
         _REGISTRY[prov.name] = prov
+
+        # ------------------------------------------------------------+
+        #  ✨  Middleware – wrap .generate for metrics + trace logs    |
+        # ------------------------------------------------------------+
+
+        async def _timed_generate(
+            *args: Any,
+            _call: Callable[..., Awaitable[Any]] = prov.generate,
+            _provider_name: str = prov.name,
+            **kw: Any,
+        ) -> Any:
+            start = time.perf_counter()
+            status = "ok"
+            try:
+                result = await _call(*args, **kw)
+                return result
+            except Exception:
+                status = "error"
+                raise
+            finally:
+                record_llm_call(_provider_name, status, time.perf_counter() - start)
+
+        # Only patch once
+        if not hasattr(prov.generate, "__wrapped__"):
+            _orig_generate: Callable[..., Awaitable[Any]] = prov.generate
+            prov.generate = functools.wraps(_orig_generate)(_timed_generate)  # type: ignore[method-assign]
+            _log.debug("LLM provider '%s' wrapped with telemetry", prov.name)
 
 
 def get(name: str) -> LLMProvider:
