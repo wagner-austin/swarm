@@ -27,7 +27,7 @@ help:               ## show this help message
 # ---------------------------------------------------------------------------
 install:            ## resolve & install all dependencies (incl. dev)
 	$(POETRY) lock
-	$(POETRY) install --with dev --extras dev
+	$(POETRY) install --extras dev
 
 shell:              ## activate Poetry shell (interactive)
 	$(POETRY) shell
