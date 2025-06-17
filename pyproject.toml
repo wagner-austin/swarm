@@ -25,6 +25,9 @@ dependencies = [
   # --- runtime resource metrics ---
   "psutil>=5.9",
 
+  # --- observability ---
+  "prometheus-client>=0.21",
+
   # --- dependency injection ---
   "dependency-injector>=4.41",
   "PyYAML>=6.0",

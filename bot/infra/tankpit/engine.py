@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Tuple
+from bot.core.telemetry import record_frame
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +51,15 @@ class TankPitEngine:
         while True:
             direction, payload = await self._in.get()
             try:
+                t0 = time.perf_counter()
                 # TODO: parse payload and update state. For now we just echo.
                 if direction == "RX":
                     # naive echo logic for proof-of-wiring
                     try:
                         self._out.put_nowait(payload)
+                        from bot.core.telemetry import update_queue_gauge
+
+                        update_queue_gauge("proxy_out", self._out)
                     except asyncio.QueueFull:
                         from bot.core import alerts
 
@@ -61,4 +67,8 @@ class TankPitEngine:
             except Exception as exc:  # pragma: no cover – dev aid
                 logger.error("TankPitEngine error: %s", exc, exc_info=True)
             finally:
+                record_frame(direction, time.perf_counter() - t0)
+                from bot.core.telemetry import update_queue_gauge
+
+                update_queue_gauge("proxy_in", self._in)
                 self._in.task_done()

@@ -87,8 +87,11 @@ class Settings(BaseSettings):
     browser: BrowserConfig = BrowserConfig()
     queues: QueueConfig = QueueConfig()
 
-    # --- URL guard‑rails ---
+    # --- URL guard-rails ---
     allowed_hosts: list[str] = []  # e.g. ["github.com", "docs.python.org"]
+
+    # --- observability ---
+    metrics_port: int = 9100  # Prometheus exporter port (0 = disabled)
 
     @field_validator("allowed_hosts", mode="before")
     @classmethod
