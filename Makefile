@@ -1,7 +1,8 @@
 # Makefile — Poetry-aware workflow for Discord Bot project
 # Run `make help` to see available targets.
 
-.PHONY: install shell lint format test clean run build help
+.PHONY: install shell lint format test clean run build help \
+        savecode savecode-test deploy logs secrets
 
 # ---------------------------------------------------------------------------
 # Tooling helpers
@@ -48,6 +49,28 @@ format: install             ## auto-format code base (ruff + black)
 # ---------------------------------------------------------------------------
 test: install                ## run pytest suite
 	$(PYTEST)
+
+# ---------------------------------------------------------------------------
+# Fly.io helpers – run `make deploy` when you’re happy with local tests
+# ---------------------------------------------------------------------------
+
+# List of vars we always want on Fly
+FLY_VARS = DISCORD_TOKEN GEMINI_API_KEY OPENAI_API_KEY OWNER_ID \
+           PROXY_ENABLED PROXY_PORT METRICS_PORT \
+           REDIS_ENABLED REDIS_URL
+
+# Push any **non-empty** env var from .env → Fly secrets
+secrets: install               ## upload .env values to Fly (idempotent)
+	@echo "🔐  Syncing secrets with Fly …"
+	@$(PYTHON) scripts/sync_secrets.py
+
+# Build & deploy current code to Fly
+deploy: secrets         ## build & deploy current code to Fly
+	flyctl deploy --remote-only
+
+# Tail live Fly logs
+logs:                        ## tail live Fly logs
+	flyctl logs -a discord-bot
 
 # ---------------------------------------------------------------------------
 # Misc helpers

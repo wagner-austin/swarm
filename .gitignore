@@ -5,10 +5,6 @@ __pycache__/
 # Ignore temporary file
 temp.txt
 
-# Ignore database
-bot_data.db
-bot_data_e.db
-
 # Exclude environment variable files
 .env
 

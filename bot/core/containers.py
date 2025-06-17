@@ -2,6 +2,7 @@ from dependency_injector import containers, providers
 from pathlib import Path
 
 from bot.core.settings import Settings
+from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
 from bot.history.redis_backend import RedisBackend
 
@@ -24,13 +25,43 @@ class Container(containers.DeclarativeContainer):
     config = providers.Singleton(Settings)
 
     # Conversation history backend (pluggable)
-    history_backend = providers.Singleton(
-        lambda cfg: (
-            RedisBackend(cfg.redis_url, cfg.conversation_max_turns)
-            if cfg.redis_enabled and cfg.redis_url
-            else MemoryBackend(cfg.conversation_max_turns)
-        ),
-        config,
+
+    # Conversation history backend – pluggable
+    @staticmethod
+    def _choose_backend(cfg: Settings) -> HistoryBackend:
+        redis_enabled = getattr(cfg, "redis_enabled", False) or getattr(
+            getattr(cfg, "redis", None) or object(), "enabled", False
+        )
+        redis_url = getattr(cfg, "redis_url", None) or getattr(
+            getattr(cfg, "redis", None) or object(), "url", None
+        )
+        import logging
+
+        logger = logging.getLogger(__name__)
+        import socket
+
+        if redis_enabled and redis_url:
+            # Quick connectivity probe to avoid runtime failures.
+            try:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(redis_url)
+                host, port = parsed.hostname or "localhost", parsed.port or 6379
+                with socket.create_connection((host, port), timeout=1):
+                    pass  # success
+                logger.info("History backend: Redis (%s)", redis_url)
+                return RedisBackend(redis_url, cfg.conversation_max_turns)
+            except Exception as exc:  # pragma: no cover – probe only
+                logger.warning(
+                    "Redis backend unreachable (%s), falling back to in-memory. Error: %s",
+                    redis_url,
+                    exc,
+                )
+        logger.info("History backend: In-memory (fallback)")
+        return MemoryBackend(cfg.conversation_max_turns)
+
+    history_backend: providers.Singleton[HistoryBackend] = providers.Singleton(
+        _choose_backend, config
     )
 
     # Mapping of LLM provider singletons discovered in bot.ai.providers
