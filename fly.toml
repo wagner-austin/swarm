@@ -1,5 +1,5 @@
 app = "corvis-ai"              # <── the app you really want
-primary_region = "sjc"
+primary_region = "lax"
 
 [build]
   dockerfile = "Dockerfile"
@@ -9,7 +9,7 @@ primary_region = "sjc"
   METRICS_PORT = 9200          # strings are fine inside [env]
 
 [processes]
-  bot = "python -m bot.core.main"
+  bot = "python -m bot.core"
 
 [metrics]
   port = 9200                  # ← NO quotes, must be an int

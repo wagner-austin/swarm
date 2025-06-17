@@ -63,4 +63,4 @@ EXPOSE 9000 $METRICS_PORT
 ENV METRICS_PORT=$METRICS_PORT
 
 # The default process defined in fly.toml
-CMD ["python", "-m", "bot.core.main"]
+CMD ["python", "-m", "bot.core"]
