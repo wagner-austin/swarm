@@ -5,6 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bot"
 version = "0.1.0"
+description = "A modern Discord bot built with Python."
+authors = ["Austin Wagner <austin@example.com>"]
 requires-python = ">=3.10"
 dependencies = [
 
