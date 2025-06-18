@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import asyncio
-import tempfile
 import time
 from pathlib import Path
 import functools
@@ -208,92 +207,6 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 ephemeral=True,
             )
             return None
-
-    @app_commands.command(
-        name="click", description="Click an element matching the CSS selector."
-    )
-    @app_commands.describe(selector="The CSS selector of the element to click.")
-    @browser_command(allow_mutation=True, defer_ephemeral=True)
-    async def click(
-        self, interaction: discord.Interaction, selector: str
-    ) -> CommandResult:
-        """Clicks an element on the current page."""
-        return ("click", (selector,), f"✔️ Clicked `{selector}`")
-
-    @app_commands.command(name="fill", description="Fill a form field with text.")
-    @app_commands.describe(
-        selector="The CSS selector of the form field.", text="The text to fill."
-    )
-    @browser_command(allow_mutation=True, defer_ephemeral=True)
-    async def fill(
-        self, interaction: discord.Interaction, selector: str, text: str
-    ) -> CommandResult:
-        """Fills a form field on the current page."""
-        return ("fill", (selector, text), f"✔️ Filled `{selector}`.")
-
-    @app_commands.command(
-        name="upload", description="Upload a file to an input element."
-    )
-    @app_commands.describe(
-        selector="The CSS selector of the file input element.",
-        attachment="The file to upload.",
-    )
-    @browser_command(allow_mutation=True, defer_ephemeral=True)
-    async def upload(
-        self,
-        interaction: discord.Interaction,
-        selector: str,
-        attachment: discord.Attachment,
-    ) -> CommandResult | None:
-        """Uploads a file to a file input element on the page."""
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir) / attachment.filename
-            # Download the file to a temporary location
-            await attachment.save(temp_path)
-
-            # Engine method is called **upload** – keep naming consistent
-            return (
-                "upload",
-                (selector, temp_path),
-                f"✔️ Uploaded `{attachment.filename}` to `{selector}`",
-            )
-
-    @app_commands.command(
-        name="wait",
-        description="Wait for an element to be visible, hidden, attached, or detached.",
-    )
-    @app_commands.describe(
-        selector="The CSS selector of the element.",
-        state="The state to wait for (default: visible).",
-    )
-    @app_commands.choices(
-        state=[
-            app_commands.Choice(name="Visible", value="visible"),
-            app_commands.Choice(name="Hidden", value="hidden"),
-            app_commands.Choice(name="Attached", value="attached"),
-            app_commands.Choice(name="Detached", value="detached"),
-        ]
-    )
-    @browser_command()
-    async def wait(
-        self, interaction: discord.Interaction, selector: str, state: str = "visible"
-    ) -> CommandResult | None:
-        """Waits for an element on the current page to reach a certain state."""
-        # Playwright supports exactly these four states
-        valid_states = ["visible", "hidden", "attached", "detached"]
-        if state.lower() not in valid_states:
-            await interaction.response.send_message(
-                f"❌ Invalid state '{state}'. Valid options: {', '.join(valid_states)}",
-                ephemeral=True,
-            )
-            return None
-
-        return (
-            "wait_for",
-            (selector, state.lower()),
-            f"✔️ Waited for `{selector}` to be `{state}`.",
-        )
 
     # ------------------------------------------------------------------+
     # internal helpers (used by close / closeall and legacy paths)      |

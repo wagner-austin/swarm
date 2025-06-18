@@ -2,39 +2,33 @@
 
 This file provides setup, configuration, and usage instructions for the Discord bot.
 
-## Running locally
+## Quickstart
 
-After installing dependencies and configuring your `.env`, you can start the bot in either of these ways:
-
-```sh
-python -m bot.core.main
-```
-
-Alternatively, if you have a `Makefile` (like the one potentially implied by `make run`) or use `python bot.py` directly:
-
-The bot now starts **with a visible Chromium window by default**.  
-Set `BROWSER_HEADLESS=true` (or export nothing but put the key in your `.env`) to make it headless for CI.
+1. Install [Poetry](https://python-poetry.org/) and project dependencies:
 
 ```bash
-# For systems that use environment variables like this (Linux/macOS)
-make run 
+pipx install poetry
+poetry install --with dev            # runtime + dev dependencies
+poetry run playwright install chromium   # one-off: download Chromium
+```
+
+2. Copy `.env.example` (or create `.env`) and define at minimum your Discord token:
+
+```ini
+DISCORD_TOKEN=your-bot-token-here
+```
+
+3. Launch the bot:
+
+```bash
+make run                      # preferred (uses Poetry venv)
 # or
-# python bot.py
-
-# For Windows PowerShell:
-# make run 
-# or
-# python bot.py
+poetry run python -m bot.core  # same entry-point without Makefile
 ```
-Unset `BROWSER_HEADLESS` or set it to `true` (default) to keep the browser headless (e.g., for CI).
 
-The bot will respond to commands that start with `!` or when mentioned:
+The embedded Chromium window is **visible by default**. Set `BROWSER_HEADLESS=true` for headless/CI use.
 
-```
-!help
-!browser start
-!info
-```
+Run `make test` to execute the pytest suite and `make lint` for formatting, ruff, and mypy.
 
 ---
 
@@ -85,7 +79,7 @@ The following environment variables can be set to control the browser session:
 - `CHROME_PROFILE_NAME`: Name of the Chrome profile to use (default: Profile 1).
 - `CHROMEDRIVER_PATH`: Path to the ChromeDriver executable.
 - `BROWSER_DOWNLOAD_DIR`: Directory for browser downloads and screenshots.
-- `BROWSER_HEADLESS`: Launch Chrome in headless mode (default: true). Set to `false` to show the browser window.
+- `BROWSER_HEADLESS`: Launch Chrome in headless mode (default: false). Set to `true` for CI or servers without a display.
 - `BROWSER_DISABLE_GPU`: Disable GPU hardware acceleration (default: true).
 - `BROWSER_WINDOW_SIZE`: Window size for the browser, e.g., `1920,1080` (default: `1920,1080`).
 - `BROWSER_NO_SANDBOX`: Disable Chrome's sandbox (default: true; required for some CI environments).
@@ -140,5 +134,14 @@ See `plugins/wizard.py` for details. Wizards are channel-agnostic and can be use
 
 
 ### Security toggles
-* `BROWSER_READ_ONLY=true`  → blocks /web click|fill|upload unless owner/admin
-* `ALLOWED_HOSTS=github.com,internal‑portal.local` → restricts navigation targets
+* `ALLOWED_HOSTS=github.com,internal-portal.local` → restricts navigation targets for `/browser open`.
+
+### Persona management (admin only)
+The bot ships with a YAML-backed persona registry.  Operators can:
+
+* `/persona list` – list built-in and custom personas
+* `/persona show <name>` – display the prompt for a persona (read-only)
+* `/persona reload` – re-parse all YAML files from disk
+* `/persona import` – (owner-only) upload secret personas
+
+The previous `/persona add`, `/persona delete` and `/persona edit` commands have been removed in favour of managing YAML files directly on disk.

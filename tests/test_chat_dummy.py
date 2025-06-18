@@ -117,4 +117,4 @@ async def test_chat_with_dummy_provider() -> None:  # noqa: D401
     await cast(Any, Chat.chat.callback)(cog, ixn, "hi", False, None)
 
     # Ensure the provider’s reply made it to Discord follow-up
-    assert ixn.response.last == "dummy reply"
+    assert (ixn.response.last or "").find("dummy reply") != -1

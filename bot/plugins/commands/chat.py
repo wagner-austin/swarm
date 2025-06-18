@@ -7,12 +7,10 @@ from bot.ai.personas import (
     prompt as persona_prompt,
     visible as persona_visible,
 )
-from typing import cast
 
 # Centralized interaction helpers
 from bot.utils.discord_interactions import safe_followup, safe_send
 from bot.plugins.commands.decorators import background_app_command
-import asyncio
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
 from bot.ai import providers as _providers
@@ -191,20 +189,21 @@ class Chat(commands.Cog):
             return
 
         DISCORD_CHAR_LIMIT: int = settings.discord_chunk_size
-        if len(response_text) <= DISCORD_CHAR_LIMIT:
-            await safe_followup(interaction, response_text)
+        # Wrap response in Discord code blocks and chunk if necessary
+        if len(response_text) + 10 <= DISCORD_CHAR_LIMIT:
+            await safe_followup(interaction, f"```text\n{response_text}\n```")
         else:
-            chunks = [
-                response_text[i : i + DISCORD_CHAR_LIMIT]
-                for i in range(0, len(response_text), DISCORD_CHAR_LIMIT)
+            raw_chunks = [
+                response_text[i : i + DISCORD_CHAR_LIMIT - 10]
+                for i in range(0, len(response_text), DISCORD_CHAR_LIMIT - 10)
             ]
-            for idx, chunk in enumerate(chunks):
-                if len(chunks) > 1:
-                    prefix = f"[Part {idx + 1}/{len(chunks)}] "
-                    if len(prefix) + len(chunk) > DISCORD_CHAR_LIMIT:
-                        chunk = chunk[: DISCORD_CHAR_LIMIT - len(prefix)]
-                    chunk = prefix + chunk
-                await safe_followup(interaction, chunk)
+            for idx, chunk in enumerate(raw_chunks):
+                part_prefix = (
+                    f"[Part {idx + 1}/{len(raw_chunks)}]\n"
+                    if len(raw_chunks) > 1
+                    else ""
+                )
+                await safe_followup(interaction, part_prefix + f"```text\n{chunk}\n```")
 
         # Record the turn in history
         await self._history.record(
@@ -224,118 +223,6 @@ class Chat(commands.Cog):
             return visible[:25]
         lowered = current.lower()
         return [c for c in visible if lowered in c.name.lower()][:25]
-
-    # ------------------------------------------------------------------
-    # /chat round-table
-    # ------------------------------------------------------------------
-
-    @app_commands.command(
-        name="roundtable",
-        description="Ask the same question to every available persona.",
-    )
-    @app_commands.describe(
-        prompt="What should I ask?",
-    )
-    @background_app_command(defer_ephemeral=False)
-    async def round_table(
-        self,
-        interaction: discord.Interaction,
-        prompt: str | None = None,
-    ) -> None:
-        """Send the prompt to *all* personas and stream their replies."""
-
-        if prompt is None:
-            prompt = "Hello!"
-
-        # Select provider based on settings
-        provider_name: str = getattr(settings, "llm_provider", "gemini")
-        try:
-            provider = _providers.get(provider_name)
-        except KeyError:
-            await safe_send(
-                interaction,
-                f"LLM provider '{provider_name}' is not available.",
-                ephemeral=True,
-            )
-            return
-
-        async def _ask_persona(
-            name: str, persona_prompt: str
-        ) -> tuple[str, str | None, Exception | None]:
-            """Generate a reply for *name* using the shared provider."""
-            try:
-                chan_id: int = interaction.channel_id or 0
-                history_pairs = await self._history.recent(chan_id, name)
-                messages = [
-                    {
-                        "role": "system",
-                        "content": DEFAULT_SYSTEM_PROMPT + "\n\n" + persona_prompt,
-                    },
-                    *(
-                        {"role": r, "content": c}
-                        for pair in history_pairs
-                        for r, c in (("user", pair[0]), ("assistant", pair[1]))
-                    ),
-                    {"role": "user", "content": prompt},
-                ]
-                response_text = await provider.generate(messages=messages)
-                return (name, cast(str, response_text), None)
-            except Exception as exc:
-                return (name, None, exc)
-
-        # launch tasks only for visible personas
-        visible_items = [
-            (n, p["prompt"])
-            for n, p in PERSONALITIES.items()
-            if persona_visible(n, interaction.user.id)
-        ]
-        if not visible_items:
-            await safe_send(interaction, "No personas available.", ephemeral=True)
-            return
-
-        tasks = [
-            asyncio.create_task(_ask_persona(n, prompt_str))
-            for n, prompt_str in visible_items
-        ]
-
-        for coro in asyncio.as_completed(tasks):
-            name, text, err = await coro
-
-            # Convert Optional[str] -> str for static typing safety
-            safe_text: str = text or ""
-
-            title = f"**{name.capitalize()}**"
-            if err is not None:
-                await safe_followup(
-                    interaction, f"{title} (error): {err}", ephemeral=True
-                )
-                continue
-
-            # Discord limit handling (2000 chars). Wrap each chunk in its own code block.
-            DISCORD_CHAR_LIMIT = settings.discord_chunk_size  # margin for title/prefix
-
-            if len(safe_text) + len(title) + 10 <= DISCORD_CHAR_LIMIT:
-                await safe_followup(interaction, f"{title}\n```text\n{safe_text}\n```")
-            else:
-                raw_chunks = [
-                    safe_text[
-                        i : i + DISCORD_CHAR_LIMIT - 10
-                    ]  # 10 for code fences and margin
-                    for i in range(0, len(safe_text), DISCORD_CHAR_LIMIT - 10)
-                ]
-                for idx, chunk in enumerate(raw_chunks):
-                    part_prefix = (
-                        f"{title} [Part {idx + 1}/{len(raw_chunks)}]\n"
-                        if len(raw_chunks) > 1
-                        else f"{title}\n"
-                    )
-                    await safe_followup(
-                        interaction, part_prefix + f"```text\n{chunk}\n```"
-                    )
-
-            # record turn in history
-            chan_id: int = interaction.channel_id or 0
-            await self._history.record(chan_id, name, (prompt or "", safe_text))
 
     # ------------------------------------------------------------------
     # /chat round-table
