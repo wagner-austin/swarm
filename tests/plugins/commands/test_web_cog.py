@@ -87,36 +87,4 @@ async def test_web_cog_start_command_invalid_url(
     mock_interaction.followup.send.assert_not_called()
 
 
-async def test_web_cog_click_command_success(
-    mock_bot: MagicMock, mock_interaction: MagicMock
-) -> None:
-    """Test the /web click command."""
-    # Arrange
-    # Patch runtime.enqueue instead of using a runner instance
-    enqueue_patch = patch(
-        "bot.plugins.commands.web.BrowserRuntime.enqueue", new_callable=AsyncMock
-    )
-    mock_enqueue = enqueue_patch.start()
-
-    from bot.plugins.commands.web import Web as WebCog
-
-    cog = WebCog(mock_bot)
-    test_selector = "#myButton"
-
-    # Act
-    await cast(Any, cog.click.callback)(cog, mock_interaction, test_selector)
-
-    # Assert
-    mock_interaction.response.defer.assert_awaited_once_with(
-        thinking=True, ephemeral=True
-    )
-    mock_enqueue.assert_awaited_once_with(
-        mock_interaction.channel_id, "click", test_selector
-    )
-    mock_interaction.followup.send.assert_awaited_once_with(
-        f"✔️ Clicked `{test_selector}`"
-    )
-
-
-# TODO: Add more tests for other commands (fill, upload, wait, screenshot)
-# TODO: Add tests for error handling in WebRunner (e.g., QueueFull, engine errors)
+# TODO: Add more tests for other existing Web commands (open, screenshot, etc.)

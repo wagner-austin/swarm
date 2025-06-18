@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import List, Optional, cast
 
 import discord
 import yaml
@@ -103,53 +102,6 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
     ) -> None:
         _delete_yaml(name)
 
-    # ---------------------------------------------------------------------
-    # /persona add
-    # ---------------------------------------------------------------------
-
-    @app_commands.command(name="add", description="Create or overwrite a persona")
-    @app_commands.default_permissions(administrator=True)
-    async def add(  # noqa: D401 – discord handler
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        prompt_text: str,
-        allowed_users: Optional[str] = None,
-    ) -> None:
-        """Create or overwrite a persona.
-
-        ``allowed_users`` is an optional comma-separated list of Discord user
-        IDs.  If omitted the persona is visible to everyone.
-        """
-
-        from typing import cast
-
-        users: Optional[List[int | str]] = cast(
-            Optional[List[int | str]],
-            ([int(u) for u in allowed_users.split(",")] if allowed_users else None),
-        )
-        _write_yaml(name, {"prompt": prompt_text, "allowed_users": users})
-
-        await interaction.response.send_message(
-            f"Persona **{name}** saved.", ephemeral=True
-        )
-
-    # ------------------------------------------------------------------
-    # /persona delete (async version used at runtime; sync stub above for tests)
-    # ------------------------------------------------------------------
-
-    @app_commands.command(name="delete", description="Delete custom persona")
-    @app_commands.default_permissions(administrator=True)
-    async def delete_cmd(self, interaction: discord.Interaction, name: str) -> None:
-        """Delete a custom persona (if it exists)."""
-
-        if _delete_yaml(name):
-            msg = f"Persona **{name}** removed."
-        else:
-            msg = "No such custom persona."
-        await interaction.response.send_message(msg, ephemeral=True)
-
-    # ------------------------------------------------------------------
     # /persona list
     # ------------------------------------------------------------------
 
@@ -167,100 +119,38 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
         )
 
     # ------------------------------------------------------------------
-    # /persona edit – partial update (supports interactive modal)
+    # /persona show – read-only display
     # ------------------------------------------------------------------
 
     @app_commands.command(
-        name="edit",
-        description="Modify an existing persona (leave blank args to open a modal)",
+        name="show",
+        description="Show the prompt for a persona (admin-only, read-only)",
     )
     @app_commands.default_permissions(administrator=True)
-    async def edit_cmd(  # noqa: D401 – discord handler
+    async def show_cmd(  # noqa: D401 – discord handler
         self,
         interaction: discord.Interaction,
         name: str,
-        prompt_text: str | None = None,
-        allowed_users: str | None = None,
     ) -> None:
-        """Partially update an existing persona without resupplying all fields."""
+        """Display the prompt (and allowed users) for the specified persona without allowing edits."""
 
         # --- ensure persona exists ---
         if name not in PERSONALITIES:
             await interaction.response.send_message("No such persona.", ephemeral=True)
             return
 
-        # Interactive modal path – no arguments given
-        if prompt_text is None and allowed_users is None:
-            current = PERSONALITIES[name]
-
-            class _EditModal(discord.ui.Modal, title=f"Edit persona: {name}"):
-                prompt_input: discord.ui.TextInput[discord.ui.Modal]
-                users_input: discord.ui.TextInput[discord.ui.Modal]
-
-                def __init__(self) -> None:  # noqa: D401 – simple init
-                    super().__init__()
-                    self.prompt_input = discord.ui.TextInput(
-                        label="Prompt",
-                        style=discord.TextStyle.paragraph,
-                        default=current["prompt"],
-                        required=False,
-                    )
-                    self.users_input = discord.ui.TextInput(
-                        label="Allowed user IDs (comma-separated)",
-                        default=",".join(
-                            str(u) for u in (current["allowed_users"] or [])
-                        ),
-                        required=False,
-                    )
-                    self.add_item(self.prompt_input)
-                    self.add_item(self.users_input)
-
-                async def on_submit(self, interaction: discord.Interaction) -> None:
-                    new_prompt = self.prompt_input.value or None
-                    new_users_raw = self.users_input.value or None
-                    new_users = (
-                        cast(
-                            List[int | str],
-                            [
-                                int(u.strip())
-                                for u in new_users_raw.split(",")
-                                if u.strip()
-                            ],
-                        )
-                        if new_users_raw
-                        else None
-                    )
-
-                    data: Persona = cast(
-                        Persona,
-                        {
-                            "prompt": new_prompt or current["prompt"],
-                            "allowed_users": new_users,
-                        },
-                    )
-                    _write_yaml(name, data)
-                    await interaction.response.send_message(
-                        f"Persona **{name}** updated via modal.", ephemeral=True
-                    )
-
-            await interaction.response.send_modal(_EditModal())
-            return
-
-        # ---- CLI-style args path ----
-        current = PERSONALITIES[name].copy()
-        if prompt_text is not None:
-            current["prompt"] = prompt_text
-        if allowed_users is not None:
-            from typing import cast as _cast
-
-            current["allowed_users"] = _cast(
-                Optional[List[int | str]],
-                ([int(u) for u in allowed_users.split(",")]),
-            )
-
-        _write_yaml(name, current)
+        # Display prompt
+        data = PERSONALITIES[name]
+        prompt = data["prompt"]
+        allowed = data.get("allowed_users")
+        allowed_str = (
+            "(restricted to: " + ", ".join(str(u) for u in allowed) + ")"
+            if allowed
+            else "(visible to everyone)"
+        )
         await interaction.response.send_message(
-            f"Persona **{name}** updated.", ephemeral=True
+            f"**{name}** {allowed_str}\n```text\n{prompt}\n```",
+            ephemeral=True,
         )
 
     # ------------------------------------------------------------------
