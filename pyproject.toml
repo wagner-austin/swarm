@@ -60,7 +60,7 @@ description = "A modern Discord bot built with Python."
 authors = ["Austin Wagner <austin@example.com>"]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.13"
+python = ">=3.10,<4.0"
 
 [tool.poetry.scripts]
 discord-bot = "bot.core.main:main"
