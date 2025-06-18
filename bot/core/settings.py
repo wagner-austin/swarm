@@ -67,6 +67,7 @@ class Settings(BaseSettings):
 
     conversation_max_turns: int = 8  # Rolling chat history length per channel + persona
     discord_chunk_size: int = 1900  # Characters per Discord message chunk
+    # gemini_model: str = "gemini-2.5-flash"  # Backup Gemini model name, quota is shared 500 per day.
     gemini_model: str = "gemini-2.5-flash-preview-04-17"  # Default Gemini model name
 
     # Optional external JSON for additional personalities
