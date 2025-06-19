@@ -5,7 +5,8 @@ import logging
 
 from bot.core.lifecycle import BotLifecycle
 from bot.core.settings import settings as global_settings
-from bot.utils.signals import install_handlers
+
+# install_handlers import removed – SignalHandlers context manager used instead
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +35,10 @@ async def launch_bot() -> None:
 
     loop = asyncio.get_running_loop()
 
-    # install OS signal handlers via shared helper
-    installed_sigs = install_handlers(loop, _lifecycle_manager_instance)
+    # Install OS signal handlers via async context manager for automatic cleanup
+    from bot.utils.signals import SignalHandlers
 
-    await _lifecycle_manager_instance.run()
-
-    # Clean up signal handlers after run completes (bot has stopped)
-    for sig in installed_sigs:
-        try:
-            loop.remove_signal_handler(sig)
-            logger.info(f"Removed signal handler for {sig.name}")
-        except (NotImplementedError, AttributeError, ValueError, RuntimeError) as e:
-            logger.debug(f"Could not remove {sig.name} handler during cleanup: {e}")
+    async with SignalHandlers(loop, _lifecycle_manager_instance):
+        await _lifecycle_manager_instance.run()
 
     logger.info("launch_bot completed.")

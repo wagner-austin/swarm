@@ -18,7 +18,10 @@ from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["install_handlers"]
+__all__ = [
+    "install_handlers",
+    "SignalHandlers",
+]
 
 
 def install_handlers(
@@ -76,3 +79,43 @@ def install_handlers(
             logger.warning("Could not set %s handler: %s", sig.name, e)
 
     return installed
+
+
+class SignalHandlers:
+    """Async context-manager that installs OS signal handlers and cleans up automatically."""
+
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        manager: asyncio.Future[Any] | object,
+        *,
+        signals: Iterable[signal.Signals] | None = None,
+    ) -> None:
+        self._loop = loop
+        self._manager = manager
+        self._signals = signals
+        self._installed: list[signal.Signals] = []
+
+    async def __aenter__(self) -> SignalHandlers:  # noqa: D401 – context manager
+        self._installed = install_handlers(self._loop, self._manager, signals=self._signals)
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: Any | None,
+    ) -> bool:
+        for sig in self._installed:
+            try:
+                self._loop.remove_signal_handler(sig)
+                logger.debug("Removed signal handler for %s", sig.name)
+            except (
+                NotImplementedError,
+                AttributeError,
+                ValueError,
+                RuntimeError,
+            ) as e:  # pragma: no cover
+                logger.debug("Could not remove %s handler during cleanup: %s", sig.name, e)
+        # Do not suppress exceptions
+        return False

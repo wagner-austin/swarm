@@ -29,12 +29,8 @@ class Container(containers.DeclarativeContainer):
     # Conversation history backend – pluggable
     @staticmethod
     def _choose_backend(cfg: Settings) -> HistoryBackend:
-        redis_enabled = getattr(cfg, "redis_enabled", False) or getattr(
-            getattr(cfg, "redis", None) or object(), "enabled", False
-        )
-        redis_url = getattr(cfg, "redis_url", None) or getattr(
-            getattr(cfg, "redis", None) or object(), "url", None
-        )
+        redis_enabled = cfg.redis.enabled
+        redis_url = cfg.redis.url
         import logging
 
         logger = logging.getLogger(__name__)

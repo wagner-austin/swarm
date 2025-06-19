@@ -9,7 +9,7 @@ from bot.ai.personas import (
     visible as persona_visible,
 )
 from bot.core.exceptions import ModelOverloaded
-from bot.core.settings import settings  # fully typed alias
+from bot.core.settings import DISCORD_LIMIT, settings  # fully typed alias
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
 from bot.plugins.commands.decorators import background_app_command
@@ -178,7 +178,7 @@ class Chat(commands.Cog):
             await safe_send(interaction, "[No response]")
             return
 
-        DISCORD_CHAR_LIMIT: int = settings.discord_chunk_size
+        DISCORD_CHAR_LIMIT: int = DISCORD_LIMIT
         # Wrap response in Discord code blocks and chunk if necessary
         if len(response_text) + 10 <= DISCORD_CHAR_LIMIT:
             # Single-message response – simple code block
