@@ -26,7 +26,7 @@ class About(commands.Cog):
 
     @app_commands.command(name="about", description="Show information about the bot.")
     async def about(self, interaction: discord.Interaction) -> None:
-        """Displays basic information about the bot."""
+        """Display basic information about the bot."""
         assert self.bot.user is not None  # narrow Optional for mypy
         embed = discord.Embed(
             title=f"{self.bot.user.name} - About",

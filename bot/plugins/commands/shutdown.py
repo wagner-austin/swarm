@@ -17,7 +17,7 @@ class Shutdown(BaseDIClientCog):
 
     @app_commands.command(name="shutdown", description="Cleanly shut the bot down (owner only).")
     async def shutdown(self, interaction: discord.Interaction) -> None:
-        """Cleanly shut the bot down (owner-only)."""
+        """Shut the bot down (owner-only)."""
         await safe_send(interaction, "Shutting down...")
 
         bot = interaction.client  # Get the bot instance

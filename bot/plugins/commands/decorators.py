@@ -43,7 +43,7 @@ async def setup(_bot: commands.Bot) -> None:  # pragma: no cover
 def background_app_command(
     *, defer_ephemeral: bool = False
 ) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, None]]]:
-    """Decorator for **long-running** ``discord.app_commands`` commands.
+    """Decorate **long-running** ``discord.app_commands`` commands.
 
     Behaviour:
         1. *Immediately* ``defer`` the ``interaction`` (ephemeral if requested)

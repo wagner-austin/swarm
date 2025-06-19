@@ -61,7 +61,7 @@ def get_uptime() -> float:
 
 
 # Convenience formatter for HH:MM:SS
-def format_hms(seconds: float) -> str:  # noqa: D401 – utility
+def format_hms(seconds: float) -> str:
     h = int(seconds) // 3600
     m = (int(seconds) % 3600) // 60
     s = int(seconds) % 60
@@ -74,10 +74,7 @@ def format_hms(seconds: float) -> str:  # noqa: D401 – utility
 
 
 def get_stats() -> dict[str, float | int]:
-    """
-    Convenience – returns a dict that callers (e.g. the future ``!status``
-    command) can format any way they like.
-    """
+    """Return a dict of runtime metrics suitable for formatting by callers."""
     return {
         "uptime_s": get_uptime(),
         "messages_sent": messages_sent,

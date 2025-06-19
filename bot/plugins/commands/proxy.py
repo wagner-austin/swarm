@@ -49,7 +49,7 @@ class ProxyCog(
 
 
 async def setup(bot: commands.Bot) -> None:
-    """Setup function for the proxy plugin.
+    """Set up the proxy plugin.
 
     Called by Discord.py when loading the extension.
     Dependencies are injected into the cog via the DI container.

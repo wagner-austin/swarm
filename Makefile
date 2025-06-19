@@ -48,6 +48,7 @@ lint: install               ## ruff fix + ruff format + mypy strict type-check
 	$(PIP) install --quiet --disable-pip-version-check types-requests types-PyYAML
 	$(RUFF) check --fix .
 	$(RUFF) format .
+	$(RUFF) check . --select D401 --fix
 	$(MYPY) --strict .
 
 format: install             ## auto-format code base (ruff + black)
