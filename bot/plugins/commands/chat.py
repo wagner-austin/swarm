@@ -9,7 +9,7 @@ from bot.ai.personas import (
 )
 
 # Centralized interaction helpers
-from bot.utils.discord_interactions import safe_followup, safe_send
+from bot.utils.discord_interactions import safe_send
 from bot.plugins.commands.decorators import background_app_command
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
@@ -79,7 +79,7 @@ class Chat(commands.Cog):
 
             await self._history.clear(chan_id_clear, personality)
             target = f" for **{personality}**" if personality else ""
-            await safe_followup(
+            await safe_send(
                 interaction,
                 f"Chat history{target} cleared.",
                 ephemeral=True,
@@ -153,14 +153,14 @@ class Chat(commands.Cog):
                 system_prompt=final_system_prompt,
             )
         except ModelOverloaded:
-            await safe_followup(
+            await safe_send(
                 interaction,
                 "The language model is currently overloaded. Please try again in a moment.",
                 ephemeral=True,
             )
             return
         except Exception as exc:
-            await safe_followup(interaction, f"LLM error: {exc}")
+            await safe_send(interaction, f"LLM error: {exc}")
             return
 
         # Providers may still return an async iterator – normalise to a string
@@ -172,26 +172,26 @@ class Chat(commands.Cog):
                 async for fragment in raw_reply:
                     parts.append(fragment)
             except ModelOverloaded:
-                await safe_followup(
+                await safe_send(
                     interaction,
                     "The language model is currently overloaded. Please try again in a moment.",
                     ephemeral=True,
                 )
                 return
             except Exception as exc:  # handle unforeseen provider errors mid-stream
-                await safe_followup(interaction, f"LLM error: {exc}")
+                await safe_send(interaction, f"LLM error: {exc}")
                 return
             response_text = "".join(parts)
 
         # Handle Discord's character limit by splitting into chunks
         if not response_text:
-            await safe_followup(interaction, "[No response]")
+            await safe_send(interaction, "[No response]")
             return
 
         DISCORD_CHAR_LIMIT: int = settings.discord_chunk_size
         # Wrap response in Discord code blocks and chunk if necessary
         if len(response_text) + 10 <= DISCORD_CHAR_LIMIT:
-            await safe_followup(interaction, f"```text\n{response_text}\n```")
+            await safe_send(interaction, f"```text\n{response_text}\n```")
         else:
             raw_chunks = [
                 response_text[i : i + DISCORD_CHAR_LIMIT - 10]
@@ -203,7 +203,7 @@ class Chat(commands.Cog):
                     if len(raw_chunks) > 1
                     else ""
                 )
-                await safe_followup(interaction, part_prefix + f"```text\n{chunk}\n```")
+                await safe_send(interaction, part_prefix + f"```text\n{chunk}\n```")
 
         # Record the turn in history
         await self._history.record(

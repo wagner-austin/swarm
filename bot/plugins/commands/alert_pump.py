@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from bot.utils.async_helpers import with_retries
 
 import discord
 from discord.ext import commands
@@ -107,34 +108,19 @@ class AlertPump(commands.Cog):
     ) -> None:
         """Try sending *content* to *owner* with exponential back-off."""
 
-        delay = INITIAL_RETRY_DELAY
-        attempt = 0
-        while attempt < MAX_RETRY_ATTEMPTS:
-            try:
-                await owner.send(content)
-                return  # success
-            except discord.HTTPException as exc:
-                attempt += 1
-                if attempt >= MAX_RETRY_ATTEMPTS:
-                    logger.error(
-                        "Alert DM failed after %s attempts – giving up: %s",
-                        attempt,
-                        exc,
-                    )
-                    return
+        async def _attempt_send() -> None:
+            await owner.send(content)
 
-                logger.warning(
-                    "Alert DM attempt %s/%s failed (%s) – retrying in %.1fs",
-                    attempt,
-                    MAX_RETRY_ATTEMPTS,
-                    exc.__class__.__name__,
-                    delay,
-                )
-                try:
-                    await asyncio.sleep(delay)
-                except asyncio.CancelledError:
-                    raise  # respect shutdown
-                delay *= 2  # exponential back-off
+        try:
+            await with_retries(
+                _attempt_send, MAX_RETRY_ATTEMPTS, INITIAL_RETRY_DELAY, backoff=2.0
+            )
+        except discord.HTTPException as exc:
+            logger.error(
+                "Alert DM failed after %s attempts – giving up: %s",
+                MAX_RETRY_ATTEMPTS,
+                exc,
+            )
 
 
 async def setup(bot: commands.Bot) -> None:  # discord.py extension entry-point
