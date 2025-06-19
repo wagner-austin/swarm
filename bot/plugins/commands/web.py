@@ -1,26 +1,25 @@
 from __future__ import annotations
 
-import logging
 import asyncio
-import time
-from pathlib import Path
 import functools
-from typing import Any, Callable, Coroutine, ParamSpec, TypeVar, Optional, cast
-
-# Import centralised Discord interaction helpers
-from bot.utils.discord_interactions import safe_send, safe_defer
-from bot.plugins.commands.decorators import background_app_command
+import logging
+import time
+from collections.abc import Callable, Coroutine
+from pathlib import Path
+from typing import Any, ParamSpec, TypeVar, cast
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-
-from bot.core.settings import settings
+from discord.ext.commands import Bot
 
 from bot.browser.runtime import BrowserRuntime
-from discord.ext.commands import Bot
-from bot.utils.urls import validate_and_normalise_web_url
+from bot.core.settings import settings
+from bot.core.url_validation import validate_and_normalise_web_url
+from bot.plugins.commands.decorators import background_app_command
 
+# Import centralised Discord interaction helpers
+from bot.utils.discord_interactions import safe_defer, safe_send
 
 # --- validation helpers for this cog -------------------------------------
 logger = logging.getLogger(__name__)
@@ -49,10 +48,7 @@ def read_only_guard() -> Callable[[Callable[..., Any]], Any]:
             is_owner = await client.is_owner(interaction.user)
 
         has_admin = False
-        if (
-            isinstance(interaction.user, discord.Member)
-            and interaction.user.guild_permissions
-        ):
+        if isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions:
             has_admin = interaction.user.guild_permissions.administrator
 
         if is_owner or has_admin:
@@ -136,17 +132,13 @@ def browser_command(
                     ephemeral=True,
                 )
             except Exception as exc:
-                await safe_send(
-                    interaction, f"❌ {type(exc).__name__}: {exc}", ephemeral=True
-                )
+                await safe_send(interaction, f"❌ {type(exc).__name__}: {exc}", ephemeral=True)
             return
 
         # Attach the guard at the very end so it wraps the *wrapper* that Discord sees
         if allow_mutation:
             return cast(
-                Callable[
-                    [Any, discord.Interaction, Any, Any], Coroutine[Any, Any, None]
-                ],
+                Callable[[Any, discord.Interaction, Any, Any], Coroutine[Any, Any, None]],
                 read_only_guard()(wrapper),
             )
         return wrapper
@@ -162,13 +154,11 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         # The bot is always started with a DI container attached in discord_runner
         self.runtime: BrowserRuntime = bot.container.browser_runtime()  # type: ignore[attr-defined]
 
-    @app_commands.command(
-        name="start", description="Start a browser session with an optional URL."
-    )
+    @app_commands.command(name="start", description="Start a browser session with an optional URL.")
     @app_commands.describe(url="Optional URL to navigate to.")
     @browser_command(allow_mutation=True)
     async def start(
-        self, interaction: discord.Interaction, url: Optional[str] = None
+        self, interaction: discord.Interaction, url: str | None = None
     ) -> CommandResult | None:
         """Opens a new browser page and optionally navigates to the specified URL."""
         if url:
@@ -194,9 +184,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     )
     @app_commands.describe(url="The URL to navigate to.")
     @browser_command(allow_mutation=True)
-    async def open(
-        self, interaction: discord.Interaction, url: str
-    ) -> CommandResult | None:
+    async def open(self, interaction: discord.Interaction, url: str) -> CommandResult | None:
         """Navigates the current browser to the specified URL."""
         try:
             processed_url = validate_and_normalise_web_url(url)
@@ -214,9 +202,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
     # Helper removed - now using @read_only_guard() decorator instead
 
-    @app_commands.command(
-        name="screenshot", description="Take a screenshot of the current page."
-    )
+    @app_commands.command(name="screenshot", description="Take a screenshot of the current page.")
     @app_commands.describe(filename="Optional filename for the screenshot.")
     @browser_command(queued=True, allow_mutation=False)
     async def screenshot(
@@ -257,9 +243,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 # Enqueue the screenshot action and wait until the browser worker
                 # signals completion.  *enqueue()* returns a Future that resolves
                 # when the underlying Playwright operation has finished.
-                cmd_future = await self.runtime.enqueue(
-                    chan, "screenshot", screenshot_path
-                )
+                cmd_future = await self.runtime.enqueue(chan, "screenshot", screenshot_path)
                 await cmd_future  # ensures the file has been written
                 if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
                     await safe_send(
@@ -310,7 +294,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                         await asyncio.wait_for(
                             self.runtime.enqueue(chan, "health_check"), timeout=2.0
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # If timeout occurs, continue with other channels
                         pass
                     except Exception:
@@ -324,9 +308,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
         # Display status information
         if not rows:
-            await interaction.response.send_message(
-                "No active browser workers.", ephemeral=True
-            )
+            await interaction.response.send_message("No active browser workers.", ephemeral=True)
             return
 
         embed = discord.Embed(title="Browser Workers Status")
@@ -339,9 +321,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
             )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name="close", description="Close the browser for this channel"
-    )
+    @app_commands.command(name="close", description="Close the browser for this channel")
     @read_only_guard()  # replaces manual guard
     @background_app_command(defer_ephemeral=False)
     async def close(self, interaction: discord.Interaction) -> None:
@@ -360,9 +340,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         try:
             # Close the browser for this channel
             await self.runtime.close_channel(chan)
-            await safe_send(
-                interaction, "✅ Browser closed successfully.", ephemeral=True
-            )
+            await safe_send(interaction, "✅ Browser closed successfully.", ephemeral=True)
         except Exception as exc:
             await safe_send(
                 interaction,
@@ -370,9 +348,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 ephemeral=True,
             )
 
-    @app_commands.command(
-        name="closeall", description="Close all browser instances (admin only)"
-    )
+    @app_commands.command(name="closeall", description="Close all browser instances (admin only)")
     @app_commands.default_permissions(administrator=True)
     @background_app_command(defer_ephemeral=True)
     async def closeall(self, interaction: discord.Interaction) -> None:

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 from types import ModuleType
-from typing import Any, List, cast
-
+from typing import Any, cast
 
 from .backends import (
     HistoryBackend,
@@ -57,10 +56,10 @@ class RedisBackend(HistoryBackend):
         # Trim to last N items (-N to -1 keeps last N)
         await cast(Any, self._r).ltrim(key, -self._max_turns, -1)
 
-    async def recent(self, channel: int, persona: str) -> List[Turn]:
+    async def recent(self, channel: int, persona: str) -> list[Turn]:
         key: str = self._key(channel, persona)
-        raw: List[str] = await cast(Any, self._r).lrange(key, -self._max_turns, -1)
-        return cast(List[Turn], [tuple(json.loads(t)) for t in raw])
+        raw: list[str] = await cast(Any, self._r).lrange(key, -self._max_turns, -1)
+        return cast(list[Turn], [tuple(json.loads(t)) for t in raw])
 
     async def clear(self, channel: int, persona: str | None = None) -> None:  # noqa: D401
         if persona is None:

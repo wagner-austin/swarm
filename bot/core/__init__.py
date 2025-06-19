@@ -11,7 +11,7 @@ from typing import List
 
 # ----- public re-exports -----
 # 1) create the symbol table *first*
-__all__: List[str] = []
+__all__: list[str] = []
 
 # ---------------------------------------------------------------------------+
 # Export the *instance* so `from bot_core import settings` works at runtime  #

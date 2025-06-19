@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from bot.utils.async_helpers import with_retries
+from typing import cast
 
 import discord
 from discord.ext import commands
-from typing import cast
+
+from bot.utils.async_helpers import with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,7 @@ class AlertPump(commands.Cog):
                 pass
         lifecycle = getattr(self.bot, "lifecycle", None)
         if lifecycle is None or not hasattr(lifecycle, "alerts_q"):
-            logger.warning(
-                "AlertPump loaded but lifecycle.alerts_q not available – disabled"
-            )
+            logger.warning("AlertPump loaded but lifecycle.alerts_q not available – disabled")
             return  # cannot proceed without a queue
 
         # At this point lifecycle is guaranteed to have 'alerts_q'
@@ -71,7 +70,7 @@ class AlertPump(commands.Cog):
             except asyncio.CancelledError:
                 pass
 
-    async def _relay_loop(self, q: "asyncio.Queue[str]") -> None:
+    async def _relay_loop(self, q: asyncio.Queue[str]) -> None:
         """Forever consume the queue and DM the owner."""
         while not self.bot.is_closed():
             got_msg = False
@@ -81,7 +80,7 @@ class AlertPump(commands.Cog):
                 # Always stash newly received message first
                 self._pending.append(msg)
                 got_msg = True
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # No new message; fall through to retry pending sends
                 pass
 
@@ -109,9 +108,7 @@ class AlertPump(commands.Cog):
             else:
                 # We have an owner: try to flush all pending alerts (oldest first)
                 for pending_msg in list(self._pending):
-                    await self._send_dm_with_retry(
-                        owner, f"⚠️ **Bot alert:** {pending_msg}"
-                    )
+                    await self._send_dm_with_retry(owner, f"⚠️ **Bot alert:** {pending_msg}")
                 self._pending.clear()
 
             # Acknowledge the queue task only if we actually pulled one.
@@ -133,9 +130,7 @@ class AlertPump(commands.Cog):
             await owner.send(content)
 
         try:
-            await with_retries(
-                _attempt_send, MAX_RETRY_ATTEMPTS, INITIAL_RETRY_DELAY, backoff=2.0
-            )
+            await with_retries(_attempt_send, MAX_RETRY_ATTEMPTS, INITIAL_RETRY_DELAY, backoff=2.0)
         except discord.HTTPException as exc:
             logger.error(
                 "Alert DM failed after %s attempts – giving up: %s",

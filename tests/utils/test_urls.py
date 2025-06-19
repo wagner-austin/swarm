@@ -1,7 +1,8 @@
 # tests/utils/test_urls.py
 import pytest
 from pytest import MonkeyPatch
-from bot.utils.urls import validate_and_normalise_web_url
+
+from bot.core.url_validation import validate_and_normalise_web_url
 
 
 @pytest.mark.parametrize(

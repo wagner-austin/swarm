@@ -2,10 +2,10 @@
 Settings for the DiscordBot. All browser flags live in Settings.browser (see BrowserConfig).
 """
 
-from pydantic_settings import BaseSettings
-from pydantic import BaseModel, field_validator, ValidationInfo
-from typing import Optional
 from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, ValidationInfo, field_validator
+from pydantic_settings import BaseSettings
 
 
 class BrowserConfig(BaseModel):
@@ -54,11 +54,11 @@ class Settings(BaseSettings):
     """
     discord_token: str
 
-    gemini_api_key: Optional[str] = None
-    openai_api_key: Optional[str] = None
+    gemini_api_key: str | None = None
+    openai_api_key: str | None = None
 
     # Bot owner Discord user ID – used for restricted personas
-    owner_id: Optional[int] = None
+    owner_id: int | None = None
 
     # --- Tunable bot behaviour ---
     # Redis history backend config
@@ -75,17 +75,15 @@ class Settings(BaseSettings):
 
     # --- Proxy settings ---
     proxy_enabled: bool = False
-    proxy_port: Optional[int] = None
-    proxy_cert_dir: Optional[str] = (
-        ".mitm_certs"  # Default cert directory for mitmproxy
-    )
+    proxy_port: int | None = None
+    proxy_cert_dir: str | None = ".mitm_certs"  # Default cert directory for mitmproxy
 
     # --- Browser session config ---
-    chrome_profile_dir: Optional[str] = None
-    chrome_profile_name: Optional[str] = "Profile 1"
-    chromedriver_path: Optional[str] = None
-    browser_download_dir: Optional[str] = None
-    browser_version_main: Optional[int] = (
+    chrome_profile_dir: str | None = None
+    chrome_profile_name: str | None = "Profile 1"
+    chromedriver_path: str | None = None
+    browser_download_dir: str | None = None
+    browser_version_main: int | None = (
         None  # Allow overriding Chrome major version (None = auto-detect)
     )
 

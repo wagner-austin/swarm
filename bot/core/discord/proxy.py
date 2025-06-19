@@ -52,11 +52,7 @@ async def stop_proxy_service(bot: MyBot) -> None:
     """
     Stops the ProxyService if it's running and attached to the bot.
     """
-    if (
-        bot.proxy_service
-        and hasattr(bot.proxy_service, "stop")
-        and bot.proxy_service.is_running()
-    ):
+    if bot.proxy_service and hasattr(bot.proxy_service, "stop") and bot.proxy_service.is_running():
         logger.info("Shutting down ProxyService...")
         try:
             await bot.proxy_service.stop()

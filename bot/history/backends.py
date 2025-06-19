@@ -9,12 +9,10 @@ in-memory implementation is used.
 from __future__ import annotations
 
 # ruff: noqa: D205,D400
-
 from abc import ABC, abstractmethod
-from typing import List, Tuple
 
 # Alias for readability: (user_message, assistant_message)
-Turn = Tuple[str, str]
+Turn = tuple[str, str]
 
 
 class HistoryBackend(ABC):
@@ -25,7 +23,7 @@ class HistoryBackend(ABC):
         """Append *turn* to the tail of the history for *channel* / *persona*."""
 
     @abstractmethod
-    async def recent(self, channel: int, persona: str) -> List[Turn]:
+    async def recent(self, channel: int, persona: str) -> list[Turn]:
         """Return buffered turns for *channel*/*persona* (oldest first).
 
         The concrete backend decides how many turns to retain based on the

@@ -4,16 +4,15 @@ This module centralizes logging configuration and exposes a setup_logging() func
 that can be used in both production and testing environments.
 """
 
-from typing import Optional, Dict, Any
+import collections
+import copy
 import logging
 import logging.config
-import copy
 import warnings
-import collections
-from typing import Deque, Tuple
+from typing import Any
 
 
-def merge_dicts(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+def merge_dicts(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     """
     Recursively merge *overrides* into *base*.
 
@@ -38,7 +37,7 @@ def merge_dicts(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, An
     return base
 
 
-DEFAULT_LOGGING_CONFIG: Dict[str, Any] = {
+DEFAULT_LOGGING_CONFIG: dict[str, Any] = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
@@ -72,7 +71,7 @@ class _DuplicateFilter(logging.Filter):
 
     def __init__(self, window: int = 20) -> None:
         super().__init__()
-        self._recent: Deque[Tuple[str, str]] = collections.deque(maxlen=window)
+        self._recent: collections.deque[tuple[str, str]] = collections.deque(maxlen=window)
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
         key = (record.getMessage(), getattr(record, "exc_text", ""))
@@ -85,7 +84,7 @@ class _DuplicateFilter(logging.Filter):
 _CONFIGURED: bool = False
 
 
-def setup_logging(config_overrides: Optional[Dict[str, Any]] = None) -> None:
+def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
     """
     setup_logging - Configures logging using a centralized configuration.
 
@@ -114,9 +113,7 @@ def setup_logging(config_overrides: Optional[Dict[str, Any]] = None) -> None:
         or not config["handlers"]
         or not config.get("root", {}).get("handlers")
     ):
-        warnings.warn(
-            "Logging configuration missing handlers; using fallback console handler."
-        )
+        warnings.warn("Logging configuration missing handlers; using fallback console handler.")
         config["handlers"] = {
             "console": {
                 "class": "logging.StreamHandler",

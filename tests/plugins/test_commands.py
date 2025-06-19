@@ -4,18 +4,17 @@ Integration-level sanity check for *slash* cogs after prefix removal.
 
 from __future__ import annotations
 
-from typing import Any, List, cast
 import types
-import pytest
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import pytest
 from discord.ext import commands
 
 from bot.core.containers import Container
 from bot.plugins.commands.about import About
 from bot.plugins.commands.chat import Chat
 from tests._mocks.mocks import StubInteraction
-
 
 # ---------------------------------------------------------------------------+
 # Tests                                                                      +
@@ -78,8 +77,7 @@ async def test_chat_command(monkeypatch: Any) -> None:
     await cast(Any, cog.chat.callback)(cog, ix, "hi")
 
     # we expect at least one follow-up send with "Hi!"
-    sends: List[str] = [
-        call.kwargs.get("content", "") or call.args[0]
-        for call in ix.followup.send.await_args_list
+    sends: list[str] = [
+        call.kwargs.get("content", "") or call.args[0] for call in ix.followup.send.await_args_list
     ]
     assert any("hi" in s.lower() for s in sends)

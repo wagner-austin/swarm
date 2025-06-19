@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TypedDict, Any
+from typing import Any, TypedDict
 
 
 class Command(TypedDict, total=True):

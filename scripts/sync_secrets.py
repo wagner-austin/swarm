@@ -7,10 +7,10 @@ on Windows PowerShell, cmd.exe, bash, CI, etc.
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main() -> None:  # noqa: D401

@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import sys
 import types
-from typing import Any, AsyncIterator, Iterator, cast
+from collections.abc import AsyncIterator, Iterator
+from typing import Any, cast
 
 import pytest
 
-from bot.ai.contracts import LLMProvider
 from bot.ai import providers as registry
+from bot.ai.contracts import LLMProvider
 
 
 @pytest.fixture(autouse=True)

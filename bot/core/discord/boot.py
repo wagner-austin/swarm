@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from discord.ext import commands
 
@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
 class MyBot(commands.Bot):
     # Attrs added at runtime, but mypy needs to know for strict type checking.
-    container: "Container"
-    lifecycle: "BotLifecycle"
+    container: Container
+    lifecycle: BotLifecycle
     proxy_service: ProxyService | None
 
     def __init__(self, *args: Any, **kwargs: Any):

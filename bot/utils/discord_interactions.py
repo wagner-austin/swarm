@@ -15,12 +15,13 @@ handlers when they need to defer, send, or follow-up to an interaction.
 
 from __future__ import annotations
 
-import logging
-from bot.core.settings import settings
 import inspect
+import logging
 from typing import Any
 
 import discord
+
+from bot.core.settings import settings
 
 __all__ = [
     "safe_defer",

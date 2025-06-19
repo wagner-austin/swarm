@@ -8,20 +8,24 @@ Start/stop a TLS-MITM proxy on localhost:*port*.
 """
 
 from __future__ import annotations
+
 import asyncio
 import logging
-from bot.core.settings import settings
 from pathlib import Path
-from mitmproxy import options, proxy
-from mitmproxy.http import HTTPFlow  # For WebSocket flow type hint
 from typing import (
     Any,
-    cast,
     Protocol,
+    cast,
     runtime_checkable,
 )
-from bot.core.telemetry import update_queue_gauge
+
+from mitmproxy import options, proxy
+from mitmproxy.http import HTTPFlow  # For WebSocket flow type hint
 from mitmproxy.tools.dump import DumpMaster
+
+from bot.core.service_base import ServiceABC
+from bot.core.settings import settings
+from bot.core.telemetry import update_queue_gauge
 
 # Removed: from .addon import WSAddon
 
@@ -33,7 +37,7 @@ class AddonProtocol(Protocol):  # minimal contract
     async def websocket_message(self, flow: HTTPFlow) -> None: ...
 
 
-class ProxyService:
+class ProxyService(ServiceABC):
     def __init__(
         self,
         port: int = 9000,
@@ -47,12 +51,8 @@ class ProxyService:
         # Bounded queues prevent unbounded memory growth under heavy load.
         # Tuned based on typical traffic patterns: inbound frames larger and
         # more frequent than outbound AI-crafted frames.
-        self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(
-            maxsize=settings.queues.inbound
-        )
-        self.out_q: asyncio.Queue[bytes] = asyncio.Queue(
-            maxsize=settings.queues.outbound
-        )
+        self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(maxsize=settings.queues.inbound)
+        self.out_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=settings.queues.outbound)
         # initialise gauges
         update_queue_gauge("proxy_in", self.in_q)
         update_queue_gauge("proxy_out", self.out_q)
@@ -62,9 +62,9 @@ class ProxyService:
         self._process: asyncio.subprocess.Process | None = None
 
     # ── public API ──────────────────────────────────────────────
-    async def start(self) -> str:
+    async def start(self) -> None:
         if self._dump:
-            return f"Proxy already running on :{self.port}"
+            return
         # Always delegate to utils.net – single source of truth
         from bot.utils.net import pick_free_port
 
@@ -95,9 +95,7 @@ class ProxyService:
         # mitmproxy 9/10: DumpMaster listens automatically
         # wire addons
         for addon in self._addons:
-            instance = (
-                addon(self.in_q, self.out_q) if isinstance(addon, type) else addon
-            )
+            instance = addon(self.in_q, self.out_q) if isinstance(addon, type) else addon
             self._dump.addons.add(instance)  # type: ignore[no-untyped-call]
         # Ensure the certdir exists
         self.certdir.mkdir(parents=True, exist_ok=True)
@@ -113,21 +111,21 @@ class ProxyService:
             if self._dump:  # Check if dump was initialized
                 self._dump.shutdown()  # type: ignore[no-untyped-call] # Attempt to shutdown dump master
             raise  # Re-raise the exception so the caller knows startup failed
-        return f"Proxy listening on http://127.0.0.1:{self.port}"
+        return
 
     # _pick_free_port and _is_port_free are now in bot.utils.net
 
-    async def stop(self) -> str:
+    async def stop(self, *, graceful: bool = True) -> None:
         # Check if proxy was never started
         if not self._dump and not self._task:
-            return "Proxy not running."
+            return
 
         # Check if proxy is not running but may have been started before
         if not self._dump:
             logger.info("ProxyService: No active mitmproxy instance to stop.")
             self._task = None
             self.port = self._default_port
-            return "Proxy not running."
+            return
 
         logger.info("ProxyService: Shutting down mitmproxy.")
         assert self._dump is not None  # Ensured by the checks above
@@ -161,7 +159,6 @@ class ProxyService:
         # tries the same number first (nice for humans, harmless for tests).
         self.port = self._default_port
         logger.info("ProxyService: mitmproxy stopped.")
-        return "Proxy stopped."
 
     # convenience helper for unit tests
     def is_running(self) -> bool:
@@ -203,4 +200,4 @@ class ProxyService:
 # module‑level singleton so other modules can just "from … import proxy_service"
 # ------------------------------------------------------------------
 
-proxy_service: "ProxyService" = ProxyService()
+proxy_service: ProxyService = ProxyService()

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def initialize_and_wire_container(
-    app_settings: "Settings",
+    app_settings: Settings,
     runner_module_name: str,
 ) -> Container:
     """Create the DI container and wire *all* packages under ``bot.plugins``.

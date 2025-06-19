@@ -9,15 +9,15 @@ import discord
 from discord import Intents
 from discord.ext import commands  # For extension loading exceptions
 
-from bot.core.settings import Settings
-from bot.utils.module_discovery import iter_submodules
+from bot.core import telemetry
 
 # from bot.core.containers import Container # Forward ref
 from bot.core.discord.boot import MyBot
 from bot.core.discord.di import initialize_and_wire_container
 from bot.core.discord.events import register_event_handlers
-from bot.core import telemetry
 from bot.core.discord.proxy import start_proxy_service_if_enabled, stop_proxy_service
+from bot.core.settings import Settings
+from bot.utils.module_discovery import iter_submodules
 
 if TYPE_CHECKING:
     from bot.core.containers import Container
@@ -45,9 +45,7 @@ class BotLifecycle:
         self._container: Container | None = None
         self._shutdown_event = asyncio.Event()
         # Bounded queue for runtime alerts that should be forwarded to the bot owner.
-        self.alerts_q: asyncio.Queue[str] = asyncio.Queue(
-            maxsize=settings.queues.alerts
-        )
+        self.alerts_q: asyncio.Queue[str] = asyncio.Queue(maxsize=settings.queues.alerts)
 
     @property
     def state(self) -> LifecycleState:
@@ -56,9 +54,7 @@ class BotLifecycle:
     def _set_state(self, new_state: LifecycleState) -> None:
         if self._state == new_state:
             return
-        logger.info(
-            f"Bot lifecycle state changing from {self._state.name} to {new_state.name}"
-        )
+        logger.info(f"Bot lifecycle state changing from {self._state.name} to {new_state.name}")
         self._state = new_state
 
     async def run(self) -> None:
@@ -223,4 +219,4 @@ class BotLifecycle:
 # Global access hook (used by bot.core.alerts.send_alert)
 # ------------------------------------------------------------------
 
-_lifecycle_singleton: "BotLifecycle | None" = None
+_lifecycle_singleton: BotLifecycle | None = None

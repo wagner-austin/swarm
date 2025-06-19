@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+
 from discord.ext import commands
 
 from bot.core.containers import Container

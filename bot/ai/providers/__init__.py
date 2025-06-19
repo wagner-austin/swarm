@@ -19,21 +19,21 @@ This avoids monkey-patching import paths.
 
 from __future__ import annotations
 
+import functools
 import importlib
+import logging
+import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType
-from typing import Dict, cast
+from typing import Any, Dict, cast
 
 from bot.ai.contracts import LLMProvider
 from bot.core.telemetry import record_llm_call
-import time
-import functools
-import logging
-from typing import Any, Awaitable, Callable
 
 _log = logging.getLogger(__name__)
 
-_REGISTRY: Dict[str, LLMProvider] = {}
+_REGISTRY: dict[str, LLMProvider] = {}
 
 _pkg_path = Path(__file__).resolve().parent
 
@@ -79,7 +79,7 @@ def get(name: str) -> LLMProvider:
     return _REGISTRY[name]
 
 
-def all() -> Dict[str, LLMProvider]:
+def all() -> dict[str, LLMProvider]:
     """Return a shallow copy of the current registry mapping."""
 
     return dict(_REGISTRY)

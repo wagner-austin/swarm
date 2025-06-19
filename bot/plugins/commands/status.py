@@ -7,9 +7,10 @@ Live bot health and traffic counters (slash-command `/status`).
 import discord
 from discord import app_commands
 from discord.ext import commands
+
 from bot.core import metrics
-from bot.utils.discord_interactions import safe_send
 from bot.plugins.commands.decorators import background_app_command
+from bot.utils.discord_interactions import safe_send
 
 SPACER = " │ "  # visual separator in a single embed field
 
@@ -48,11 +49,7 @@ class Status(commands.Cog):
         )
         embed.add_field(
             name="Traffic",
-            value=(
-                f"📨 {s['discord_messages_processed']} in"
-                f"{SPACER}"
-                f"✉️ {s['messages_sent']} out"
-            ),
+            value=(f"📨 {s['discord_messages_processed']} in{SPACER}✉️ {s['messages_sent']} out"),
             inline=False,
         )
 
@@ -63,9 +60,7 @@ class Status(commands.Cog):
         )
         embed.add_field(
             name="Discord",
-            value=(
-                f"⏰ {latency_ms} ms latency\n🌐 {guilds} guilds\n🔀 Shard {shard_info}"
-            ),
+            value=(f"⏰ {latency_ms} ms latency\n🌐 {guilds} guilds\n🔀 Shard {shard_info}"),
             inline=False,
         )
 

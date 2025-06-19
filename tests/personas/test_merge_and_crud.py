@@ -62,9 +62,7 @@ def test_crud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     adm._CUSTOM_DIR = tmp_path  # type: ignore[attr-defined]
 
     # Simulate `/persona add` via static helper
-    adm.PersonaAdmin._write(
-        adm.PersonaAdmin, "foo", {"prompt": "bar", "allowed_users": None}
-    )
+    adm.PersonaAdmin._write(adm.PersonaAdmin, "foo", {"prompt": "bar", "allowed_users": None})
 
     assert p.prompt("foo") == "bar"
 

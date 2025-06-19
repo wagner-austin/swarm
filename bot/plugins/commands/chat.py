@@ -1,38 +1,34 @@
 import discord
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.Cog
-from bot.core.settings import settings  # fully typed alias
+
+from bot.ai import providers as _providers
 from bot.ai.personas import (
     PERSONALITIES,
     prompt as persona_prompt,
     visible as persona_visible,
 )
+from bot.core.exceptions import ModelOverloaded
+from bot.core.settings import settings  # fully typed alias
+from bot.history.backends import HistoryBackend
+from bot.history.in_memory import MemoryBackend
+from bot.plugins.commands.decorators import background_app_command
 
 # Centralized interaction helpers
 from bot.utils.discord_interactions import safe_send
-from bot.plugins.commands.decorators import background_app_command
-from bot.history.backends import HistoryBackend
-from bot.history.in_memory import MemoryBackend
-from bot.ai import providers as _providers
-from bot.core.exceptions import ModelOverloaded
-
 
 INTERNAL_ERROR = "An internal error occurred. Please try again later."
 
 
 # Static fallback list for autocomplete defaults
-_ALL_CHOICES = [
-    app_commands.Choice(name=k.capitalize(), value=k) for k in PERSONALITIES.keys()
-]
+_ALL_CHOICES = [app_commands.Choice(name=k.capitalize(), value=k) for k in PERSONALITIES.keys()]
 
 # Global system instruction applied to every persona
 DEFAULT_SYSTEM_PROMPT = "Always include your name at the beginning of a response."
 
 
 class Chat(commands.Cog):
-    def __init__(
-        self, bot: commands.Bot, history_backend: HistoryBackend | None = None
-    ) -> None:
+    def __init__(self, bot: commands.Bot, history_backend: HistoryBackend | None = None) -> None:
         super().__init__()  # <-- no args
         self.bot = bot  # keep ref for future use
         # Remember last selected personality per channel
@@ -67,9 +63,7 @@ class Chat(commands.Cog):
         # Handle clearing history first
         if clear:
             chan_id_clear: int = interaction.channel_id or 0
-            if personality is not None and not persona_visible(
-                personality, interaction.user.id
-            ):
+            if personality is not None and not persona_visible(personality, interaction.user.id):
                 await safe_send(
                     interaction,
                     "You are not allowed to use that persona.",
@@ -110,9 +104,7 @@ class Chat(commands.Cog):
             or 0
         )
 
-        if personality is not None and persona_visible(
-            personality, interaction.user.id
-        ):
+        if personality is not None and persona_visible(personality, interaction.user.id):
             # Explicit valid choice – remember it for this channel
             self._channel_persona[channel_id_int] = personality
         else:
@@ -124,9 +116,7 @@ class Chat(commands.Cog):
 
         # Visibility check
         if not persona_visible(personality, interaction.user.id):
-            await safe_send(
-                interaction, "You are not allowed to use that persona.", ephemeral=True
-            )
+            await safe_send(interaction, "You are not allowed to use that persona.", ephemeral=True)
             return
 
         persona_prompt_str: str = persona_prompt(personality)
@@ -207,23 +197,18 @@ class Chat(commands.Cog):
                 chunk_size = 50
 
             raw_chunks = [
-                response_text[i : i + chunk_size]
-                for i in range(0, len(response_text), chunk_size)
+                response_text[i : i + chunk_size] for i in range(0, len(response_text), chunk_size)
             ]
             total_parts = len(raw_chunks)
             for idx, chunk in enumerate(raw_chunks):
-                part_prefix = (
-                    f"[Part {idx + 1}/{total_parts}]\n" if total_parts > 1 else ""
-                )
+                part_prefix = f"[Part {idx + 1}/{total_parts}]\n" if total_parts > 1 else ""
                 await safe_send(
                     interaction,
                     f"```text\n{part_prefix}{chunk}\n```",
                 )
 
         # Record the turn in history
-        await self._history.record(
-            channel_id_int, personality, (prompt or "", response_text)
-        )
+        await self._history.record(channel_id_int, personality, (prompt or "", response_text))
 
     @chat.autocomplete("personality")
     async def personality_autocomplete(

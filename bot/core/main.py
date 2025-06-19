@@ -4,8 +4,8 @@ main.py - Main entry point for the personal Discord bot.
 Initializes logging and starts the bot application.
 """
 
-from bot.core.logger_setup import setup_logging
 from bot.core.launcher import launch_bot  # Import launch_bot from new launcher
+from bot.core.logger_setup import setup_logging
 
 
 async def main() -> None:

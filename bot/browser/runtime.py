@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from typing import Any, Dict
-from bot.core.telemetry import update_queue_gauge
+from typing import Any
 
 from bot.core.settings import settings
+from bot.core.telemetry import update_queue_gauge  # retained for initial gauge setup
+from bot.utils.queue_helpers import (
+    get as q_get,
+    put_nowait as q_put,
+    task_done as q_task_done,
+)
 
 from .engine import BrowserEngine
 from .types import Command
@@ -27,7 +32,7 @@ class _ChannelCtx:
 
     def __init__(self) -> None:  # noqa: D401 – simple description is fine
         self.engine: BrowserEngine | None = None
-        self.queue: "asyncio.Queue[Command]" | None = None
+        self.queue: asyncio.Queue[Command] | None = None
         self.task: asyncio.Task[None] | None = None
 
 
@@ -36,7 +41,7 @@ class BrowserRuntime:
 
     def __init__(self) -> None:  # noqa: D401
         # Mapping: Discord channel ID -> _ChannelCtx
-        self._ch: Dict[int, _ChannelCtx] = defaultdict(_ChannelCtx)
+        self._ch: dict[int, _ChannelCtx] = defaultdict(_ChannelCtx)
         self._lock = asyncio.Lock()
 
     # ---------------------------------------------------------------------
@@ -72,8 +77,7 @@ class BrowserRuntime:
                 "kwargs": kwargs,
                 "future": fut,
             }
-            ctx.queue.put_nowait(cmd)
-            update_queue_gauge(f"browser_cmd:{channel_id}", ctx.queue)
+            q_put(ctx.queue, cmd, f"browser_cmd:{channel_id}")
             return fut
 
     async def close_channel(self, channel_id: int) -> None:
@@ -117,7 +121,7 @@ class BrowserRuntime:
         assert ctx.engine is not None and ctx.queue is not None
 
         while True:
-            cmd: Command = await ctx.queue.get()
+            cmd: Command = await q_get(ctx.queue, f"browser_cmd:{channel_id}")
             try:
                 method = getattr(ctx.engine, cmd["action"])
                 result = await method(*cmd["args"], **cmd["kwargs"])
@@ -127,8 +131,7 @@ class BrowserRuntime:
                 if not cmd["future"].done():
                     cmd["future"].set_exception(exc)
             finally:
-                ctx.queue.task_done()
-                update_queue_gauge(f"browser_cmd:{channel_id}", ctx.queue)
+                q_task_done(ctx.queue, f"browser_cmd:{channel_id}")
 
 
 # ---------------------------------------------------------------------+

@@ -2,9 +2,12 @@
 # Add the src directory to the Python path for all tests
 
 # Now import other modules
-import pytest
 import warnings
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
+
+import pytest
+
 from bot.core.logger_setup import setup_logging
 
 # Silence noisy third-party deprecations we can’t fix locally.
@@ -51,12 +54,8 @@ def _force_headless(monkeypatch: pytest.MonkeyPatch) -> None:
     # Patch the global settings object if it exists. `raising=False` means
     # the attribute will be created if missing, so this works even if the
     # settings module gets imported lazily during tests.
-    monkeypatch.setattr(
-        "bot.core.settings.settings.browser.headless", True, raising=False
-    )
-    monkeypatch.setattr(
-        "bot.core.settings.settings.browser.visible", False, raising=False
-    )
+    monkeypatch.setattr("bot.core.settings.settings.browser.headless", True, raising=False)
+    monkeypatch.setattr("bot.core.settings.settings.browser.visible", False, raising=False)
 
 
 @pytest.fixture

@@ -12,7 +12,8 @@ import asyncio
 import functools
 import logging
 import os
-from typing import Any, Callable, Coroutine, ParamSpec, TypeVar, cast
+from collections.abc import Callable, Coroutine
+from typing import Any, ParamSpec, TypeVar, cast
 
 import discord
 from discord.ext import commands
@@ -41,9 +42,7 @@ async def setup(_bot: commands.Bot) -> None:  # pragma: no cover
 
 def background_app_command(
     *, defer_ephemeral: bool = False
-) -> Callable[
-    [Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, None]]
-]:
+) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, None]]]:
     """Decorator for **long-running** ``discord.app_commands`` commands.
 
     Behaviour:
@@ -77,11 +76,7 @@ def background_app_command(
                 # Accept stub/mock objects used in unit tests that mimic the
                 # minimal ``discord.Interaction`` interface instead of using
                 # ``isinstance`` which fails for AsyncMock-spec instances.
-                if (
-                    maybe is not None
-                    and hasattr(maybe, "response")
-                    and hasattr(maybe, "followup")
-                ):
+                if maybe is not None and hasattr(maybe, "response") and hasattr(maybe, "followup"):
                     interaction = cast(discord.Interaction, maybe)
 
             if interaction is None:
@@ -97,9 +92,7 @@ def background_app_command(
                 try:
                     await func(*args, **kwargs)
                 except Exception as exc:  # noqa: BLE001 – intentional blanket
-                    logger.exception(
-                        "Unhandled error in background command", exc_info=exc
-                    )
+                    logger.exception("Unhandled error in background command", exc_info=exc)
                     # 3. Surface a generic error to the user – do *not* leak internals.
                     await safe_send(
                         interaction,
