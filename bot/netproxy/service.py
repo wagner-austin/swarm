@@ -25,6 +25,7 @@ from mitmproxy.tools.dump import DumpMaster
 
 from bot.core.service_base import ServiceABC
 from bot.core.settings import settings
+from bot.utils.queue_helpers import new_pair
 
 # Removed: from .addon import WSAddon
 
@@ -47,12 +48,8 @@ class ProxyService(ServiceABC):
         self._default_port = port
         self.port = port
         self.certdir = certdir or Path(".mitm_certs")
-        # Bounded queues prevent unbounded memory growth under heavy load.
-        # Tuned based on typical traffic patterns: inbound frames larger and
-        # more frequent than outbound AI-crafted frames.
-        self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(maxsize=settings.queues.inbound)
-        self.out_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=settings.queues.outbound)
-        # initialise gauges
+        # Centralised helper returns bounded queues sized per settings.queues
+        self.in_q, self.out_q = new_pair("proxy")
 
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
