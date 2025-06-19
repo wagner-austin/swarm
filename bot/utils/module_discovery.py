@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import pkgutil
 from collections.abc import Iterator
-from importlib import import_module, resources
-from pathlib import PurePath
+from importlib import import_module
 from types import ModuleType
 
 # Utility helpers for module/package discovery.
@@ -22,13 +22,16 @@ def iter_submodules(pkg: str) -> Iterator[str]:
     """
 
     root: ModuleType = import_module(pkg)
-    root_files = resources.files(root)
+
+    # If the provided name is not a package (e.g., a single module), nothing to do.
+    if not hasattr(root, "__path__"):
+        return
 
     module_names = [
-        f"{pkg}." + ".".join(PurePath(path.relative_to(root_files)).with_suffix("").parts)
-        for path in root_files.rglob("*.py")  # type: ignore[attr-defined]
-        if path.name != "__init__.py"
+        name
+        for _, name, is_pkg in pkgutil.walk_packages(root.__path__, prefix=f"{pkg}.")
+        if not is_pkg
     ]
 
-    # Ruff UP028: use `yield from` for simplicity
+    # Deterministic ordering across platforms.
     yield from sorted(module_names)
