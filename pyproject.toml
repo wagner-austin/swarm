@@ -64,7 +64,6 @@ python = ">=3.10,<4.0"
 
 [tool.poetry.scripts]
 discord-bot = "bot.core.main:main"
-types-requests = "^2.32.0.20250602"
 
 [project.entry-points."bot_plugins"]
 builtin = "bot.plugins.commands"
