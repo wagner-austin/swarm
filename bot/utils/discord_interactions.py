@@ -25,7 +25,6 @@ import discord
 __all__ = [
     "safe_defer",
     "safe_send",
-    "safe_followup",
 ]
 
 logger = logging.getLogger(__name__)
@@ -145,18 +144,3 @@ async def safe_send(
         await target.send(content or "", **kwargs)
     except Exception:  # pragma: no cover – log and swallow
         logger.exception("Final channel send fallback failed.")
-
-
-async def safe_followup(
-    interaction: discord.Interaction,
-    content: str | None = None,
-    **kwargs: Any,
-) -> None:
-    """Alias for :pyfunc:`safe_send` kept for semantic clarity.
-
-    Historically the codebase used a ``_safe_followup`` helper inside
-    *web.py*.  Retaining the *followup* naming avoids widespread refactors in
-    existing call-sites while still unifying the implementation.
-    """
-
-    await safe_send(interaction, content, **kwargs)

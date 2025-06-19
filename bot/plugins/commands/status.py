@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from bot.core import metrics
-from bot.utils.discord_interactions import safe_followup
+from bot.utils.discord_interactions import safe_send
 from bot.plugins.commands.decorators import background_app_command
 
 SPACER = " │ "  # visual separator in a single embed field
@@ -69,7 +69,7 @@ class Status(commands.Cog):
             inline=False,
         )
 
-        await safe_followup(interaction, embed=embed, ephemeral=True)
+        await safe_send(interaction, embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

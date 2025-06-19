@@ -195,16 +195,7 @@ class ProxyService:
         """
         logger.info("ProxyService: aclose() called. Initiating shutdown via stop().")
         await self.stop()
-        # If self._process was intended for a different way of running mitmproxy (e.g., external subprocess),
-        # and if that way could co-exist or be an alternative, then the original logic for self._process
-        # might be relevant. However, based on current start(), mitmproxy runs via self._task.
-        # The original aclose diff's self._process logic:
-        # if self._process is None:
-        #     return
-        # self._process.terminate()
-        # await self._process.wait()
-        # self._process = None
-        # For now, we assume self.stop() handles all necessary cleanup for the current start() implementation.
+
         logger.info("ProxyService: aclose() completed.")
 
 

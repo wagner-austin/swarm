@@ -8,7 +8,7 @@ import functools
 from typing import Any, Callable, Coroutine, ParamSpec, TypeVar, Optional, cast
 
 # Import centralised Discord interaction helpers
-from bot.utils.discord_interactions import safe_followup, safe_defer
+from bot.utils.discord_interactions import safe_send, safe_defer
 from bot.plugins.commands.decorators import background_app_command
 
 import discord
@@ -128,15 +128,15 @@ def browser_command(
             try:
                 await self.runtime.enqueue(chan, op, *op_args)
                 if success_msg:
-                    await safe_followup(interaction, success_msg)
+                    await safe_send(interaction, success_msg)
             except asyncio.QueueFull:
-                await safe_followup(
+                await safe_send(
                     interaction,
                     "❌ The browser command queue is full. Please try again later.",
                     ephemeral=True,
                 )
             except Exception as exc:
-                await safe_followup(
+                await safe_send(
                     interaction, f"❌ {type(exc).__name__}: {exc}", ephemeral=True
                 )
             return
@@ -262,18 +262,18 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 )
                 await cmd_future  # ensures the file has been written
                 if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
-                    await safe_followup(
+                    await safe_send(
                         interaction,
                         "✔️ Screenshot captured:",
                         file=discord.File(screenshot_path, filename=actual_filename),
                     )
                 else:
-                    await safe_followup(
+                    await safe_send(
                         interaction,
                         "❌ Failed to capture screenshot (empty or missing file).",
                     )
             except Exception as e:
-                await safe_followup(
+                await safe_send(
                     interaction,
                     f"❌ Error sending screenshot: {e}",
                 )
@@ -360,11 +360,11 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         try:
             # Close the browser for this channel
             await self.runtime.close_channel(chan)
-            await safe_followup(
+            await safe_send(
                 interaction, "✅ Browser closed successfully.", ephemeral=True
             )
         except Exception as exc:
-            await safe_followup(
+            await safe_send(
                 interaction,
                 f"❌ Error closing browser: {type(exc).__name__}: {exc}",
                 ephemeral=True,
@@ -390,13 +390,13 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         try:
             # Close all browsers
             await self.runtime.close_all()
-            await safe_followup(
+            await safe_send(
                 interaction,
                 f"✅ Successfully closed {len(rows)} browser instance(s).",
                 ephemeral=True,
             )
         except Exception as exc:
-            await safe_followup(
+            await safe_send(
                 interaction,
                 f"❌ Error closing browsers: {type(exc).__name__}: {exc}",
                 ephemeral=True,
