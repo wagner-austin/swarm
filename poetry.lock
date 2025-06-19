@@ -3253,4 +3253,4 @@ discord = ["discord.py"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "fa228812d0f28d55c92b2627bf26661039cfeda023a76397eb0ba407ac3ddc03"
+content-hash = "375bfad35bf0687318949f4dd7207f23fb7f7a5cd31abd28e4358be0e509ed05"

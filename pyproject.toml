@@ -56,19 +56,12 @@ dev = [
 
 
 
-[tool.poetry]
-name = "bot"
-version = "0.2.0"
-description = "A modern Discord bot built with Python."
-authors = ["Austin Wagner <austin@example.com>"]
-
-[tool.poetry.dependencies]
-python = ">=3.12"
-httpcore = "^1.0.2"
 
 
-[tool.poetry.scripts]
-discord-bot = "bot.core.main:main"
+
+
+
+
 
 [project.entry-points."bot_plugins"]
 builtin = "bot.plugins.commands"
