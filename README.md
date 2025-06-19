@@ -99,9 +99,6 @@ Create a `.env` file in your project root with the following contents:
 ```ini
 # .env - Discord Bot configuration
 DISCORD_TOKEN=your-bot-token-here
-DB_NAME=bot_data.db
-BACKUP_INTERVAL=3600
-BACKUP_RETENTION=10
 ROLE_NAME_MAP={"123456789012345678": "owner", "987654321098765432": "admin"}
 GEMINI_API_KEY=your-gemini-key-here
 OPENAI_API_KEY=your-openai-key-here
