@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, TypeVar
 
+from bot.core.settings import settings
 from bot.core.telemetry import update_queue_gauge
 
 T = TypeVar("T")
@@ -20,6 +21,7 @@ __all__ = [
     "put_nowait",
     "get",
     "task_done",
+    "new_pair",
 ]
 
 
@@ -40,3 +42,22 @@ def task_done(q: asyncio.Queue[Any], name: str) -> None:  # noqa: ANN401 – Any
     """Mark one task processed for *q* and refresh its gauge."""
     q.task_done()
     update_queue_gauge(name, q)
+
+
+def new_pair(direction: str = "proxy") -> tuple[asyncio.Queue[Any], asyncio.Queue[Any]]:  # noqa: D401
+    """Return `(in_q, out_q)` sized per ``settings.queues``.
+
+    Parameters
+    ----------
+    direction: str, default "proxy"
+        A prefix used when exporting Prometheus gauge names.  For example,
+        ``direction='proxy'`` will register gauges ``proxy_in`` and
+        ``proxy_out``.
+    """
+    in_q: asyncio.Queue[Any] = asyncio.Queue(maxsize=settings.queues.inbound)
+    out_q: asyncio.Queue[Any] = asyncio.Queue(maxsize=settings.queues.outbound)
+
+    # Initialise gauges to 0 so they appear even before the first put().
+    update_queue_gauge(f"{direction}_in", in_q)
+    update_queue_gauge(f"{direction}_out", out_q)
+    return in_q, out_q
