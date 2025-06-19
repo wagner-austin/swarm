@@ -4,12 +4,8 @@ import asyncio
 import logging
 
 from bot.core.lifecycle import BotLifecycle
-from bot.core.logger_setup import setup_logging
 from bot.core.settings import settings as global_settings
 from bot.utils.signals import install_handlers
-
-# Ensure logging is configured before any loggers are fetched
-setup_logging()
 
 logger = logging.getLogger(__name__)
 
