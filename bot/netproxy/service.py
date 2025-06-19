@@ -25,7 +25,6 @@ from mitmproxy.tools.dump import DumpMaster
 
 from bot.core.service_base import ServiceABC
 from bot.core.settings import settings
-from bot.core.telemetry import update_queue_gauge
 
 # Removed: from .addon import WSAddon
 
@@ -54,8 +53,7 @@ class ProxyService(ServiceABC):
         self.in_q: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(maxsize=settings.queues.inbound)
         self.out_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=settings.queues.outbound)
         # initialise gauges
-        update_queue_gauge("proxy_in", self.in_q)
-        update_queue_gauge("proxy_out", self.out_q)
+
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
         self._addons: list[AddonProtocol] = addons or []
