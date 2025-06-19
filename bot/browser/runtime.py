@@ -16,7 +16,6 @@ from collections import defaultdict
 from typing import Any
 
 from bot.core.settings import settings
-from bot.core.telemetry import update_queue_gauge  # retained for initial gauge setup
 from bot.utils.queue_helpers import (
     get as q_get,
     put_nowait as q_put,
@@ -67,7 +66,6 @@ class BrowserRuntime:
 
             if ctx.queue is None:
                 ctx.queue = asyncio.Queue(maxsize=settings.queues.command)
-                update_queue_gauge(f"browser_cmd:{channel_id}", ctx.queue)
                 ctx.task = asyncio.create_task(self._worker(channel_id))
 
             fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()

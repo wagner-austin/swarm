@@ -98,12 +98,15 @@ disallow_untyped_defs = true
 # Ruff – the fast Python linter & formatter
 # ------------------------------------------------------------------
 [tool.ruff]
-select = ["E", "F", "I", "UP"]  # Pycodestyle, Pyflakes, isort, PyUpgrade
-# Ignore long lines for now and deprecated typing generics (handled progressively)
-ignore = ["E501", "UP035", "F401", "UP022"]
 line-length = 100
 # Target the same runtime we deploy on
 target-version = "py312"
 
-[tool.ruff.isort]
+[tool.ruff.lint]
+# Pycodestyle, Pyflakes, isort, PyUpgrade
+select = ["E", "F", "I", "UP"]
+# Ignore long lines for now and deprecated typing generics (handled progressively)
+ignore = ["E501", "UP035", "F401", "UP022"]
+
+[tool.ruff.lint.isort]
 combine-as-imports = true

@@ -146,6 +146,21 @@ def browser_command(
     return decorator
 
 
+def browser_mutating(
+    queued: bool = True,
+    defer_ephemeral: bool = False,
+) -> Callable[[Callable[..., Coroutine[Any, Any, CommandResult | None]]], Any]:
+    """Convenience decorator for *mutating* browser commands.
+
+    This is equivalent to ``@browser_command(allow_mutation=True)`` but avoids the
+    possibility that a future contributor forgets to set ``allow_mutation=True`` and
+    accidentally exposes state-changing functionality while the bot is running in
+    read-only mode.
+    """
+
+    return browser_command(queued=queued, allow_mutation=True, defer_ephemeral=defer_ephemeral)
+
+
 class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
     def __init__(self, bot: Bot) -> None:  # noqa: D401  (imperative)
         super().__init__()
@@ -156,7 +171,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
     @app_commands.command(name="start", description="Start a browser session with an optional URL.")
     @app_commands.describe(url="Optional URL to navigate to.")
-    @browser_command(allow_mutation=True)
+    @browser_mutating()
     async def start(
         self, interaction: discord.Interaction, url: str | None = None
     ) -> CommandResult | None:
@@ -183,7 +198,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         name="open", description="Navigate to the specified URL in the current browser."
     )
     @app_commands.describe(url="The URL to navigate to.")
-    @browser_command(allow_mutation=True)
+    @browser_mutating()
     async def open(self, interaction: discord.Interaction, url: str) -> CommandResult | None:
         """Navigates the current browser to the specified URL."""
         try:
@@ -322,7 +337,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="close", description="Close the browser for this channel")
-    @read_only_guard()  # replaces manual guard
+    @browser_mutating(queued=False, defer_ephemeral=False)
     @background_app_command(defer_ephemeral=False)
     async def close(self, interaction: discord.Interaction) -> None:
         """Closes the browser instance for the current channel."""
@@ -350,6 +365,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
     @app_commands.command(name="closeall", description="Close all browser instances (admin only)")
     @app_commands.default_permissions(administrator=True)
+    @browser_mutating(queued=False, defer_ephemeral=True)
     @background_app_command(defer_ephemeral=True)
     async def closeall(self, interaction: discord.Interaction) -> None:
         """Closes all browser instances across all channels (admin only)."""

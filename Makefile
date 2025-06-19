@@ -53,6 +53,8 @@ lint: install               ## ruff fix + ruff format + mypy strict type-check
 format: install             ## auto-format code base (ruff + black)
 	$(RUFF) format .
 
+check: lint test
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------

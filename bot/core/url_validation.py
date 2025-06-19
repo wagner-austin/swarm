@@ -10,39 +10,17 @@ single place.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from urllib.parse import urlparse
 
-from bot.core.settings import settings
-from bot.utils.urls import normalise
+# Re-export the unified helper from bot.utils.urls while keeping the same public interface
+from bot.utils.urls import validate_and_normalise_web_url as _base
 
 __all__ = ["validate_and_normalise_web_url"]
 
 
 def validate_and_normalise_web_url(raw: str, *, allowed_hosts: Iterable[str] | None = None) -> str:  # noqa: D401
-    """Return a safe, normalised web URL after applying host-allowlist rules.
+    """Return a safe, normalised web URL via the unified helper.
 
-    Behaviour:
-    1. Adds an ``https://`` scheme if missing.
-    2. Allows ``file://`` and ``about:`` URLs unchanged.
-    3. Rejects hosts that do not look valid (no dot and not *localhost*).
-    4. Enforces *allowed_hosts* (case-insensitive).  If this iterable is empty
-       or contains ``"*"``, the check is skipped.
+    This is merely a backward-compatibility shim; prefer importing
+    :func:`bot.utils.urls.validate_and_normalise_web_url` directly in new code.
     """
-    if not raw:
-        raise ValueError("URL cannot be empty")
-
-    url = normalise(raw)
-    if url.startswith(("file://", "about:")):
-        return url
-
-    parsed = urlparse(url)
-    host = parsed.hostname or parsed.netloc
-
-    if "." not in host and host.lower() != "localhost":  # basic sanity
-        raise ValueError(f"'{raw}' does not look like a valid host")
-
-    allow = list(allowed_hosts) if allowed_hosts is not None else list(settings.allowed_hosts)
-    if allow and "*" not in allow and host.lower() not in {h.lower() for h in allow}:
-        raise ValueError(f"Navigation to '{host}' is not permitted by configuration")
-
-    return url
+    return _base(raw, allowed_hosts=allowed_hosts)

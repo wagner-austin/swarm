@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from urllib.parse import urlparse
+
+from bot.core.settings import settings
 
 # ---------------------------------------------------------------------------+
 # Public helper – the *only* place that validates a user‑supplied URL        +
 # ---------------------------------------------------------------------------+
 
 
-def validate_and_normalise_web_url(raw: str) -> str:
+def validate_and_normalise_web_url(raw: str, *, allowed_hosts: Iterable[str] | None = None) -> str:
     """
     • Add ``https://`` if scheme is missing.
     • Reject anything that is neither http/https nor ``file://`` nor ``about:``.
@@ -33,6 +36,11 @@ def validate_and_normalise_web_url(raw: str) -> str:
     # 1) basic sanity (unchanged)
     if "." not in host and host.lower() != "localhost":
         raise ValueError(f"'{raw}' does not look like a valid host")
+
+    # 2) host allow-list enforcement
+    allow = list(allowed_hosts) if allowed_hosts is not None else list(settings.allowed_hosts)
+    if allow and "*" not in allow and host.lower() not in {h.lower() for h in allow}:
+        raise ValueError(f"Navigation to '{host}' is not permitted by configuration")
 
     return url
 
