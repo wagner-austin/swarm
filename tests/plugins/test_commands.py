@@ -74,7 +74,7 @@ async def test_chat_command(monkeypatch: Any) -> None:
     cog = Chat(bot)
     ix = StubInteraction(bot=bot)
 
-    await cast(Any, cog.chat.callback)(cog, ix, "hi")
+    await cast(Any, cog.chat.callback)(cog, ix, "hi", sync_in_test=True)
 
     # we expect at least one follow-up send with "Hi!"
     sends: list[str] = [

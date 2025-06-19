@@ -112,7 +112,7 @@ async def test_chat_with_dummy_provider() -> None:  # noqa: D401
     # Call the underlying callback to avoid Command wrappers
     from typing import Any  # local import to avoid top-level heavy deps
 
-    await cast(Any, Chat.chat.callback)(cog, ixn, "hi", False, None)
+    await cast(Any, Chat.chat.callback)(cog, ixn, "hi", False, None, sync_in_test=True)
 
     # Ensure the provider’s reply made it to Discord follow-up
     assert (ixn.response.last or "").find("dummy reply") != -1
