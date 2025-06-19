@@ -191,19 +191,34 @@ class Chat(commands.Cog):
         DISCORD_CHAR_LIMIT: int = settings.discord_chunk_size
         # Wrap response in Discord code blocks and chunk if necessary
         if len(response_text) + 10 <= DISCORD_CHAR_LIMIT:
+            # Single-message response – simple code block
             await safe_send(interaction, f"```text\n{response_text}\n```")
         else:
+            # Determine the maximum prefix length (e.g. "[Part 10/10]\n") so we can
+            # make sure each chunk, plus its prefix *inside* the code-block fence, is
+            # guaranteed to fit within Discord's hard limit (2000 characters).
+            # We pessimistically assume two-digit indices – that is more than enough
+            # for the 2000-char limit.
+            # Reserve space for opening/closing code fences (`````text\n```) -> 10
+            max_prefix_len: int = len(f"[Part {99}/{99}]\n")
+            chunk_size: int = DISCORD_CHAR_LIMIT - 10 - max_prefix_len
+            if chunk_size <= 0:
+                # Fall-back safety – should never happen, but avoid ZeroDivisionError
+                chunk_size = 50
+
             raw_chunks = [
-                response_text[i : i + DISCORD_CHAR_LIMIT - 10]
-                for i in range(0, len(response_text), DISCORD_CHAR_LIMIT - 10)
+                response_text[i : i + chunk_size]
+                for i in range(0, len(response_text), chunk_size)
             ]
+            total_parts = len(raw_chunks)
             for idx, chunk in enumerate(raw_chunks):
                 part_prefix = (
-                    f"[Part {idx + 1}/{len(raw_chunks)}]\n"
-                    if len(raw_chunks) > 1
-                    else ""
+                    f"[Part {idx + 1}/{total_parts}]\n" if total_parts > 1 else ""
                 )
-                await safe_send(interaction, part_prefix + f"```text\n{chunk}\n```")
+                await safe_send(
+                    interaction,
+                    f"```text\n{part_prefix}{chunk}\n```",
+                )
 
         # Record the turn in history
         await self._history.record(
