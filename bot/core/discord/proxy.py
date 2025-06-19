@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 async def start_proxy_service_if_enabled(container: Container, bot: MyBot) -> None:
-    """
-    Starts the ProxyService if it's enabled in the configuration.
-    Updates the bot instance and the running event loop with the service.
+    """Start the ProxyService if enabled in the configuration.
+
+    Update the bot instance and running event loop with the service.
     """
     ps_instance: ProxyService | None = None
     if container.config().proxy_enabled:
@@ -49,9 +49,7 @@ async def start_proxy_service_if_enabled(container: Container, bot: MyBot) -> No
 
 
 async def stop_proxy_service(bot: MyBot) -> None:
-    """
-    Stops the ProxyService if it's running and attached to the bot.
-    """
+    """Stop the ProxyService if it is running and attached to the bot."""
     if bot.proxy_service and hasattr(bot.proxy_service, "stop") and bot.proxy_service.is_running():
         logger.info("Shutting down ProxyService...")
         try:

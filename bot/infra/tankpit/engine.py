@@ -67,7 +67,7 @@ class TankPitEngine(ServiceABC):
         return "running" if self.is_running() else "stopped"
 
     async def _run(self) -> None:
-        """Main consume loop – placeholder implementation."""
+        """Run the main consume loop (placeholder implementation)."""
         while True:
             direction, payload = await q_get(self._in, "proxy_in")
             try:

@@ -191,7 +191,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
         await interaction.response.send_message("Secret personas imported 👍", ephemeral=True)
 
 
-async def setup(bot: commands.Bot) -> None:  # noqa: D401 – mandated signature
-    """Standard extension entry-point used by discord-py."""
+async def setup(bot: commands.Bot) -> None:  # mandated signature
+    """Set up the persona_admin extension for discord.py."""
 
     await bot.add_cog(PersonaAdmin(bot))

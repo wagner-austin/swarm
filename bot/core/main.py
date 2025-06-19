@@ -1,16 +1,16 @@
 #!/usr/bin/env python
-"""
-main.py - Main entry point for the personal Discord bot.
-Initializes logging and starts the bot application.
+"""Start the Discord bot application.
+
+Initialize logging and delegate execution to ``launch_bot``.
 """
 
 from bot.core.launcher import launch_bot  # Import launch_bot from new launcher
 
 
 async def main() -> None:
-    """
-    Main asynchronous entry point.
-    Configures logging and delegates to the startup orchestrator.
+    """Asynchronous entry point for the bot.
+
+    Configure logging then delegate to the startup orchestrator.
     """
     # Logging is configured during the initial bootstrap in bot.core.__main__.
     # The new launch_bot and BotLifecycle handle KeyboardInterrupt/CancelledError internally.

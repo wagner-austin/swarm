@@ -17,13 +17,11 @@ logger = logging.getLogger(__name__)
 
 # Container removed from arguments
 def register_event_handlers(bot: MyBot) -> None:
-    """
-    Defines and registers event handlers for the bot.
-    """
+    """Define and register event handlers for the bot."""
 
     @bot.event
     async def on_ready() -> None:
-        """Called when the bot is done preparing the data received from Discord."""
+        """Handle bot ready event after Discord data is prepared."""
         # Matches the version from discord_runner.py before refactor
         logger.info(f"[bold green]✅ {bot.user} is LIVE[/] – syncing slash commands …")
 

@@ -98,6 +98,7 @@ target-version = "py312"
 [tool.ruff.lint]
 # Pycodestyle, Pyflakes, isort, PyUpgrade
 select = ["E", "F", "I", "UP"]
+extend-select = ["D401"]
 # Ignore long lines for now and deprecated typing generics (handled progressively)
 ignore = ["E501", "UP035", "F401", "UP022"]
 

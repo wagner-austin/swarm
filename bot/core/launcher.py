@@ -13,9 +13,9 @@ _lifecycle_manager_instance: BotLifecycle | None = None
 
 
 async def launch_bot() -> None:
-    """
-    Initializes settings and starts the bot using the BotLifecycle manager.
-    This is the primary entry point called by main.py.
+    """Initialize settings and start the bot via the BotLifecycle manager.
+
+    This is the primary entry point called by ``main.py``.
     """
     global _lifecycle_manager_instance
 

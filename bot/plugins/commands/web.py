@@ -69,7 +69,7 @@ def browser_command(
     allow_mutation: bool = False,
     defer_ephemeral: bool = False,
 ) -> Callable[[Callable[..., Coroutine[Any, Any, CommandResult | None]]], Any]:
-    """Decorator that handles common boilerplate for browser commands.
+    """Handle common boilerplate for browser commands.
 
     Args:
         queued: Whether the command should be queued through the WebRunner
@@ -150,7 +150,7 @@ def browser_mutating(
     queued: bool = True,
     defer_ephemeral: bool = False,
 ) -> Callable[[Callable[..., Coroutine[Any, Any, CommandResult | None]]], Any]:
-    """Convenience decorator for *mutating* browser commands.
+    """Decorate mutating browser commands.
 
     This is equivalent to ``@browser_command(allow_mutation=True)`` but avoids the
     possibility that a future contributor forgets to set ``allow_mutation=True`` and
@@ -162,7 +162,7 @@ def browser_mutating(
 
 
 class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
-    def __init__(self, bot: Bot) -> None:  # noqa: D401  (imperative)
+    def __init__(self, bot: Bot) -> None:
         super().__init__()
         self.bot = bot
         # Resolve DI singleton for browser runtime
@@ -175,7 +175,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     async def start(
         self, interaction: discord.Interaction, url: str | None = None
     ) -> CommandResult | None:
-        """Opens a new browser page and optionally navigates to the specified URL."""
+        """Open a new browser page and optionally navigate to the specified URL."""
         if url:
             try:
                 processed_url = validate_and_normalise_web_url(url)
@@ -223,7 +223,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     async def screenshot(
         self, interaction: discord.Interaction, filename: str | None = None
     ) -> CommandResult | None:
-        """Takes a screenshot of the current browser page."""
+        """Take a screenshot of the current browser page."""
         actual_filename = filename or "screenshot.png"
         if not any(actual_filename.endswith(ext) for ext in [".png", ".jpg", ".jpeg"]):
             actual_filename += ".png"  # Default to PNG if no extension
@@ -293,7 +293,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
     @app_commands.command(name="status", description="Show browser status")
     async def status(self, interaction: discord.Interaction) -> None:
-        """Shows information about the browser instance for the current channel."""
+        """Show information about the browser instance for the current channel."""
         # First check if browsers exist
         rows = self.runtime.status()
 
@@ -340,7 +340,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     @browser_mutating(queued=False, defer_ephemeral=False)
     @background_app_command(defer_ephemeral=False)
     async def close(self, interaction: discord.Interaction) -> None:
-        """Closes the browser instance for the current channel."""
+        """Close the browser instance for the current channel."""
         chan = interaction.channel_id
         assert chan is not None
 
@@ -368,7 +368,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     @browser_mutating(queued=False, defer_ephemeral=True)
     @background_app_command(defer_ephemeral=True)
     async def closeall(self, interaction: discord.Interaction) -> None:
-        """Closes all browser instances across all channels (admin only)."""
+        """Close all browser instances across all channels (admin only)."""
         # The decorator already enforces permissions; no extra checks needed
 
         # Check if there are any active browsers
