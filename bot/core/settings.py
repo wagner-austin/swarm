@@ -29,8 +29,8 @@ class BrowserConfig(BaseModel):
 
 
 class RedisConfig(BaseModel):
-    enabled: bool = Field(False, alias="REDIS_ENABLED")
-    url: str | None = Field(None, alias="REDIS_URL")
+    enabled: bool = False
+    url: str | None = None
 
     model_config = {"extra": "ignore"}
 
@@ -118,7 +118,12 @@ class Settings(BaseSettings):
         # Default to empty list for unexpected types
         return []
 
-    model_config = {"env_file": ".env", "case_sensitive": False, "extra": "allow"}
+    model_config = {
+        "env_file": ".env",
+        "case_sensitive": False,
+        "extra": "allow",
+        "env_nested_delimiter": "__",  # Enable nested env vars like REDIS__URL
+    }
 
     @field_validator("discord_token")
     @classmethod

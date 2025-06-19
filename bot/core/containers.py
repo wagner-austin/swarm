@@ -34,20 +34,13 @@ class Container(containers.DeclarativeContainer):
         import logging
 
         logger = logging.getLogger(__name__)
-        import socket
+        import socket  # retained for backward-compat
 
         if redis_enabled and redis_url:
-            # Quick connectivity probe to avoid runtime failures.
+            logger.info("History backend: Redis (%s)", redis_url)
             try:
-                from urllib.parse import urlparse
-
-                parsed = urlparse(redis_url)
-                host, port = parsed.hostname or "localhost", parsed.port or 6379
-                with socket.create_connection((host, port), timeout=1):
-                    pass  # success
-                logger.info("History backend: Redis (%s)", redis_url)
                 return RedisBackend(redis_url, cfg.conversation_max_turns)
-            except Exception as exc:  # pragma: no cover – probe only
+            except Exception as exc:
                 logger.warning(
                     "Redis backend unreachable (%s), falling back to in-memory. Error: %s",
                     redis_url,
