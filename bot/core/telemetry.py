@@ -15,16 +15,16 @@ has already been started, the call becomes a no-op.
 
 from __future__ import annotations
 
-import logging
 import asyncio
-from typing import Any
+import logging
 from errno import EADDRINUSE
+from typing import Any
 
 from prometheus_client import (
-    Counter,
-    Histogram,
-    Gauge,
     CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
     start_http_server,
 )
 
@@ -95,7 +95,7 @@ def record_frame(direction: str, duration_s: float) -> None:
     FRAME_LATENCY.observe(duration_s)
 
 
-def update_queue_gauge(name: str, q: "asyncio.Queue[Any]") -> None:
+def update_queue_gauge(name: str, q: asyncio.Queue[Any]) -> None:
     """Export instantaneous fill level of an ``asyncio.Queue``."""
     QUEUE_SIZE.labels(name).set(q.qsize())
 

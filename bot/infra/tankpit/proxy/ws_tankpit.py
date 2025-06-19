@@ -10,7 +10,12 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from mitmproxy import ctx, websocket
-from bot.core.telemetry import update_queue_gauge
+
+from bot.utils.queue_helpers import (
+    get as q_get,
+    put_nowait as q_put,
+    task_done as q_task_done,
+)
 
 # ---------------------------------------------------------------------------+
 #  Binary‑frame opcode constant                                              +
@@ -56,8 +61,7 @@ class TankPitWSAddon:  # Renamed from WSAddon
         msg = flow.websocket.messages[-1]
         direction = "TX" if msg.from_client else "RX"
         try:
-            self.in_q.put_nowait((direction, msg.content))
-            update_queue_gauge("proxy_in", self.in_q)
+            q_put(self.in_q, (direction, msg.content), "proxy_in")
         except asyncio.QueueFull:
             from bot.core import alerts
 
@@ -69,13 +73,11 @@ class TankPitWSAddon:  # Renamed from WSAddon
         Here, we take crafted frames from out_q and inject them server-bound.
         """
         while True:
-            data = await self.out_q.get()
+            data = await q_get(self.out_q, "proxy_out")
             try:
                 # The ctx.master.state access might still flag in MyPy if stubs are incomplete,
                 # but this is standard mitmproxy addon practice.
-                if ctx.master and hasattr(
-                    ctx.master, "state"
-                ):  # Check for state to be safe
+                if ctx.master and hasattr(ctx.master, "state"):  # Check for state to be safe
                     for f_flow in ctx.master.state.flows:  # Iterate all flows
                         if f_flow.websocket and not f_flow.websocket.closed:
                             # Assuming TankPit uses binary frames for game data.
@@ -102,5 +104,4 @@ class TankPitWSAddon:  # Renamed from WSAddon
                 if hasattr(ctx, "log") and hasattr(ctx.log, "error"):
                     ctx.log.error(f"Error in TankPitWSAddon running loop: {e}")  # type: ignore[no-untyped-call]
             finally:
-                self.out_q.task_done()
-                update_queue_gauge("proxy_out", self.out_q)
+                q_task_done(self.out_q, "proxy_out")

@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator, AsyncIterator, List, Optional
+from collections.abc import AsyncGenerator, AsyncIterator
+from typing import Any
 
 from bot.ai.contracts import LLMProvider, Message
-from bot.core.settings import settings
-from bot.core.exceptions import ModelOverloaded
 from bot.core import alerts
+from bot.core.exceptions import ModelOverloaded
+from bot.core.settings import settings
 
 # NOTE: We intentionally **do not** import the google-genai SDK at module load
 # time. Tests often monkey-patch `sys.modules` with stub packages before the
@@ -32,13 +33,11 @@ class _GeminiProvider(LLMProvider):
 
     def __init__(self) -> None:
         if not settings.gemini_api_key:
-            raise RuntimeError(
-                "`GEMINI_API_KEY` is not configured – cannot use Gemini provider."
-            )
+            raise RuntimeError("`GEMINI_API_KEY` is not configured – cannot use Gemini provider.")
 
         # Client and heavy SDK import are deferred until first use so that unit
         # tests can stub the `google` package before it is required.
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._genai: Any = None
 
     # ------------------------------------------------------------------
@@ -68,7 +67,7 @@ class _GeminiProvider(LLMProvider):
     async def generate(
         self,
         *,
-        messages: List[Message],
+        messages: list[Message],
         stream: bool = False,
         **options: Any,
     ) -> str | AsyncIterator[str]:
@@ -95,9 +94,7 @@ class _GeminiProvider(LLMProvider):
                 continue
             if role == "assistant":
                 role = "model"
-            contents.append(
-                types.Content(role=role, parts=[types.Part.from_text(text=text)])
-            )
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
 
         gen_config = types.GenerateContentConfig(
             system_instruction=system_prompt,
@@ -106,7 +103,7 @@ class _GeminiProvider(LLMProvider):
 
         if stream:
 
-            def _sync_stream() -> List[str]:
+            def _sync_stream() -> list[str]:
                 """Run the synchronous streaming call in a worker thread."""
                 out: list[str] = []
                 assert self._client is not None

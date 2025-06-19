@@ -13,15 +13,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Tuple
+
+from bot.core.service_base import ServiceABC
 from bot.core.telemetry import record_frame
+from bot.utils.queue_helpers import (
+    get as q_get,
+    put_nowait as q_put,
+    task_done as q_task_done,
+)
 
 logger = logging.getLogger(__name__)
 
-_DirFrame = Tuple[str, bytes]
+_DirFrame = tuple[str, bytes]
 
 
-class TankPitEngine:
+class TankPitEngine(ServiceABC):
     """Very small placeholder implementation.
 
     Parameters
@@ -34,9 +40,7 @@ class TankPitEngine:
         forwarded upstream to the TankPit server.
     """
 
-    def __init__(
-        self, q_in: "asyncio.Queue[_DirFrame]", q_out: "asyncio.Queue[bytes]"
-    ) -> None:
+    def __init__(self, q_in: asyncio.Queue[_DirFrame], q_out: asyncio.Queue[bytes]) -> None:
         self._in = q_in
         self._out = q_out
         self._task: asyncio.Task[None] | None = None
@@ -46,20 +50,33 @@ class TankPitEngine:
             self._task = asyncio.create_task(self._run())
             logger.info("TankPitEngine: background task started")
 
+    async def stop(self, *, graceful: bool = True) -> None:
+        """Cancel the background task and clean up."""
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await asyncio.wait_for(self._task, timeout=1)
+            except asyncio.CancelledError:
+                pass
+        self._task = None
+
+    def is_running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    def describe(self) -> str:
+        return "running" if self.is_running() else "stopped"
+
     async def _run(self) -> None:
         """Main consume loop – placeholder implementation."""
         while True:
-            direction, payload = await self._in.get()
+            direction, payload = await q_get(self._in, "proxy_in")
             try:
                 t0 = time.perf_counter()
                 # TODO: parse payload and update state. For now we just echo.
                 if direction == "RX":
                     # naive echo logic for proof-of-wiring
                     try:
-                        self._out.put_nowait(payload)
-                        from bot.core.telemetry import update_queue_gauge
-
-                        update_queue_gauge("proxy_out", self._out)
+                        q_put(self._out, payload, "proxy_out")
                     except asyncio.QueueFull:
                         from bot.core import alerts
 
@@ -68,7 +85,4 @@ class TankPitEngine:
                 logger.error("TankPitEngine error: %s", exc, exc_info=True)
             finally:
                 record_frame(direction, time.perf_counter() - t0)
-                from bot.core.telemetry import update_queue_gauge
-
-                update_queue_gauge("proxy_in", self._in)
-                self._in.task_done()
+                q_task_done(self._in, "proxy_in")

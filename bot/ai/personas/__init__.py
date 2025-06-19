@@ -16,10 +16,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, TypedDict, Any
+from typing import Any, Dict, List, Optional, TypedDict
 
 import yaml  # PyYAML (dev dependency already present)
-
 
 from bot.core.settings import settings
 
@@ -37,23 +36,23 @@ __all__ = [
 class Persona(TypedDict):
     prompt: str
     # allow list entries to be either int (YAML bare number) or str (quoted number)
-    allowed_users: Optional[List[int | str]]
+    allowed_users: list[int | str] | None
 
 
-def _coerce(raw_map: Any) -> Dict[str, Persona]:
+def _coerce(raw_map: Any) -> dict[str, Persona]:
     """Return mapping with strict ``Persona`` objects.
 
     Ensures *prompt* exists and fills missing ``allowed_users`` with ``None`` so
     mypy's TypedDict requirements are satisfied.
     """
 
-    result: Dict[str, Persona] = {}
+    result: dict[str, Persona] = {}
     for key, val in dict(raw_map).items():
         if not isinstance(val, dict) or "prompt" not in val:
             # skip invalid entries quietly (matches earlier leniency)
             continue
         prompt: str = str(val["prompt"])
-        allowed: Optional[List[int | str]] = val.get("allowed_users")
+        allowed: list[int | str] | None = val.get("allowed_users")
         result[key] = {"prompt": prompt, "allowed_users": allowed}
     return result
 
@@ -86,7 +85,7 @@ _SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
 # ---------------------------------------------------------------------------
 
 
-def _load(fp: Path) -> Dict[str, Persona]:
+def _load(fp: Path) -> dict[str, Persona]:
     """Load *fp* if it exists; return an empty dict otherwise."""
 
     if not fp.exists():
@@ -105,10 +104,10 @@ def _load(fp: Path) -> Dict[str, Persona]:
 # Internal loading helpers
 # ---------------------------------------------------------------------------
 
-PERSONALITIES: Dict[str, Persona] = {}
+PERSONALITIES: dict[str, Persona] = {}
 
 
-def _populate(target: Dict[str, Persona]) -> None:
+def _populate(target: dict[str, Persona]) -> None:
     """(Re)fill *target* with merged YAML data."""
 
     target.clear()
@@ -123,9 +122,7 @@ def _populate(target: Dict[str, Persona]) -> None:
     _secret_env: str | None = os.getenv("BOT_SECRET_PERSONAS")
     if _secret_env:
         try:
-            _env_raw: str = _secret_env.replace(
-                "${OWNER_ID}", str(settings.owner_id or "")
-            )
+            _env_raw: str = _secret_env.replace("${OWNER_ID}", str(settings.owner_id or ""))
             target.update(_coerce(yaml.safe_load(_env_raw) or {}))
         except Exception:
             # Fail soft – malformed env secrets shouldn't crash the bot

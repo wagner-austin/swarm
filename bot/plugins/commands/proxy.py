@@ -1,11 +1,12 @@
 import logging
+
 import discord
-from bot.utils.discord_interactions import safe_defer, safe_send
-from bot.plugins.base_di import BaseDIClientCog  # <- move here
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.GroupCog
 
 from bot.netproxy.service import ProxyService
+from bot.plugins.base_di import BaseDIClientCog  # <- move here
+from bot.utils.discord_interactions import safe_defer, safe_send
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +27,14 @@ class ProxyCog(
     async def start(self, interaction: discord.Interaction) -> None:
         await safe_defer(interaction, thinking=True, ephemeral=True)
 
-        await safe_send(interaction, await self.svc.start())
+        await self.svc.start()
+        await safe_send(interaction, self.svc.describe())
 
     @app_commands.command(name="stop", description="Stop the proxy")
     async def stop(self, interaction: discord.Interaction) -> None:
         await safe_defer(interaction, thinking=True, ephemeral=True)
-        await safe_send(interaction, await self.svc.stop())
+        await self.svc.stop()
+        await safe_send(interaction, "🛑 Proxy stopped.")
 
     @app_commands.command(name="status", description="Show proxy status")
     async def status(self, interaction: discord.Interaction) -> None:

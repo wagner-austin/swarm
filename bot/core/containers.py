@@ -1,15 +1,15 @@
-from dependency_injector import containers, providers
 from pathlib import Path
 
+from dependency_injector import containers, providers
+
+from bot.ai import providers as _ai_providers
+from bot.browser.runtime import BrowserRuntime
 from bot.core.settings import Settings
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
 from bot.history.redis_backend import RedisBackend
-
-from bot.netproxy.service import ProxyService
-from bot.browser.runtime import BrowserRuntime
 from bot.infra.tankpit.proxy.ws_tankpit import TankPitWSAddon
-from bot.ai import providers as _ai_providers
+from bot.netproxy.service import ProxyService
 
 
 class Container(containers.DeclarativeContainer):
@@ -90,9 +90,7 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Browser runtime – one process-wide instance wired through DI
-    browser_runtime: providers.Singleton["BrowserRuntime"] = providers.Singleton(
-        BrowserRuntime
-    )
+    browser_runtime: providers.Singleton["BrowserRuntime"] = providers.Singleton(BrowserRuntime)
 
 
 # Example of how to initialize and use the container (typically in main.py or discord_runner.py):

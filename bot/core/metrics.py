@@ -5,14 +5,15 @@ This file now carries full type hints so it passes `mypy --strict`.
 """
 
 from __future__ import annotations
+
 import os
 import time
-from typing import Dict, Tuple, Optional, Any
 from types import ModuleType  # Added ModuleType
+from typing import Any
 
 # psutil is optional – the code degrades gracefully if it's absent
-psutil: Optional[ModuleType] = None
-_PROC: Optional[Any] = None  # Using Any for _PROC if psutil.Process is not available
+psutil: ModuleType | None = None
+_PROC: Any | None = None  # Using Any for _PROC if psutil.Process is not available
 
 try:
     import psutil as _imported_psutil
@@ -72,7 +73,7 @@ def format_hms(seconds: float) -> str:  # noqa: D401 – utility
 # ------------------------------------------------------------+
 
 
-def get_stats() -> Dict[str, float | int]:
+def get_stats() -> dict[str, float | int]:
     """
     Convenience – returns a dict that callers (e.g. the future ``!status``
     command) can format any way they like.
@@ -89,7 +90,7 @@ def get_stats() -> Dict[str, float | int]:
 # ------------------------------------------------------------+
 
 
-def get_cpu_mem() -> Tuple[str, str]:  # noqa: D401 – utility
+def get_cpu_mem() -> tuple[str, str]:  # noqa: D401 – utility
     """
     Return **(system_cpu_percent, bot_mem_mb)** strings.
 

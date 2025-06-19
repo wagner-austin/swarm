@@ -3,9 +3,10 @@ Mock objects used in tests.
 These are intentionally separated from production code to avoid accidental imports.
 """
 
-from typing import Any, List
 import types
+from typing import Any
 from unittest.mock import AsyncMock
+
 import discord
 from discord.ext.commands import Bot
 
@@ -16,9 +17,7 @@ class MockMessage:
     def __init__(self, content: str | None = None, **kwargs: Any):
         self.content = content
         self.kwargs = kwargs  # Store original send kwargs
-        self.edit_history: list[
-            dict[str, Any]
-        ] = []  # To track edits, if needed for assertions
+        self.edit_history: list[dict[str, Any]] = []  # To track edits, if needed for assertions
 
     async def edit(self, content: str | None = None, **kwargs: Any) -> "MockMessage":
         """Mock the edit method of a discord.Message."""
@@ -65,9 +64,7 @@ class MockCtx:
 
         await _noop()
 
-        return MockMessage(
-            content=content, **kwargs
-        )  # Return an instance of MockMessage
+        return MockMessage(content=content, **kwargs)  # Return an instance of MockMessage
 
 
 # ---------------------------------------------------------------------------+
@@ -100,7 +97,7 @@ class StubInteraction(AsyncMock):
         self.followup.send = AsyncMock()
 
         # Convenience for assertions
-        self.sent_messages: List[str] = []
+        self.sent_messages: list[str] = []
         # Also set sent_messages on followup for tests expecting it there
         self.followup.sent_messages = self.sent_messages
 
@@ -119,9 +116,10 @@ class StubInteraction(AsyncMock):
 class DummyDump:
     """Minimal stand‑in for mitmproxy.tools.dump.DumpMaster."""
 
-    def __init__(self) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         from types import SimpleNamespace
 
+        # mitmproxy AddonManager expects an object exposing .addons.add()
         self.addons = SimpleNamespace(add=lambda *_: None)
 
     async def run(self) -> None:  # noqa: D401

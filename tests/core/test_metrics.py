@@ -3,9 +3,9 @@ tests/core/test_metrics.py - Tests for the metrics module.
 Ensures uptime and message counting functionality work as expected.
 """
 
-import bot.core.metrics as metrics
-
 import pytest
+
+import bot.core.metrics as metrics
 
 
 @pytest.mark.asyncio

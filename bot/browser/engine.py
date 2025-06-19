@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Literal
+
 from playwright.async_api import (
-    async_playwright,
-    Playwright,
     Browser,
-    Page,
     BrowserContext,
+    Page,
+    Playwright,
+    async_playwright,
 )
 
+from bot.core.service_base import ServiceABC
 
-class BrowserEngine:
+
+class BrowserEngine(ServiceABC):
     """Thin async wrapper around Playwright so the rest of the bot sees *one* surface."""
 
     def __init__(self, *, headless: bool, proxy: str | None, timeout_ms: int) -> None:
@@ -21,9 +24,7 @@ class BrowserEngine:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._page: Page | None = None
-        self._context: BrowserContext | None = (
-            None  # Track the browser context to avoid leaks
-        )
+        self._context: BrowserContext | None = None  # Track the browser context to avoid leaks
         self._last_url: str | None = None  # ← track last navigation
 
     # ------------------------------------------------------------------+
@@ -116,6 +117,16 @@ class BrowserEngine:
                     # quietly ignore – the caller will surface an error if needed
                     pass
 
+    async def stop(self, *, graceful: bool = True) -> None:
+        """Gracefully close all Playwright resources."""
+        await self.close()
+
+    def is_running(self) -> bool:
+        return self._browser is not None
+
+    def describe(self) -> str:
+        return "running" if self.is_running() else "stopped"
+
     async def close(self) -> None:
         if self._page:
             await self._page.close()  # Ensure page is closed before context
@@ -157,9 +168,7 @@ class BrowserEngine:
     ) -> None:
         await self._ensure_page()
         assert self._page is not None  # type narrowing
-        await self._page.locator(selector).wait_for(
-            state=state, timeout=self._timeout_ms
-        )
+        await self._page.locator(selector).wait_for(state=state, timeout=self._timeout_ms)
 
     async def screenshot(self, path: str) -> str:
         """Take a screenshot of the current page and save to the specified path."""

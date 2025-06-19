@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import types
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 
+from bot.core import alerts as alert_mod
 from bot.core.lifecycle import BotLifecycle
 from bot.core.settings import Settings
-from bot.core import alerts as alert_mod
 from bot.plugins.commands.alert_pump import AlertPump
 
 
@@ -46,16 +46,14 @@ async def test_alert_reaches_owner(monkeypatch: pytest.MonkeyPatch) -> None:
         def lifecycle(self) -> BotLifecycle:  # noqa: D401 – property style mimics production
             return self._lifecycle
 
-        def get_user(self, uid: int) -> Optional[_DummyOwner]:  # noqa: D401 – simple stub
+        def get_user(self, uid: int) -> _DummyOwner | None:  # noqa: D401 – simple stub
             return owner if uid == self.owner_id else None
 
         async def application_info(self) -> types.SimpleNamespace:  # noqa: D401 – returns dummy app info
             return types.SimpleNamespace(owner=owner)
 
         # Discord.py machinery stubs -----------------------------------
-        def add_listener(
-            self, *_a: object, **_kw: object
-        ) -> None:  # not used by the cog
+        def add_listener(self, *_a: object, **_kw: object) -> None:  # not used by the cog
             pass
 
         def add_cog(self, cog: Any) -> None:  # noqa: D401 – emulate Cog addition

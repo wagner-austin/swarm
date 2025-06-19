@@ -1,6 +1,6 @@
+import asyncio
 import contextlib
 import socket
-import asyncio
 
 
 async def pick_free_port(base: int, attempts: int = 5, *, delay: float = 0.1) -> int:

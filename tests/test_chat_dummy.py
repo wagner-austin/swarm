@@ -7,15 +7,15 @@ hitting any real LLM backend or Discord network.
 from __future__ import annotations
 
 import types
-from typing import Any, List, Generator, cast
+from collections.abc import Generator
+from typing import Any, cast
 
 import pytest
 
-from bot.ai.contracts import LLMProvider, Message
 from bot.ai import providers as registry
+from bot.ai.contracts import LLMProvider, Message
 from bot.core.settings import settings
 from bot.plugins.commands.chat import Chat
-
 
 # ---------------------------------------------------------------------------
 # fixtures & helpers
@@ -27,9 +27,7 @@ class DummyProvider(LLMProvider):
 
     name = "dummy"
 
-    async def generate(
-        self, *, messages: List[Message], stream: bool = False, **opts: Any
-    ) -> str:  # noqa: D401, FBT001, FBT002
+    async def generate(self, *, messages: list[Message], stream: bool = False, **opts: Any) -> str:  # noqa: D401, FBT001, FBT002
         # Ensure the Chat cog actually forwarded the prompt as the last message
         assert messages[-1]["role"] == "user"
         assert messages[-1]["content"] == "hi"

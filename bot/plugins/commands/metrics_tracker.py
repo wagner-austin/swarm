@@ -6,7 +6,6 @@ This cog uses *public* discord.py gateway hooks – no monkey-patching required.
 
 from __future__ import annotations
 
-
 import discord  # need both Message & Interaction types
 from discord.ext import commands
 

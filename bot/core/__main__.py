@@ -5,7 +5,6 @@ import asyncio
 import sys
 from textwrap import dedent
 
-
 __all__ = ["cli"]
 
 # ---------------------------------------------------------------------------+
@@ -26,9 +25,7 @@ def _build_parser() -> argparse.ArgumentParser:  # noqa: D401 – imperative sty
         import importlib.metadata as _ilmd
 
         version: str = (
-            _ilmd.version("bot")
-            if "bot" in _ilmd.packages_distributions()
-            else "unknown"
+            _ilmd.version("bot") if "bot" in _ilmd.packages_distributions() else "unknown"
         )
     except Exception:  # pragma: no cover – metadata lookup best-effort
         version = "unknown"
@@ -48,12 +45,8 @@ def _build_parser() -> argparse.ArgumentParser:  # noqa: D401 – imperative sty
     )
 
     # Meta flags expected by the test-suite (and humans!)
-    parser.add_argument(
-        "-h", "--help", action="help", help="show this message and exit"
-    )
-    parser.add_argument(
-        "-V", "--version", action="version", version=f"%(prog)s {version}"
-    )
+    parser.add_argument("-h", "--help", action="help", help="show this message and exit")
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {version}")
     return parser
 
 

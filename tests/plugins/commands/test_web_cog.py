@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
+import pytest
+from discord.ext.commands import Bot
 
 from bot.core.containers import Container
-from discord.ext.commands import Bot
 
 # Mark all tests in this module as asyncio
 pytestmark = pytest.mark.asyncio
@@ -37,9 +37,7 @@ async def test_web_cog_start_command_success(
     """Test the /web start command for a successful URL navigation."""
     # Arrange
     # Patch runtime.enqueue instead of using a runner instance
-    enqueue_patch = patch(
-        "bot.plugins.commands.web.BrowserRuntime.enqueue", new_callable=AsyncMock
-    )
+    enqueue_patch = patch("bot.plugins.commands.web.BrowserRuntime.enqueue", new_callable=AsyncMock)
     mock_enqueue = enqueue_patch.start()
 
     from bot.plugins.commands.web import Web as WebCog
@@ -64,9 +62,7 @@ async def test_web_cog_start_command_invalid_url(
     """Test the /web start command with an invalid URL."""
     # Arrange
     # Patch runtime.enqueue instead of using a runner instance
-    enqueue_patch = patch(
-        "bot.plugins.commands.web.BrowserRuntime.enqueue", new_callable=AsyncMock
-    )
+    enqueue_patch = patch("bot.plugins.commands.web.BrowserRuntime.enqueue", new_callable=AsyncMock)
     mock_enqueue = enqueue_patch.start()
 
     from bot.plugins.commands.web import Web as WebCog

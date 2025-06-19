@@ -23,10 +23,10 @@ from discord.ext import commands
 
 # Re-export internals we need – kept under ``noqa`` to silence ruff unused-import
 from bot.ai.personas import (  # noqa: F401 – re-export for tests
-    PERSONALITIES,
     _CUSTOM_DIR,
-    _load as _reload,  # helper to (re)load from YAML
+    PERSONALITIES,
     Persona,
+    _load as _reload,  # helper to (re)load from YAML
 )
 
 __all__ = ["PersonaAdmin"]
@@ -79,7 +79,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
     # ---------------------------------------------------------------------
 
     @staticmethod
-    def _write(cls: type["PersonaAdmin"], name: str, data: Persona) -> None:
+    def _write(cls: type[PersonaAdmin], name: str, data: Persona) -> None:
         """Exposed write helper so tests can call
         ``PersonaAdmin._write(PersonaAdmin, ...)`` without instantiating.
         The *self* argument is ignored (it will receive the class object).
@@ -95,7 +95,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
 
     @staticmethod
     def delete(
-        cls: type["PersonaAdmin"],
+        cls: type[PersonaAdmin],
         _interaction: discord.Interaction | None = None,
         *,
         name: str,
@@ -114,9 +114,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
             f"• **{n}**  ({'custom' if (_CUSTOM_DIR / (n + '.yaml')).exists() else 'built-in'})"
             for n in sorted(PERSONALITIES)
         ]
-        await interaction.response.send_message(
-            "\n".join(lines) or "None", ephemeral=True
-        )
+        await interaction.response.send_message("\n".join(lines) or "None", ephemeral=True)
 
     # ------------------------------------------------------------------
     # /persona show – read-only display
@@ -204,9 +202,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
                 if not isinstance(val, dict) or "prompt" not in val:
                     raise ValueError(f"{key}: missing prompt field")
         except Exception as exc:  # pragma: no cover – tested via path above
-            await interaction.response.send_message(
-                f"YAML error: {exc}", ephemeral=True
-            )
+            await interaction.response.send_message(f"YAML error: {exc}", ephemeral=True)
             return
 
         from bot.ai.personas import _SECRET_FILE, PERSONALITIES
@@ -216,9 +212,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
 
         # hot reload – merge secrets last
         PERSONALITIES.update(data)
-        await interaction.response.send_message(
-            "Secret personas imported 👍", ephemeral=True
-        )
+        await interaction.response.send_message("Secret personas imported 👍", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:  # noqa: D401 – mandated signature

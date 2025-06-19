@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from typing import Any, cast
-
-import pytest
 from unittest.mock import AsyncMock
 
+import pytest
 from discord.ext import commands
 
 from bot.core.containers import Container

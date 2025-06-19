@@ -31,7 +31,7 @@ except Exception:  # pragma: no cover
 #  Re‑export public sub‑modules                                              +
 # ---------------------------------------------------------------------------+
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 for _name in ["core.logger_setup"]:
     mod: ModuleType = import_module(f".{_name}", __name__)

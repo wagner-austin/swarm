@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 import pkgutil
+from collections.abc import Iterator
 from importlib import import_module
 from types import ModuleType
-from typing import Iterator
 
 # Utility helpers for module/package discovery.
 #
@@ -23,8 +24,6 @@ def iter_submodules(pkg: str) -> Iterator[str]:
     root: ModuleType = import_module(pkg)
     prefix: str = f"{pkg}."
 
-    for mod_info in sorted(
-        pkgutil.walk_packages(root.__path__, prefix), key=lambda m: m.name
-    ):
+    for mod_info in sorted(pkgutil.walk_packages(root.__path__, prefix), key=lambda m: m.name):
         if not mod_info.ispkg:
             yield mod_info.name

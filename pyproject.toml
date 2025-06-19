@@ -80,8 +80,30 @@ discord_bot = "bot.core.main:main"
 python_paths = ["."]
 
 [tool.mypy]
+# Search path for additional stubs / local packages
 mypy_path = "."
+# Exclude noisy helper stubs from type-checking
 exclude = [
     "tests/helpers/mocks.py",
-    "tests/helpers/__init__.py"
+    "tests/helpers/__init__.py",
 ]
+# Strictness knobs ─ tighten gradual typing
+strict_optional = true
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+
+# ------------------------------------------------------------------
+# Ruff – the fast Python linter & formatter
+# ------------------------------------------------------------------
+[tool.ruff]
+select = ["E", "F", "I", "UP"]  # Pycodestyle, Pyflakes, isort, PyUpgrade
+# Ignore long lines for now and deprecated typing generics (handled progressively)
+ignore = ["E501", "UP035", "F401", "UP022"]
+line-length = 100
+# Target the same runtime we deploy on
+target-version = "py312"
+
+[tool.ruff.isort]
+combine-as-imports = true

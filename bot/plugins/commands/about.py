@@ -1,6 +1,7 @@
-import discord
 import tomllib
 from pathlib import Path
+
+import discord
 from discord import app_commands
 from discord.ext import commands
 
@@ -8,9 +9,7 @@ from discord.ext import commands
 def get_bot_version() -> str:
     """Get the bot version from pyproject.toml."""
     try:
-        project_root = Path(__file__).parents[
-            3
-        ]  # Go up three directories to project root
+        project_root = Path(__file__).parents[3]  # Go up three directories to project root
         pyproject_path = project_root / "pyproject.toml"
 
         with open(pyproject_path, "rb") as f:

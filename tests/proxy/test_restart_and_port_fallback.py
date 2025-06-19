@@ -1,8 +1,8 @@
 # tests/proxy/test_restart_and_port_fallback.py
 from __future__ import annotations
 
-
 import pytest
+
 from bot.netproxy.service import ProxyService
 from tests._mocks.mocks import DummyDump
 
@@ -27,9 +27,11 @@ async def test_stop_then_start_uses_same_or_next_port(
     monkeypatch.setattr("bot.utils.net.is_port_free", fake_check)
 
     svc: ProxyService = ProxyService(port=9000)
-    msg1: str = await svc.start()  # should fall back to 9001
+    await svc.start()  # should fall back to 9001
+    port1 = svc.port
     await svc.stop()
-    msg2: str = await svc.start()  # original 9000 should be free now
+    await svc.start()  # original 9000 should be free now
+    port2 = svc.port
 
-    assert "9001" in msg1  # first run picked next port
-    assert "9000" in msg2  # second run reclaimed preferred port
+    assert port1 == 9001  # first run picked next port
+    assert port2 == 9000  # second run reclaimed preferred port

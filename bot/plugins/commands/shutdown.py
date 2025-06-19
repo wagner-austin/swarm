@@ -1,11 +1,12 @@
 import asyncio
-import discord
-from bot.utils.discord_interactions import safe_send
-from discord.ext import commands
-from discord import app_commands
-from bot.browser.runtime import BrowserRuntime
 
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from bot.browser.runtime import BrowserRuntime
 from bot.plugins.base_di import BaseDIClientCog
+from bot.utils.discord_interactions import safe_send
 
 
 class Shutdown(BaseDIClientCog):
@@ -14,9 +15,7 @@ class Shutdown(BaseDIClientCog):
         self.bot = bot
         self.runtime: BrowserRuntime = bot.container.browser_runtime()  # type: ignore[attr-defined]
 
-    @app_commands.command(
-        name="shutdown", description="Cleanly shut the bot down (owner only)."
-    )
+    @app_commands.command(name="shutdown", description="Cleanly shut the bot down (owner only).")
     async def shutdown(self, interaction: discord.Interaction) -> None:
         """Cleanly shut the bot down (owner-only)."""
         await safe_send(interaction, "Shutting down...")

@@ -1,8 +1,8 @@
-from types import ModuleType
-from typing import Iterator
 import importlib
 import inspect
 import pkgutil
+from collections.abc import Iterator
+from types import ModuleType
 
 PACKAGE: str = "bot.plugins.commands"
 
@@ -18,9 +18,7 @@ def iter_cogs() -> Iterator[ModuleType]:
 def test_cog_attributes() -> None:
     for mod in iter_cogs():
         cog_classes = [
-            cls
-            for _, cls in inspect.getmembers(mod, inspect.isclass)
-            if hasattr(cls, "_ENTRY_CMD")
+            cls for _, cls in inspect.getmembers(mod, inspect.isclass) if hasattr(cls, "_ENTRY_CMD")
         ]
         for cls in cog_classes:
             assert isinstance(getattr(cls, "USAGE", ""), str) and cls.USAGE.strip(), (

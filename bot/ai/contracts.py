@@ -8,9 +8,10 @@ either a full string or an async iterator of chunks.
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Dict, List, Protocol, runtime_checkable
+from collections.abc import AsyncIterator
+from typing import Any, Protocol, runtime_checkable
 
-Message = Dict[str, str]  # {"role": "user", "content": "..."}
+Message = dict[str, str]  # {"role": "user", "content": "..."}
 
 
 @runtime_checkable
@@ -23,7 +24,7 @@ class LLMProvider(Protocol):
     async def generate(
         self,
         *,
-        messages: List[Message],
+        messages: list[Message],
         stream: bool = False,
         **options: Any,
     ) -> str | AsyncIterator[str]:

@@ -22,8 +22,8 @@ if not sys.platform.startswith("win"):
 #  Apply back-port patch to asyncio transports                                +
 # ---------------------------------------------------------------------------+
 
-from asyncio.proactor_events import _ProactorBasePipeTransport  # noqa: SLF001 – internal import
 from asyncio.base_subprocess import BaseSubprocessTransport  # noqa: SLF001 – internal import
+from asyncio.proactor_events import _ProactorBasePipeTransport  # noqa: SLF001 – internal import
 
 
 def _safe_repr(self: object) -> str:  # noqa: D401 – helper

@@ -43,13 +43,9 @@ def register_event_handlers(bot: MyBot) -> None:
                 await bot.tree.sync(guild=guild)
                 logger.info(f"Synced commands to dev guild {guild_id}.")
             except ValueError:
-                logger.error(
-                    f"Invalid DEV_GUILD ID: {guild_id_str}. Must be an integer."
-                )
+                logger.error(f"Invalid DEV_GUILD ID: {guild_id_str}. Must be an integer.")
             except Exception as e:
-                logger.exception(
-                    f"Failed to sync commands to dev guild {guild_id_str}: {e}"
-                )
+                logger.exception(f"Failed to sync commands to dev guild {guild_id_str}: {e}")
 
         logger.info("Slash commands synced.")
 
@@ -68,16 +64,12 @@ def register_event_handlers(bot: MyBot) -> None:
                 logger.info(
                     f"Attempting to start ProxyService on port {bot.proxy_service.port} from on_ready..."
                 )
-                await (
-                    bot.proxy_service.start()
-                )  # Assumes bot.proxy_service is an instance
+                await bot.proxy_service.start()  # Assumes bot.proxy_service is an instance
                 logger.info(
                     f"ProxyService started successfully from on_ready on port {bot.proxy_service.port}"
                 )
             except Exception as e:
-                logger.exception(
-                    f"Proxy failed to start in on_ready: {e}; shutting bot down"
-                )
+                logger.exception(f"Proxy failed to start in on_ready: {e}; shutting bot down")
                 await bot.close()  # Critical: shuts down bot on proxy failure
         else:
             logger.info(

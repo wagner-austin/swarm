@@ -1,7 +1,7 @@
 """Utility functions for the bot."""
 
-from .net import pick_free_port, is_port_free
-from .urls import normalise, looks_like_web_url
+from .net import is_port_free, pick_free_port
+from .urls import looks_like_web_url, normalise
 
 __all__ = [
     "pick_free_port",

@@ -1,8 +1,9 @@
 # File: tests/test_startup_smoke.py
 
 
-import pytest
 from typing import Any
+
+import pytest
 
 # ── internal entry-points we want to exercise ─────────────────────────
 from bot.core.launcher import launch_bot
@@ -20,9 +21,7 @@ async def test_bot_startup_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
     # ------------------------------------------------------------------
     # 1.  Guarantee a valid token in the already-imported settings singleton
     # ------------------------------------------------------------------
-    monkeypatch.setattr(
-        "bot.core.settings.settings.discord_token", "stub-token", raising=False
-    )
+    monkeypatch.setattr("bot.core.settings.settings.discord_token", "stub-token", raising=False)
 
     # ------------------------------------------------------------------
     # 2.  Stub discord.ext.commands.Bot.start/close so we don’t touch Discord
@@ -41,9 +40,7 @@ async def test_bot_startup_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("discord.ext.commands.Bot.start", fake_bot_start, raising=True)
     monkeypatch.setattr("discord.ext.commands.Bot.close", fake_bot_close, raising=True)
-    monkeypatch.setattr(
-        "discord.ext.commands.Bot.is_closed", lambda self: True, raising=False
-    )
+    monkeypatch.setattr("discord.ext.commands.Bot.is_closed", lambda self: True, raising=False)
 
     # ------------------------------------------------------------------
     # 3.  Stub the TankPit ProxyService so no mitmproxy subprocess kicks off
