@@ -31,6 +31,8 @@ class AlertPump(commands.Cog):
         self.bot = bot
         self._task: asyncio.Task[None] | None = None
         self.owner: discord.User | None = None
+        # Alerts that could not be sent yet because the owner is unresolved.
+        self._pending: list[str] = []
 
     async def cog_load(self) -> None:  # Called by discord.py 2.3+
         # Wait until bot is ready only if it's already logging in; avoid calling
@@ -72,29 +74,48 @@ class AlertPump(commands.Cog):
     async def _relay_loop(self, q: "asyncio.Queue[str]") -> None:
         """Forever consume the queue and DM the owner."""
         while not self.bot.is_closed():
+            got_msg = False
             try:
                 # Wake up periodically even when no alerts arrive
                 msg = await asyncio.wait_for(q.get(), timeout=1.0)
+                # Always stash newly received message first
+                self._pending.append(msg)
+                got_msg = True
             except asyncio.TimeoutError:
-                continue
-            try:
-                owner = None
-                if self.bot.owner_id:
-                    owner = self.bot.get_user(self.bot.owner_id)
+                # No new message; fall through to retry pending sends
+                pass
 
-                if owner is None:
-                    # Ensure application info has been fetched and owner cached
-                    try:
-                        app_info = await self.bot.application_info()
-                        owner = app_info.owner
-                    except Exception as exc:
-                        logger.error("Cannot resolve bot owner: %s", exc)
+            # No 'continue' above: we want to attempt delivery for any pending
+            # alerts each time the loop wakes up, even if no new alert arrived.
+            owner: discord.User | None = None
+            if self.bot.owner_id:
+                owner = self.bot.get_user(self.bot.owner_id)
 
-                if owner is None:
-                    logger.warning("Cannot send alert – owner unavailable: %s", msg)
-                else:
-                    await self._send_dm_with_retry(owner, f"⚠️ **Bot alert:** {msg}")
-            finally:
+            if owner is None:
+                # Ensure application info has been fetched and owner cached
+                try:
+                    app_info = await self.bot.application_info()
+                    owner = app_info.owner
+                except Exception as exc:
+                    logger.error("Cannot resolve bot owner: %s", exc)
+
+            if owner is None:
+                # Owner still not available – keep messages in the _pending list
+                if self._pending:
+                    logger.debug(
+                        "Owner unresolved – deferring %d alert(s) for next pass",
+                        len(self._pending),
+                    )
+            else:
+                # We have an owner: try to flush all pending alerts (oldest first)
+                for pending_msg in list(self._pending):
+                    await self._send_dm_with_retry(
+                        owner, f"⚠️ **Bot alert:** {pending_msg}"
+                    )
+                self._pending.clear()
+
+            # Acknowledge the queue task only if we actually pulled one.
+            if got_msg:
                 q.task_done()
 
     # ------------------------------------------------------------------+
