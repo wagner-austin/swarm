@@ -4,10 +4,10 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "bot"
-version = "0.1.0"
+version = "0.2.0"
 description = "A modern Discord bot built with Python."
 authors = [{ name = "Austin Wagner", email = "austin@example.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
 
   "google-genai>=0.4",
@@ -20,9 +20,13 @@ dependencies = [
   "discord.py>=2.3",
 
   # --- proxy and websocket support ---
-  "mitmproxy>=10.0.0,<11.0.0",      # MITM TLS proxy, BSD-licensed
+  "mitmproxy>=12",      # MITM TLS proxy, BSD-licensed
   "aiohttp>=3.12.11",
   "aiohappyeyeballs>=2.6.1",
+
+  # --- compatibility pins ---
+  "httpcore>=1.0.2",
+  
 
   # --- runtime resource metrics ---
   "psutil>=5.9",
@@ -54,12 +58,14 @@ dev = [
 
 [tool.poetry]
 name = "bot"
-version = "0.1.0"
+version = "0.2.0"
 description = "A modern Discord bot built with Python."
 authors = ["Austin Wagner <austin@example.com>"]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<4.0"
+python = ">=3.12"
+httpcore = "^1.0.2"
+
 
 [tool.poetry.scripts]
 discord-bot = "bot.core.main:main"
