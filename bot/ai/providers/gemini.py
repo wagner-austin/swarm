@@ -104,7 +104,7 @@ class _GeminiProvider(LLMProvider):
         if stream:
 
             def _sync_stream() -> list[str]:
-                """Run the synchronous streaming call in a worker thread."""
+                """Blocking call to Gemini streaming API – executed in worker thread."""
                 out: list[str] = []
                 assert self._client is not None
                 try:
@@ -117,7 +117,6 @@ class _GeminiProvider(LLMProvider):
                         if text_fragment:
                             out.append(text_fragment)
                 except (self._genai.errors.ServerError, json.JSONDecodeError) as err:
-                    # Translate Gemini overload into domain error
                     if "overloaded" in str(err).lower() or "503" in str(err):
                         raise ModelOverloaded(
                             "Gemini model is currently overloaded. Please retry later."
@@ -125,11 +124,13 @@ class _GeminiProvider(LLMProvider):
                     raise
                 return out
 
-            async def _async_iter() -> AsyncGenerator[str, None]:
+            # Directly use `asyncio.to_thread` in the public method to avoid the
+            # redundant nested async wrapper previously used.
+            async def _stream_generator() -> AsyncGenerator[str, None]:
                 for fragment in await asyncio.to_thread(_sync_stream):
                     yield fragment
 
-            return _async_iter()
+            return _stream_generator()
 
         # Non-streaming path – much simpler
         def _sync_call() -> str:

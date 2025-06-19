@@ -4,7 +4,7 @@ Settings for the DiscordBot. All browser flags live in Settings.browser (see Bro
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -26,6 +26,13 @@ class BrowserConfig(BaseModel):
         if v and info.data.get("headless"):
             raise ValueError("`visible=True` and `headless=True` cannot both be set")
         return v
+
+
+class RedisConfig(BaseModel):
+    enabled: bool = Field(False, alias="REDIS_ENABLED")
+    url: str | None = Field(None, alias="REDIS_URL")
+
+    model_config = {"extra": "ignore"}
 
 
 class QueueConfig(BaseModel):
@@ -61,9 +68,8 @@ class Settings(BaseSettings):
     owner_id: int | None = None
 
     # --- Tunable bot behaviour ---
-    # Redis history backend config
-    redis_enabled: bool = False  # Enable Redis-backed conversation history
-    redis_url: str | None = None  # Redis connection URL (e.g. redis://localhost:6379)
+    # Redis history backend config (nested)
+    redis: RedisConfig = RedisConfig()
 
     conversation_max_turns: int = 8  # Rolling chat history length per channel + persona
     discord_chunk_size: int = 1900  # Characters per Discord message chunk
@@ -130,8 +136,18 @@ try:
 except ValueError:  # DISCORD_TOKEN missing under CI / mypy
     settings = Settings(discord_token="dummy")
 
+# ---------------------------------------------------------------------------
+# Global constants
+# ---------------------------------------------------------------------------
+# Unified Discord message length limit (characters).  This value should be used
+# by all helpers/cogs when checking or chunking content for Discord messages so
+# that limits remain consistent across the codebase.
+DISCORD_LIMIT: int = settings.discord_chunk_size
+
 __all__ = [
     "Settings",
     "BrowserConfig",
     "QueueConfig",
+    "RedisConfig",
+    "DISCORD_LIMIT",
 ]

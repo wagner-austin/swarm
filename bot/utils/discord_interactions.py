@@ -21,7 +21,7 @@ from typing import Any
 
 import discord
 
-from bot.core.settings import settings
+from bot.core.settings import DISCORD_LIMIT, settings
 
 __all__ = [
     "safe_defer",
@@ -89,7 +89,7 @@ async def safe_send(
 
     # Enforce Discord message length limits (settings.discord_chunk_size defaults to 1900)
     if content and isinstance(content, str):
-        max_len: int = getattr(settings, "discord_chunk_size", 1900)
+        max_len: int = DISCORD_LIMIT
         if len(content) > max_len:
             content = content[: max_len - 1] + "…"
 
