@@ -137,12 +137,20 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
     )
     @app_commands.default_permissions(administrator=True)
     async def reload_cmd(self, interaction: discord.Interaction) -> None:
-        """Force re-parsing of builtin, custom and secret YAML files."""
+        """Force re-parsing of builtin, custom and secret YAML files.
+
+        Discord only gives ~3 s to acknowledge a slash-command, so we *defer*
+        first, do the blocking work, then send a follow-up message. This avoids
+        404 *Unknown interaction* errors if the refresh takes too long (seen on
+        busy bots or slow disks).
+        """
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         import bot.ai.personas as p  # runtime import
 
         p.refresh()  # mutate existing dict so all cogs see updates
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Reloaded {len(p.PERSONALITIES)} personas from disk.",
             ephemeral=True,
         )
