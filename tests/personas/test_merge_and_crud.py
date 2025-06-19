@@ -61,12 +61,12 @@ def test_crud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Patch internal _CUSTOM_DIR used by adm helper (for safety)
     adm._CUSTOM_DIR = tmp_path  # type: ignore[attr-defined]
 
-    # Simulate `/persona add` via static helper
-    adm.PersonaAdmin._write(adm.PersonaAdmin, "foo", {"prompt": "bar", "allowed_users": None})
+    # Simulate `/persona add` via helper
+    adm._write_yaml("foo", {"prompt": "bar", "allowed_users": None})
 
     assert p.prompt("foo") == "bar"
 
-    # Simulate delete via staticmethod stub; interaction param not used
-    adm.PersonaAdmin.delete(adm.PersonaAdmin, None, name="foo")
+    # Simulate delete via helper
+    adm._delete_yaml("foo")
 
     assert "foo" not in p.PERSONALITIES

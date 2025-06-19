@@ -75,32 +75,8 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
         self.bot = bot
 
     # ---------------------------------------------------------------------
-    # Static helpers for test-suite (no Discord required)
+    # Static helpers removed – use module-level _write_yaml / _delete_yaml directly
     # ---------------------------------------------------------------------
-
-    @staticmethod
-    def _write(cls: type[PersonaAdmin], name: str, data: Persona) -> None:
-        """Exposed write helper so tests can call
-        ``PersonaAdmin._write(PersonaAdmin, ...)`` without instantiating.
-        The *self* argument is ignored (it will receive the class object).
-        """
-
-        _write_yaml(name, data)
-
-    # NOTE: the *delete* name is required by tests that call
-    # ``PersonaAdmin.delete(PersonaAdmin, None, name="foo")``. We purposefully
-    # implement it as **synchronous staticmethod** so that calling code can
-    # invoke it without awaiting.    The first two positional arguments (*self*
-    # and *interaction*) are discarded.
-
-    @staticmethod
-    def delete(
-        cls: type[PersonaAdmin],
-        _interaction: discord.Interaction | None = None,
-        *,
-        name: str,
-    ) -> None:
-        _delete_yaml(name)
 
     # /persona list
     # ------------------------------------------------------------------
