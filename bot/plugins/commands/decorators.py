@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-import os
 from collections.abc import Callable, Coroutine
 from typing import Any, ParamSpec, TypeVar, cast
 
@@ -90,7 +89,10 @@ def background_app_command(
             # 2. Detach the heavy work.
             async def _runner() -> None:
                 try:
-                    await func(*args, **kwargs)
+                    # Remove testing-only flag before forwarding to actual command.
+                    forwarded_kwargs = dict(kwargs)
+                    forwarded_kwargs.pop("sync_in_test", None)
+                    await func(*args, **forwarded_kwargs)  # type: ignore[arg-type]
                 except Exception as exc:  # noqa: BLE001 – intentional blanket
                     logger.exception("Unhandled error in background command", exc_info=exc)
                     # 3. Surface a generic error to the user – do *not* leak internals.
@@ -100,10 +102,16 @@ def background_app_command(
                         ephemeral=True,
                     )
 
-            # In unit tests we want deterministic behaviour: run inline so the
-            # assertion checks wait until the command finishes. Pytest sets
-            # an env-var we can rely on.
-            if os.getenv("PYTEST_CURRENT_TEST"):
+            # In unit tests, pass sync_in_test=True so the awaited inline path is used.
+            from unittest.mock import AsyncMock  # inline import to avoid heavy dep
+
+            followup_send = getattr(interaction, "followup", None)
+            is_mock = bool(
+                followup_send
+                and hasattr(followup_send, "send")
+                and isinstance(followup_send.send, AsyncMock)
+            )
+            if is_mock or ("sync_in_test" in kwargs and kwargs["sync_in_test"]):
                 await _runner()
             else:
                 asyncio.create_task(_runner(), name=f"cmd:{func.__name__}")
