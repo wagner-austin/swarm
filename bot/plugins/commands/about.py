@@ -5,6 +5,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.utils.discord_interactions import safe_send
+
 
 def get_bot_version() -> str:
     """Get the bot version from pyproject.toml."""
@@ -43,7 +45,7 @@ class About(commands.Cog):
             inline=False,
         )
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await safe_send(interaction, embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

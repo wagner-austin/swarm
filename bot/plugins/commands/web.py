@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 import time
-from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar, cast
 
 import discord
 from discord import app_commands
@@ -14,151 +11,19 @@ from discord.ext import commands
 from discord.ext.commands import Bot
 
 from bot.browser.runtime import BrowserRuntime
-from bot.core.settings import settings
-from bot.core.url_validation import validate_and_normalise_web_url
 from bot.plugins.commands.decorators import background_app_command
+from bot.utils.discord_interactions import safe_defer, safe_send
+from bot.utils.urls import validate_and_normalise_web_url
 
 # Import centralised Discord interaction helpers
-from bot.utils.discord_interactions import safe_defer, safe_send
+from bot.webapi.decorators import (
+    CommandResult,
+    browser_command,
+    browser_mutating,
+)
 
 # --- validation helpers for this cog -------------------------------------
 logger = logging.getLogger(__name__)
-
-# Type parameters for decorator function signatures
-P = ParamSpec("P")  # for parameters
-T = TypeVar("T")  # for return value
-
-# Command result type
-CommandResult = tuple[str, tuple[Any, ...], str]
-
-
-# --- Helper decorators for browser commands ---
-def read_only_guard() -> Callable[[Callable[..., Any]], Any]:
-    """Check decorator that allows commands to run only if not in read-only mode or if user is admin/owner."""
-
-    async def predicate(interaction: discord.Interaction) -> bool:
-        if not settings.browser.read_only:
-            return True  # Not in read-only mode, allow anyone
-
-        # In read-only mode, check if user is owner or admin
-        # We need to cast client to Bot (or commands.Bot) to access is_owner
-        client = interaction.client
-        is_owner = False
-        if isinstance(client, commands.Bot):
-            is_owner = await client.is_owner(interaction.user)
-
-        has_admin = False
-        if isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions:
-            has_admin = interaction.user.guild_permissions.administrator
-
-        if is_owner or has_admin:
-            return True
-
-        # User doesn't have permission, send error message
-        await interaction.response.send_message(
-            "🔒 The browser is currently in **read-only** mode; mutating actions are disabled.",
-            ephemeral=True,
-        )
-        return False
-
-    return app_commands.check(predicate)
-
-
-def browser_command(
-    queued: bool = True,
-    allow_mutation: bool = False,
-    defer_ephemeral: bool = False,
-) -> Callable[[Callable[..., Coroutine[Any, Any, CommandResult | None]]], Any]:
-    """Handle common boilerplate for browser commands.
-
-    Args:
-        queued: Whether the command should be queued through the WebRunner
-        allow_mutation: Whether the command mutates browser state (will apply read_only check)
-        defer_ephemeral: Whether the defer response should be ephemeral
-    """
-
-    def decorator(
-        func: Callable[
-            [Any, discord.Interaction, Any, Any],
-            Coroutine[Any, Any, CommandResult | None],
-        ],
-    ) -> Callable[[Any, discord.Interaction, Any, Any], Coroutine[Any, Any, None]]:
-        # The outermost function that Discord registers **must** carry the check,
-        # otherwise the predicate is never evaluated.
-
-        @functools.wraps(func)
-        async def wrapper(
-            self: Any, interaction: discord.Interaction, *args: Any, **kwargs: Any
-        ) -> None:
-            # 0️⃣ Run the inner handler **first** so it can fail fast
-            #    (e.g. invalid-URL validation) *before* we show a spinner.
-            result = await func(self, interaction, *args, **kwargs)
-
-            # If the inner handler already produced a response we're done.
-            if result is None:
-                return
-
-            # We now know it's a "real" browser action → safe to defer.
-            chan = interaction.channel_id
-            if chan is None:
-                await interaction.response.send_message(
-                    "This command must be used inside a text channel.", ephemeral=True
-                )
-                return
-
-            if defer_ephemeral:
-                # Ephemeral spinner (e.g. /click, /fill…)
-                await safe_defer(interaction, thinking=True, ephemeral=True)
-            else:
-                # Regular spinner (e.g. /start, /open…)
-                await safe_defer(interaction, thinking=True)
-
-            # Unpack operation details
-            op, op_args, success_msg = result
-
-            # If not queued, just return (the command handled everything internally)
-            if not queued:
-                return
-
-            # Queue the operation
-            try:
-                await self.runtime.enqueue(chan, op, *op_args)
-                if success_msg:
-                    await safe_send(interaction, success_msg)
-            except asyncio.QueueFull:
-                await safe_send(
-                    interaction,
-                    "❌ The browser command queue is full. Please try again later.",
-                    ephemeral=True,
-                )
-            except Exception as exc:
-                await safe_send(interaction, f"❌ {type(exc).__name__}: {exc}", ephemeral=True)
-            return
-
-        # Attach the guard at the very end so it wraps the *wrapper* that Discord sees
-        if allow_mutation:
-            return cast(
-                Callable[[Any, discord.Interaction, Any, Any], Coroutine[Any, Any, None]],
-                read_only_guard()(wrapper),
-            )
-        return wrapper
-
-    return decorator
-
-
-def browser_mutating(
-    queued: bool = True,
-    defer_ephemeral: bool = False,
-) -> Callable[[Callable[..., Coroutine[Any, Any, CommandResult | None]]], Any]:
-    """Decorate mutating browser commands.
-
-    This is equivalent to ``@browser_command(allow_mutation=True)`` but avoids the
-    possibility that a future contributor forgets to set ``allow_mutation=True`` and
-    accidentally exposes state-changing functionality while the bot is running in
-    read-only mode.
-    """
-
-    return browser_command(queued=queued, allow_mutation=True, defer_ephemeral=defer_ephemeral)
 
 
 class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
@@ -294,6 +159,8 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
     @app_commands.command(name="status", description="Show browser status")
     async def status(self, interaction: discord.Interaction) -> None:
         """Show information about the browser instance for the current channel."""
+        # Defer early so we don't hit the 3-second response window
+        await safe_defer(interaction, thinking=True, ephemeral=True)
         # First check if browsers exist
         rows = self.runtime.status()
 
@@ -323,7 +190,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
 
         # Display status information
         if not rows:
-            await interaction.response.send_message("No active browser workers.", ephemeral=True)
+            await safe_send(interaction, "No active browser workers.", ephemeral=True)
             return
 
         embed = discord.Embed(title="Browser Workers Status")
@@ -334,7 +201,7 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
                 value=(f"📂 **Queue** {r['queue']}\n{status_emoji}\n"),
                 inline=False,
             )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await safe_send(interaction, embed=embed, ephemeral=True)
 
     @app_commands.command(name="close", description="Close the browser for this channel")
     @browser_mutating(queued=False, defer_ephemeral=False)
