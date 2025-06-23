@@ -32,7 +32,8 @@ async def test_about_command() -> None:
     # mypy: 'callback' is dynamically bound; treat as Any
     await cast(Any, cog.about.callback)(cog, ix)
 
-    ix.response.send_message.assert_awaited_once()
+    # With safe_send, the helper may choose response.send_message or followup.send
+    assert ix.response.send_message.await_count == 1 or ix.followup.send.await_count == 1
 
 
 @pytest.mark.asyncio
