@@ -11,6 +11,9 @@ import time
 from types import ModuleType  # Added ModuleType
 from typing import Any
 
+# Prometheus counters for observability – imported lazily to avoid heavy deps
+from bot.core.telemetry import BOT_MSG_TOTAL, DISCORD_MSG_TOTAL
+
 # psutil is optional – the code degrades gracefully if it's absent
 psutil: ModuleType | None = None
 _PROC: Any | None = None  # Using Any for _PROC if psutil.Process is not available
@@ -36,6 +39,8 @@ def increment_discord_message_count() -> None:
     """
     global discord_messages_processed
     discord_messages_processed += 1
+    # Export to Prometheus
+    DISCORD_MSG_TOTAL.inc()
 
 
 def get_discord_messages_processed() -> int:
@@ -51,6 +56,8 @@ def increment_message_count() -> None:
     """
     global messages_sent
     messages_sent += 1
+    # Export to Prometheus
+    BOT_MSG_TOTAL.inc()
 
 
 def get_uptime() -> float:
