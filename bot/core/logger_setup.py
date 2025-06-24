@@ -8,6 +8,7 @@ import collections
 import copy
 import logging
 import logging.config
+import os
 import warnings
 from typing import Any
 
@@ -102,6 +103,11 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
         return  # already configured – avoid duplicate handlers
 
     config = copy.deepcopy(DEFAULT_LOGGING_CONFIG)
+
+    # Honour LOG_LEVEL env variable (e.g. DEBUG, INFO, WARNING)
+    env_level = os.getenv("LOG_LEVEL")
+    if env_level:
+        config.setdefault("root", {})["level"] = env_level.upper()
     # Ensure force is set so *all* previous handlers are removed in one go.
     config["force"] = True
     if config_overrides:
