@@ -25,6 +25,8 @@ from prometheus_client import (
     Counter,
     Gauge,
     Histogram,
+    PlatformCollector,
+    ProcessCollector,
     start_http_server,
 )
 
@@ -42,6 +44,10 @@ _log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------+
 
 REGISTRY: CollectorRegistry = CollectorRegistry(auto_describe=True)
+
+# Register default collectors for CPU, memory, platform info
+ProcessCollector(registry=REGISTRY)
+PlatformCollector(registry=REGISTRY)
 
 # ——— LLM metrics ————————————————————————————————————————————————
 LLM_REQUEST_TOTAL = Counter(
@@ -75,6 +81,27 @@ QUEUE_SIZE = Gauge(
     "bot_queue_fill",
     "Current fill level of named asyncio.Queue",
     ["queue"],
+    registry=REGISTRY,
+)
+
+# ——— Core bot latency ————————————————————————————————————————————
+BOT_LATENCY = Gauge(
+    "bot_latency_seconds",
+    "Discord gateway latency in seconds",
+    registry=REGISTRY,
+)
+
+
+# ——— Bot traffic metrics ————————————————————————————————————————————
+DISCORD_MSG_TOTAL = Counter(
+    "discord_messages_processed_total",
+    "Discord messages the bot has processed",
+    registry=REGISTRY,
+)
+
+BOT_MSG_TOTAL = Counter(
+    "bot_messages_sent_total",
+    "Messages the bot has sent",
     registry=REGISTRY,
 )
 
