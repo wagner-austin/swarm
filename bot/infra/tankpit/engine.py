@@ -66,10 +66,23 @@ class TankPitEngine(ServiceABC):
     def describe(self) -> str:
         return "running" if self.is_running() else "stopped"
 
+    def __del__(self) -> None:  # best-effort safeguard for test shutdown
+        if self._task and not self._task.done():
+            try:
+                self._task.cancel()
+            except Exception:
+                # Ignore any errors during interpreter shutdown
+                pass
+
     async def _run(self) -> None:
         """Run the main consume loop (placeholder implementation)."""
-        while True:
-            direction, payload = await q_get(self._in, "proxy_in")
+        try:
+            while True:
+                direction, payload = await q_get(self._in, "proxy_in")
+        except (asyncio.CancelledError, GeneratorExit):
+            # Task cancelled or loop shutting down – exit quietly to avoid
+            # unraisable warnings during test teardown.
+            return
             try:
                 t0 = time.perf_counter()
                 # TODO: parse payload and update state. For now we just echo.

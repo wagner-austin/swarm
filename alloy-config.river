@@ -1,0 +1,26 @@
+// Grafana Alloy configuration for log shipping to Loki
+// Converted from Promtail configuration
+
+// Docker container log discovery and scraping
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+// Loki log source for Docker containers
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.docker.containers.targets
+  forward_to       = [loki.write.default.receiver]
+  refresh_interval = "15s"
+  
+  // Basic static labels; advanced relabeling can be added later once Alloy supports equivalent syntax
+  labels = { job = "docker-containers" }
+}
+
+// Loki write endpoint
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

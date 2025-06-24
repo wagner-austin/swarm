@@ -33,6 +33,17 @@ except Exception:  # pragma: no cover
 
 __all__: list[str] = []
 
+# ------------------------------------------------------------------+
+#  Aiohttp shutdown patch                                           +
+# ------------------------------------------------------------------+
+try:
+    import bot.compat.aiohttp_shutdown  # noqa: F401  (side-effects only)
+except SystemExit:
+    # aiohttp missing – e.g. stripped test env – safe to ignore
+    pass
+except Exception:  # pragma: no cover
+    pass
+
 for _name in ["core.logger_setup"]:
     mod: ModuleType = import_module(f".{_name}", __name__)
     # Extract the last part of the module name for the global
