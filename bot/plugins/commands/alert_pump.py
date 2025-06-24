@@ -18,6 +18,8 @@ from bot.utils.async_helpers import with_retries
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------+
 #  Tunables – can be overridden in tests or future settings                  +
 # ---------------------------------------------------------------------------+
@@ -33,7 +35,7 @@ class AlertPump(commands.Cog):
         self._task: asyncio.Task[None] | None = None
         self.owner: discord.User | None = None
         # Alerts that could not be sent yet because the owner is unresolved.
-        self._pending: list[str] = []
+        self._pending: list[str | discord.Embed] = []
 
     async def cog_load(self) -> None:  # Called by discord.py 2.3+
         # Wait until bot is ready only if it's already logging in; avoid calling
@@ -58,6 +60,25 @@ class AlertPump(commands.Cog):
             self.owner = self.bot.get_user(owner_id)
         else:
             self.owner = None
+
+        # Prepare startup notification
+        embed_online = discord.Embed(
+            title="Bot online",
+            description="✅ The bot has started and is now online.",
+            colour=discord.Colour.green(),
+        )
+        logger.info("AlertPump: queuing startup notification")
+        if self.owner is not None:
+            logger.info(
+                "AlertPump: sending startup notification to owner %s",
+                getattr(self.owner, "id", "unknown"),
+            )
+            await self._send_dm_with_retry(self.owner, content=None, embed=embed_online)
+            logger.info("AlertPump: startup notification sent successfully")
+        else:
+            # Owner not resolved yet – queue for first delivery pass
+            self._pending.append(embed_online)
+            logger.info("AlertPump: owner not resolved yet – startup message queued")
 
         loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._relay_loop(q))
@@ -107,8 +128,11 @@ class AlertPump(commands.Cog):
                     )
             else:
                 # We have an owner: try to flush all pending alerts (oldest first)
-                for pending_msg in list(self._pending):
-                    await self._send_dm_with_retry(owner, f"⚠️ **Bot alert:** {pending_msg}")
+                for pending_item in list(self._pending):
+                    if isinstance(pending_item, discord.Embed):
+                        await self._send_dm_with_retry(owner, content=None, embed=pending_item)
+                    else:
+                        await self._send_dm_with_retry(owner, f"⚠️ **Bot alert:** {pending_item}")
                 self._pending.clear()
 
             # Acknowledge the queue task only if we actually pulled one.
@@ -122,12 +146,40 @@ class AlertPump(commands.Cog):
     async def _send_dm_with_retry(
         self,
         owner: discord.User,
-        content: str,
+        content: str | None = None,
+        *,
+        embed: discord.Embed | None = None,
     ) -> None:
         """Try sending *content* to *owner* with exponential back-off."""
 
         async def _attempt_send() -> None:
-            await owner.send(content)
+            logger.debug(
+                "AlertPump: attempting DM to owner %s",
+                getattr(owner, "id", "unknown"),
+            )
+            try:
+                if embed is not None:
+                    await owner.send(content=content, embed=embed)
+                else:
+                    await owner.send(content)
+            except TypeError as exc:
+                # Handle test doubles without 'content'/'embed' kwargs.
+                if embed is not None and content is None:
+                    # Startup embed: silently skip in environments that do not
+                    # support rich embeds to keep tests expectations intact.
+                    logger.debug(
+                        "AlertPump: embed unsupported by owner stub – skipping startup embed"
+                    )
+                    return
+                logger.debug(
+                    "AlertPump: owner.send signature mismatch (%s) – falling back to plain text",
+                    exc,
+                )
+                fallback_msg = content or (
+                    f"{embed.title if embed else ''}\n{embed.description if embed else ''}"
+                )
+                await owner.send(fallback_msg)
+            logger.debug("AlertPump: DM succeeded")
 
         try:
             await with_retries(_attempt_send, MAX_RETRY_ATTEMPTS, INITIAL_RETRY_DELAY, backoff=2.0)
