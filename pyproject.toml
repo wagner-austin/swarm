@@ -20,7 +20,7 @@ dependencies = [
   "discord.py>=2.3",
 
   # --- proxy and websocket support ---
-  "mitmproxy>=12",      # MITM TLS proxy, BSD-licensed
+  "mitmproxy>=10.0.0",         # MITM TLS proxy (modern API)
   "aiohttp>=3.12.11",
   "aiohappyeyeballs>=2.6.1",
 
