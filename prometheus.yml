@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'discord_bot'
+    static_configs:
+      # Docker can reach the host via host.docker.internal on Windows/Mac. If
+      # this does not work on your OS, replace with the host's LAN IP
+      # or run the bot in another docker service and use its service name.
+      - targets: ['host.docker.internal:9200']

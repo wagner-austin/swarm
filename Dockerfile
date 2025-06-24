@@ -21,8 +21,7 @@ COPY pyproject.toml poetry.lock* ./
 
 # install the deps that are *already* locked – but only the “main” ones, straight into the system site-packages
 ENV POETRY_VIRTUALENVS_CREATE=false
-RUN poetry lock --regenerate \
-    && poetry install --only main --no-root --no-ansi --no-interaction
+RUN poetry install --only main --no-root --no-ansi --no-interaction
 
 # Copy the source code in a late layer so it changes often without invalidating
 # the heavy dependency layers.
@@ -47,7 +46,7 @@ WORKDIR /app
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 libdrm2 \
     libgbm1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
-    libxrender1 libfontconfig1 libasound2 libxtst6 \
+    libxrender1 libfontconfig1 libasound2 libxtst6 curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python + wheels from the builder layer
@@ -61,6 +60,10 @@ COPY --from=builder /app /app
 ARG METRICS_PORT=9200
 EXPOSE 9000 $METRICS_PORT
 ENV METRICS_PORT=$METRICS_PORT
+
+# Healthcheck: ensure metrics endpoint is up
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:9200/metrics || exit 1
 
 # The default process defined in fly.toml
 CMD ["python", "-m", "bot.core"]

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from errno import EADDRINUSE
 from typing import Any
 
@@ -84,26 +85,35 @@ QUEUE_SIZE = Gauge(
     registry=REGISTRY,
 )
 
+# Resolve shard label once at import time so all metrics share it
+_SHARD_ID: str = os.getenv("SHARD_ID", "0")
+
 # ——— Core bot latency ————————————————————————————————————————————
-BOT_LATENCY = Gauge(
+# Create a Histogram with a *dynamic* "shard" label and bind it immediately
+# to a single child instance – this avoids mypy complaints about the newer
+# ``const_labels`` kwarg while still exposing the label in Prometheus.
+BOT_LATENCY = Histogram(
     "bot_latency_seconds",
     "Discord gateway latency in seconds",
+    ["shard"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0),
     registry=REGISTRY,
-)
-
+).labels(_SHARD_ID)
 
 # ——— Bot traffic metrics ————————————————————————————————————————————
 DISCORD_MSG_TOTAL = Counter(
     "discord_messages_processed_total",
     "Discord messages the bot has processed",
+    ["shard"],
     registry=REGISTRY,
-)
+).labels(_SHARD_ID)
 
 BOT_MSG_TOTAL = Counter(
     "bot_messages_sent_total",
     "Messages the bot has sent",
+    ["shard"],
     registry=REGISTRY,
-)
+).labels(_SHARD_ID)
 
 # ---------------------------------------------------------------------------+
 #  Public helpers                                                            +

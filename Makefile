@@ -113,8 +113,38 @@ logs:                        ## tail live Fly logs
 compose-up:            ## start local dev services via docker compose (Redis)
 	docker compose up -d
 
+compose: compose-up
+
 compose-down:          ## stop and remove docker compose services
 	docker compose down
+
+# ---------------------------------------------------------------------------
+# Bot container manual reload workflow
+# ---------------------------------------------------------------------------
+bot-build:             ## Build the bot Docker image
+	docker compose build bot
+
+bot-restart:           ## Restart the bot container (after build or code update)
+	docker compose restart bot
+
+bot-logs:              ## Tail logs from the bot container
+	docker compose logs -f bot
+
+bot-shell:             ## Open a shell in the running bot container
+	docker compose exec bot bash
+
+# ---------------------------------------------------------------------------
+# Bot update: build, restart, and start if not running
+# ---------------------------------------------------------------------------
+bot-update: ## Build, (re)start bot container, and auto-tail logs
+	@echo "🔄 Building bot image..."
+	@make bot-build
+	@docker compose up -d bot
+	@echo "📜 Tailing bot logs (Ctrl+C to exit)..."
+	@make bot-logs
+
+bot-health: ## Check health status of the bot container (requires HEALTHCHECK in Dockerfile)
+	docker inspect --format='{{.State.Health.Status}}' discord-bot || echo "no health status (no HEALTHCHECK or not running)"
 
 # ---------------------------------------------------------------------------
 # Misc helpers

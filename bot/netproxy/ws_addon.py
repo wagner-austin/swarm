@@ -21,6 +21,12 @@ from typing import TYPE_CHECKING
 
 from mitmproxy import ctx, websocket
 
+# Binary opcode constant – works even if stubs lack the Opcode enum
+try:
+    OP_BINARY: int = websocket.Opcode.BINARY  # type: ignore[attr-defined]
+except AttributeError:  # fallback for missing stubs
+    OP_BINARY = 0x2  # RFC 6455 binary opcode
+
 if TYPE_CHECKING:  # mitmproxy type stubs are incomplete
     from mitmproxy.http import HTTPFlow
 
@@ -39,8 +45,8 @@ class GenericWSAddon:
     # ------------------------------------------------------------------+
     # mitmproxy hooks                                                   +
     # ------------------------------------------------------------------+
-    async def websocket_message(self, flow: "HTTPFlow") -> None:  # noqa: D401
-        """Called by mitmproxy for **every** WebSocket message."""
+    async def websocket_message(self, flow: HTTPFlow) -> None:
+        """Handle an individual WebSocket message captured by mitmproxy."""
         if not flow.websocket:
             return
         msg = flow.websocket.messages[-1]
@@ -62,9 +68,9 @@ class GenericWSAddon:
                 for f in ctx.master.state.flows:  # type: ignore[attr-defined]
                     if f.websocket and not f.websocket.closed:
                         new_msg = websocket.WebSocketMessage(
-                            opcode=websocket.Opcode.BINARY,
-                            from_client=True,
-                            content=data,
+                            OP_BINARY,
+                            True,  # from_client
+                            data,
                         )
                         f.websocket.messages.append(new_msg)
                         # mitmproxy >= 10 only exposes send_message()

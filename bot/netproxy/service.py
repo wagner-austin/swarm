@@ -42,9 +42,12 @@ class AddonProtocol(Protocol):  # minimal contract
 #  Game-engine protocol                                       +
 # ------------------------------------------------------------+
 
+
 @runtime_checkable
 class GameEngine(Protocol):
     async def start(self) -> None: ...
+
+    async def stop(self, *, graceful: bool = True) -> None: ...
 
 
 class ProxyService(ServiceABC):
@@ -137,8 +140,9 @@ class ProxyService(ServiceABC):
     # _pick_free_port and _is_port_free are now in bot.utils.net
 
     async def stop(self, *, graceful: bool = True) -> None:
-        # Check if proxy was never started
+        # Check if proxy was never started – still stop engine if running
         if not self._dump and not self._task:
+            await self._engine.stop()
             return
 
         # Check if proxy is not running but may have been started before
@@ -180,6 +184,12 @@ class ProxyService(ServiceABC):
         # tries the same number first (nice for humans, harmless for tests).
         self.port = self._default_port
         logger.info("ProxyService: mitmproxy stopped.")
+
+        # Stop game engine
+        try:
+            await self._engine.stop()
+        except Exception as exc:
+            logger.warning("ProxyService: engine stop raised %s", exc)
 
     # convenience helper for unit tests
     def is_running(self) -> bool:

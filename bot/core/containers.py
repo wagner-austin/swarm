@@ -8,10 +8,11 @@ from bot.core.settings import Settings
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
 from bot.history.redis_backend import RedisBackend
-# generic WebSocket addon and TankPit engine factory
-from bot.netproxy.ws_addon import GenericWSAddon
 from bot.infra.tankpit import engine_factory as tankpit_engine_factory
 from bot.netproxy.service import ProxyService
+
+# generic WebSocket addon and TankPit engine factory
+from bot.netproxy.ws_addon import GenericWSAddon
 
 
 class Container(containers.DeclarativeContainer):

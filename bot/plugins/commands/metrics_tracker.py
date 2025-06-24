@@ -40,7 +40,7 @@ class MetricsTracker(commands.Cog):
         """Update the bot latency gauge every 30 s."""
         while True:
             latency = float(self.bot.latency or 0.0)
-            BOT_LATENCY.set(latency)
+            BOT_LATENCY.observe(latency)
             await asyncio.sleep(30)
 
     # ------------------------------------------------------------------+

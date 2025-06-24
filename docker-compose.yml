@@ -1,9 +1,69 @@
-version: "3.9"
-
 services:
   redis:
     image: redis:7
     container_name: redis
     ports:
       - "6379:6379"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin  # change after first login
+      - GF_LOG_LEVEL=warn  # Reduce from default 'info' to 'warn'
+      - GF_LOG_FILTERS=tsdb.loki:warn  # Specifically reduce Loki data source logging
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.1.1
+    container_name: loki
+    volumes:
+      - ./loki-config.yml:/etc/loki/local-config.yaml:ro
+      - ./loki-data:/tmp/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"   # Loki HTTP API
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.2.0
+    container_name: alloy
+    volumes:
+      - ./alloy-config.river:/etc/alloy/config.river:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: ["run", "/etc/alloy/config.river", "--server.http.listen-addr=0.0.0.0:12345"]
+    ports:
+      - "12345:12345"  # Alloy UI
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  bot:
+    build: .
+    container_name: discord-bot
+    command: ["python", "-m", "bot.core"]
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    environment:
+      - METRICS_PORT=9200
+    ports:
+      - "9000:9000"      # Main bot port (if used)
+      - "9200:9200"      # Prometheus metrics
     restart: unless-stopped

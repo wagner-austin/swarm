@@ -14,8 +14,8 @@ __all__: list[str] = ["engine_factory"]
 
 
 def engine_factory(
-    q_in: "asyncio.Queue[tuple[str, bytes]]",
-    q_out: "asyncio.Queue[bytes]",
+    q_in: asyncio.Queue[tuple[str, bytes]],
+    q_out: asyncio.Queue[bytes],
 ) -> TankPitEngine:
     """Return a :class:`TankPitEngine` bound to the given queues."""
     return TankPitEngine(q_in, q_out)
