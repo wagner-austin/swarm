@@ -1,12 +1,11 @@
 import asyncio
 
 import discord
-
-from bot.core import metrics
 from discord import app_commands
 from discord.ext import commands
 
 from bot.browser.runtime import BrowserRuntime
+from bot.core import metrics
 from bot.plugins.base_di import BaseDIClientCog
 from bot.utils.discord_interactions import safe_send
 
