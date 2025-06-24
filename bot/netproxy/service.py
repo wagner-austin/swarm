@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 from typing import (
     Any,
+    Callable,
     Protocol,
     cast,
     runtime_checkable,
@@ -37,6 +38,15 @@ class AddonProtocol(Protocol):  # minimal contract
     async def websocket_message(self, flow: HTTPFlow) -> None: ...
 
 
+# ------------------------------------------------------------+
+#  Game-engine protocol                                       +
+# ------------------------------------------------------------+
+
+@runtime_checkable
+class GameEngine(Protocol):
+    async def start(self) -> None: ...
+
+
 class ProxyService(ServiceABC):
     def __init__(
         self,
@@ -44,6 +54,10 @@ class ProxyService(ServiceABC):
         *,
         certdir: Path | None = None,
         addons: list[AddonProtocol] | None = None,
+        engine_factory: Callable[
+            [asyncio.Queue[tuple[str, bytes]], asyncio.Queue[bytes]], GameEngine
+        ]
+        | None = None,
     ):
         self._default_port = port
         self.port = port
@@ -54,6 +68,15 @@ class ProxyService(ServiceABC):
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
         self._addons: list[AddonProtocol] = addons or []
+        # ------------------------------------------------------------------+
+        # Build the game engine                                            +
+        # ------------------------------------------------------------------+
+        if engine_factory is None:
+            from bot.infra.tankpit.engine import TankPitEngine
+
+            engine_factory = lambda q_in, q_out: TankPitEngine(q_in, q_out)  # noqa: E731
+
+        self._engine: GameEngine = engine_factory(self.in_q, self.out_q)
         self._process: asyncio.subprocess.Process | None = None
 
     # ── public API ──────────────────────────────────────────────
@@ -92,6 +115,9 @@ class ProxyService(ServiceABC):
         for addon in self._addons:
             instance = addon(self.in_q, self.out_q) if isinstance(addon, type) else addon
             self._dump.addons.add(instance)  # type: ignore[no-untyped-call]
+        # Kick-off the game engine
+        await self._engine.start()
+
         # Ensure the certdir exists
         self.certdir.mkdir(parents=True, exist_ok=True)
         # run mitmproxy in the background

@@ -8,7 +8,9 @@ from bot.core.settings import Settings
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
 from bot.history.redis_backend import RedisBackend
-from bot.infra.tankpit.proxy.ws_tankpit import TankPitWSAddon
+# generic WebSocket addon and TankPit engine factory
+from bot.netproxy.ws_addon import GenericWSAddon
+from bot.infra.tankpit import engine_factory as tankpit_engine_factory
 from bot.netproxy.service import ProxyService
 
 
@@ -74,8 +76,9 @@ class Container(containers.DeclarativeContainer):
         # Explicit list provider makes the "list-ness" clear and allows DI container
         # to resolve each element individually if they become providers themselves.
         addons=providers.List(
-            providers.Object(TankPitWSAddon),
+            providers.Object(GenericWSAddon),
         ),
+        engine_factory=tankpit_engine_factory,
     )
 
     # Browser runtime – one process-wide instance wired through DI
