@@ -26,3 +26,5 @@ myenv/
 test_build/
 *.egg-info/
 volunteer_bot.egg-info/
+
+loki-data
