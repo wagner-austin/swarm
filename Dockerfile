@@ -46,7 +46,7 @@ WORKDIR /app
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 libdrm2 \
     libgbm1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
-    libxrender1 libfontconfig1 libasound2 libxtst6 curl \
+    libxrender1 libfontconfig1 libasound2 libxtst6 curl xvfb x11vnc \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python + wheels from the builder layer
@@ -58,7 +58,7 @@ COPY --from=builder /app /app
 
 # Single source of truth – Settings.metrics_port defaults to 9200
 ARG METRICS_PORT=9200
-EXPOSE 9000 $METRICS_PORT
+EXPOSE 9000 $METRICS_PORT 5900
 ENV METRICS_PORT=$METRICS_PORT
 
 # Healthcheck: ensure metrics endpoint is up
