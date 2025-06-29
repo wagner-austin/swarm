@@ -113,6 +113,9 @@ logs:                        ## tail live Fly logs
 compose-up:            ## start local dev services via docker compose (Redis)
 	docker compose up -d
 
+compose-recreate:      ## recreate bot container (after config change)
+	docker compose up -d --force-recreate bot
+
 compose: compose-up
 
 compose-down:          ## stop and remove docker compose services
