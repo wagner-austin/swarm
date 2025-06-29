@@ -90,6 +90,7 @@ services:
     command: ["python", "-m", "bot.core"]
     volumes:
       - .:/app
+      - C:\Users\Test\.config\discord-bot\personas\personas.yaml:/root/.config/discord-bot/personas/personas.yaml:ro
     depends_on:
       - redis
     environment:
