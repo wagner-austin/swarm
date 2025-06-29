@@ -4,6 +4,11 @@ services:
     container_name: redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   prometheus:
@@ -13,6 +18,11 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   grafana:
@@ -22,14 +32,20 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin  # change after first login
+      # Keep Grafana output terse; WARN and above matches Loki & bot
       - GF_LOG_LEVEL=warn  # Reduce from default 'info' to 'warn'
       - GF_LOG_FILTERS=tsdb.loki:warn  # Specifically reduce Loki data source logging
     depends_on:
       - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   loki:
-    image: grafana/loki:3.1.1
+    image: grafana/loki:3.2.0   # newer maintenance release
     container_name: loki
     volumes:
       - ./loki-config.yml:/etc/loki/local-config.yaml:ro
@@ -37,20 +53,35 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     ports:
       - "3100:3100"   # Loki HTTP API
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   alloy:
-    image: grafana/alloy:v1.2.0
+    # v1.9.2 is the latest GA release (2025-06-27); pin for repeatable builds
+    image: grafana/alloy:v1.9.2
     container_name: alloy
     volumes:
       - ./alloy-config.river:/etc/alloy/config.river:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    # Allow Alloy's non-root user to access the Docker socket
+    group_add:
+      - "${DOCKER_GID:-0}"
     command: ["run", "/etc/alloy/config.river", "--server.http.listen-addr=0.0.0.0:12345"]
     ports:
       - "12345:12345"  # Alloy UI
     depends_on:
       - loki
+    healthcheck:
+      test: ["CMD", "sh", "-c", "ps aux | grep -v grep | grep '/bin/alloy run' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     restart: unless-stopped
 
   bot:
@@ -66,4 +97,10 @@ services:
     ports:
       - "9000:9000"      # Main bot port (if used)
       - "9200:9200"      # Prometheus metrics
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9200/metrics', timeout=5).getcode()==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     restart: unless-stopped

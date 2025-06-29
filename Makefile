@@ -54,7 +54,7 @@ lint: install               ## ruff fix + ruff format + mypy strict type-check
 format: install             ## auto-format code base (ruff + black)
 	$(RUFF) format .
 
-check: lint test
+check: lint test docker-status
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -118,6 +118,9 @@ compose: compose-up
 compose-down:          ## stop and remove docker compose services
 	docker compose down
 
+docker-status:         ## show status of docker compose services
+	docker compose ps
+
 # ---------------------------------------------------------------------------
 # Bot container manual reload workflow
 # ---------------------------------------------------------------------------
@@ -170,7 +173,7 @@ clean: install              ## remove Python / tool caches
 
 # Use savecode to save files
 savecode:
-	savecode . --skip tests --ext toml py
+	savecode . --skip tests --ext toml py yml
 
 # Use savecode to save files
 savecode-test:

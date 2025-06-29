@@ -3,7 +3,8 @@ auth_enabled: false
 server:
   http_listen_port: 3100
   grpc_listen_port: 9096
-  log_level: warn  # Reduce from default 'info' to 'warn' to cut noise
+  # Emit only WARN and above to keep output quiet.
+  log_level: warn
 
 common:
   path_prefix: /tmp/loki
@@ -13,6 +14,11 @@ common:
       rules_directory: /tmp/loki/rules
   replication_factor: 1
   ring:
+    # Loki 3.x requires a zone string even for single-node installs.
+    # Keep zone-awareness disabled while running one node.
+    instance_availability_zone: "default"
+    zone_awareness_enabled: false
+
     instance_addr: 127.0.0.1
     kvstore:
       store: inmemory

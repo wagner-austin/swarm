@@ -14,6 +14,7 @@ loki.source.docker "containers" {
   forward_to       = [loki.write.default.receiver]
   refresh_interval = "15s"
   
+
   // Basic static labels; advanced relabeling can be added later once Alloy supports equivalent syntax
   labels = { job = "docker-containers" }
 }
