@@ -87,7 +87,7 @@ services:
   bot:
     build: .
     container_name: discord-bot
-    command: ["python", "-m", "bot.core"]
+    command: ["bash", "-c", "Xvfb :99 -screen 0 1920x1080x24 & x11vnc -display :99 -forever -nopw -listen 0.0.0.0 & python -m bot.core"]
     volumes:
       - .:/app
       - C:\Users\Test\.config\discord-bot\personas\personas.yaml:/root/.config/discord-bot/personas/personas.yaml:ro
@@ -95,9 +95,12 @@ services:
       - redis
     environment:
       - METRICS_PORT=9200
+      - DISPLAY=:99
+      - BROWSER_HEADLESS=false
     ports:
       - "9000:9000"      # Main bot port (if used)
       - "9200:9200"      # Prometheus metrics
+      - "5900:5900"      # VNC for browser viewing
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9200/metrics', timeout=5).getcode()==200 else 1)"]
       interval: 30s
