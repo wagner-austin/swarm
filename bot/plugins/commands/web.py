@@ -214,8 +214,10 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         # First check if a browser exists for this channel
         rows = [r for r in self.runtime.status() if r["channel"] == chan]
         if not rows:
-            await interaction.response.send_message(
-                "No browser running for this channel.", ephemeral=True
+            await safe_send(
+                interaction,
+                "No browser running for this channel.",
+                ephemeral=True,
             )
             return
 
@@ -241,8 +243,10 @@ class Web(commands.GroupCog, name="web", description="Control a web browser inst
         # Check if there are any active browsers
         rows = self.runtime.status()
         if not rows:
-            await interaction.response.send_message(
-                "No active browser instances to close.", ephemeral=True
+            await safe_send(
+                interaction,
+                "No active browser instances to close.",
+                ephemeral=True,
             )
             return
 

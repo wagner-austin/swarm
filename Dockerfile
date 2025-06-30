@@ -46,7 +46,7 @@ WORKDIR /app
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 libdrm2 \
     libgbm1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
-    libxrender1 libfontconfig1 libasound2 libxtst6 curl xvfb x11vnc \
+    libxrender1 libfontconfig1 libasound2 libxtst6 curl xvfb x11vnc xauth \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python + wheels from the builder layer
