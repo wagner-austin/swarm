@@ -87,7 +87,7 @@ services:
   bot:
     build: .
     container_name: discord-bot
-    command: ["bash", "-c", "Xvfb :99 -screen 0 1920x1080x24 & x11vnc -display :99 -forever -nopw -listen 0.0.0.0 & python -m bot.core"]
+    command: ["bash", "-c", "echo 'Starting Xvfb...' && Xvfb :99 -screen 0 1920x1080x24 -ac & echo 'Waiting for Xvfb...' && sleep 3 && echo 'Starting x11vnc...' && x11vnc -display :99 -forever -nopw -listen 0.0.0.0 -quiet & echo 'Waiting for x11vnc...' && sleep 2 && echo 'Starting bot...' && python -m bot.core"]
     volumes:
       - .:/app
       - C:\Users\Test\.config\discord-bot\personas\personas.yaml:/root/.config/discord-bot/personas/personas.yaml:ro
