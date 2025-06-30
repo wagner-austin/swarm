@@ -196,6 +196,15 @@ class BotLifecycle:
         self._set_state(LifecycleState.SHUTTING_DOWN)
 
         logger.info("Attempting to gracefully shutdown services...")
+
+        if self._container:
+            try:
+                browser_runtime = self._container.browser_runtime()
+                await browser_runtime.close_all()
+                logger.info("Closed all browser engines.")
+            except Exception as e:
+                logger.exception("Error during browser runtime shutdown:", exc_info=e)
+
         if self._bot:
             await stop_proxy_service(self._bot)
         logger.info("Finished service shutdown attempts.")

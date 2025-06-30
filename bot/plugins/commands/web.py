@@ -11,6 +11,7 @@ from discord.ext import commands
 from discord.ext.commands import Bot
 
 from bot.browser.runtime import BrowserRuntime
+from bot.plugins.base_di import BaseDIClientCog
 from bot.plugins.commands.decorators import background_app_command
 from bot.utils.discord_interactions import safe_defer, safe_send
 from bot.utils.urls import validate_and_normalise_web_url
@@ -26,13 +27,13 @@ from bot.webapi.decorators import (
 logger = logging.getLogger(__name__)
 
 
-class Web(commands.GroupCog, name="web", description="Control a web browser instance."):
+class Web(
+    BaseDIClientCog, commands.GroupCog, name="web", description="Control a web browser instance."
+):
     def __init__(self, bot: Bot) -> None:
-        super().__init__()
+        BaseDIClientCog.__init__(self, bot)
         self.bot = bot
-        # Resolve DI singleton for browser runtime
-        # The bot is always started with a DI container attached in discord_runner
-        self.runtime: BrowserRuntime = bot.container.browser_runtime()  # type: ignore[attr-defined]
+        self.runtime: BrowserRuntime = self.container.browser_runtime()
 
     @app_commands.command(name="start", description="Start a browser session with an optional URL.")
     @app_commands.describe(url="Optional URL to navigate to.")

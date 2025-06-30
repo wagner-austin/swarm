@@ -46,15 +46,18 @@ WORKDIR /app
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 libdrm2 \
     libgbm1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
-    libxrender1 libfontconfig1 libasound2 libxtst6 curl xvfb x11vnc xauth \
+    libxrender1 libfontconfig1 libasound2 libxtst6 curl xvfb x11vnc xauth x11-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python + wheels from the builder layer
 COPY --from=builder /usr/local /usr/local
 # Keep only the browser bits from the Playwright cache
 COPY --from=builder /opt/venv/playwright-cache /root/.cache/ms-playwright
-# Copy application source
+# Copy application source (but NOT entrypoint.sh)
 COPY --from=builder /app /app
+# Copy the current entrypoint.sh (this ensures we get the updated version)
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Single source of truth – Settings.metrics_port defaults to 9200
 ARG METRICS_PORT=9200
@@ -65,5 +68,4 @@ ENV METRICS_PORT=$METRICS_PORT
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:9200/metrics || exit 1
 
-# The default process defined in fly.toml
-CMD ["python", "-m", "bot.core"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

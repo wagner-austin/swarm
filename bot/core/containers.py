@@ -83,7 +83,10 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Browser runtime – one process-wide instance wired through DI
-    browser_runtime: providers.Singleton["BrowserRuntime"] = providers.Singleton(BrowserRuntime)
+    browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(
+        BrowserRuntime,
+        settings=config,
+    )
 
 
 # Example of how to initialize and use the container (typically in main.py or discord_runner.py):

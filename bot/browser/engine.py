@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +13,8 @@ from playwright.async_api import (
 )
 
 from bot.core.service_base import ServiceABC
+
+logger = logging.getLogger(__name__)
 
 
 class BrowserEngine(ServiceABC):
@@ -39,11 +42,23 @@ class BrowserEngine(ServiceABC):
 
         self._playwright = await async_playwright().start()
         assert self._playwright is not None  # mypy: narrows to Playwright
-        self._browser = await self._playwright.chromium.launch(
-            headless=self._headless,
-            timeout=self._timeout_ms,
-            proxy={"server": self._proxy} if self._proxy else None,
-        )
+        try:
+            import os
+
+            display = os.getenv("DISPLAY")
+            logger.info(
+                "Launching Chromium (headless=%s, DISPLAY=%s) in BrowserEngine.start",
+                self._headless,
+                display,
+            )
+            self._browser = await self._playwright.chromium.launch(
+                headless=self._headless,
+                timeout=self._timeout_ms,
+                proxy={"server": self._proxy} if self._proxy else None,
+            )
+        except Exception as exc:
+            logger.exception("Browser launch failed in start()", exc_info=exc)
+            raise
         self._page = await self._browser.new_page()
 
     # ------------------------------------------------------------------+
@@ -61,11 +76,23 @@ class BrowserEngine(ServiceABC):
             except Exception:
                 pass  # Ignore any errors when closing
 
-        self._browser = await self._playwright.chromium.launch(
-            headless=self._headless,  # Use the original setting
-            timeout=self._timeout_ms,
-            proxy={"server": self._proxy} if self._proxy else None,
-        )
+        try:
+            import os
+
+            display = os.getenv("DISPLAY")
+            logger.info(
+                "Launching Chromium (headless=%s, DISPLAY=%s) in _restart_browser",
+                self._headless,
+                display,
+            )
+            self._browser = await self._playwright.chromium.launch(
+                headless=self._headless,  # Use the original setting
+                timeout=self._timeout_ms,
+                proxy={"server": self._proxy} if self._proxy else None,
+            )
+        except Exception as exc:
+            logger.exception("Browser launch failed in _restart_browser", exc_info=exc)
+            raise
 
     # ------------------------------------------------------------+
     # internal – ensure we have an open page                      |

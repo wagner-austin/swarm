@@ -15,7 +15,7 @@ import asyncio
 from collections import defaultdict
 from typing import Any
 
-from bot.core.settings import settings
+from bot.core.settings import Settings
 from bot.utils.queue_helpers import (
     get as q_get,
     put_nowait as q_put,
@@ -38,10 +38,11 @@ class _ChannelCtx:
 class BrowserRuntime:
     """Process-wide runtime that multiplexes one BrowserEngine per channel."""
 
-    def __init__(self) -> None:  # noqa: D401
+    def __init__(self, settings: Settings) -> None:  # noqa: D401
         # Mapping: Discord channel ID -> _ChannelCtx
         self._ch: dict[int, _ChannelCtx] = defaultdict(_ChannelCtx)
         self._lock = asyncio.Lock()
+        self._settings = settings
 
     # ---------------------------------------------------------------------
     # Public API
@@ -58,14 +59,14 @@ class BrowserRuntime:
             ctx = self._ch[channel_id]
             if ctx.engine is None:
                 ctx.engine = BrowserEngine(
-                    headless=False,
+                    headless=self._settings.browser.headless,
                     proxy=None,
                     timeout_ms=60_000,
                 )
                 await ctx.engine.start()
 
             if ctx.queue is None:
-                ctx.queue = asyncio.Queue(maxsize=settings.queues.command)
+                ctx.queue = asyncio.Queue(maxsize=self._settings.queues.command)
                 ctx.task = asyncio.create_task(self._worker(channel_id))
 
             fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
@@ -92,9 +93,10 @@ class BrowserRuntime:
     async def close_all(self) -> None:
         """Close every active channel context."""
         async with self._lock:
-            ch_map = dict(self._ch)
-            self._ch.clear()
-        await asyncio.gather(*(self.close_channel(cid) for cid in ch_map))
+            # Create a list of channel IDs to avoid issues with modifying the
+            # dictionary while iterating over it.
+            channel_ids = list(self._ch.keys())
+        await asyncio.gather(*(self.close_channel(cid) for cid in channel_ids))
 
     def status(self) -> list[dict[str, Any]]:
         """Return a lightweight diagnostic snapshot for the /status command."""
@@ -136,6 +138,4 @@ class BrowserRuntime:
 #  Public singleton – retained for backward compatibility               +
 # ---------------------------------------------------------------------+
 
-runtime = BrowserRuntime()
-
-__all__ = ["runtime", "BrowserRuntime"]
+__all__ = ["BrowserRuntime"]
