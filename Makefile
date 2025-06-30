@@ -116,6 +116,9 @@ compose-up:            ## start local dev services via docker compose (Redis)
 compose-recreate:      ## recreate bot container (after config change)
 	docker compose up -d --force-recreate bot
 
+compose-recreate-all:
+	docker compose up -d --force-recreate
+
 compose: compose-up
 
 compose-down:          ## stop and remove docker compose services
