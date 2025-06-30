@@ -110,6 +110,9 @@ logs:                        ## tail live Fly logs
 # ---------------------------------------------------------------------------
 # Docker / Redis helpers
 # ---------------------------------------------------------------------------
+build-bot:
+	docker compose build --no-cache bot
+
 compose-up:            ## start local dev services via docker compose (Redis)
 	docker compose up -d
 

@@ -14,7 +14,6 @@ class Shutdown(BaseDIClientCog):
     def __init__(self, bot: commands.Bot) -> None:
         BaseDIClientCog.__init__(self, bot)
         self.bot = bot
-        self.runtime: BrowserRuntime = bot.container.browser_runtime()  # type: ignore[attr-defined]
 
     @app_commands.command(name="shutdown", description="Cleanly shut the bot down (owner only).")
     async def shutdown(self, interaction: discord.Interaction) -> None:
@@ -23,18 +22,7 @@ class Shutdown(BaseDIClientCog):
 
         bot = interaction.client  # Get the bot instance
 
-        # 1️⃣ terminate auxiliary services via DI container
-        try:
-            await self.container.proxy_service().aclose()
-        except Exception:
-            pass
-
-        # 1️⃣.b Close all browser engines
-        try:
-            await self.runtime.close_all()
-        except Exception:
-            # Log internally – user sees generic shutdown msg already
-            pass
+        # 1️⃣ Auxiliary services are shut down by the bot's lifecycle handler.
 
         # 2️⃣ gather stats & send final confirmation then logout
         stats = metrics.get_stats()
