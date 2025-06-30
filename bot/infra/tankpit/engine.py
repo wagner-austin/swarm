@@ -13,9 +13,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Any, Callable
 
 from bot.core.service_base import ServiceABC
-from bot.core.telemetry import record_frame
+from bot.core.telemetry import record_frame as default_record_frame
 from bot.utils.queue_helpers import (
     get as q_get,
     put_nowait as q_put,
@@ -40,10 +41,23 @@ class TankPitEngine(ServiceABC):
         forwarded upstream to the TankPit server.
     """
 
-    def __init__(self, q_in: asyncio.Queue[_DirFrame], q_out: asyncio.Queue[bytes]) -> None:
+    def __init__(
+        self,
+        q_in: asyncio.Queue[_DirFrame],
+        q_out: asyncio.Queue[bytes],
+        *,
+        record_frame_fn: Callable[[str, float], None] = default_record_frame,
+        task_done_fn: Callable[[asyncio.Queue[Any], str], None] = q_task_done,
+        get_fn: Callable[[asyncio.Queue[Any], str], Any] = q_get,
+        put_nowait_fn: Callable[[asyncio.Queue[Any], Any, str], None] = q_put,
+    ) -> None:
         self._in = q_in
         self._out = q_out
         self._task: asyncio.Task[None] | None = None
+        self._record_frame = record_frame_fn
+        self._task_done = task_done_fn
+        self._get = get_fn
+        self._put_nowait = put_nowait_fn
 
     async def start(self) -> None:
         if self._task is None:
@@ -76,20 +90,22 @@ class TankPitEngine(ServiceABC):
 
     async def _run(self) -> None:
         """Run the main consume loop (placeholder implementation)."""
-        try:
-            while True:
-                direction, payload = await q_get(self._in, "proxy_in")
-        except (asyncio.CancelledError, GeneratorExit):
-            # Task cancelled or loop shutting down – exit quietly to avoid
-            # unraisable warnings during test teardown.
-            return
+        while True:
             try:
-                t0 = time.perf_counter()
+                # Await the next frame from the proxy queue.
+                direction, payload = await self._get(self._in, "proxy_in")
+            except (asyncio.CancelledError, GeneratorExit):
+                # Graceful shutdown requested – exit the loop quietly so that
+                # the task finishes without raising unhandled exceptions.
+                break
+
+            t0 = time.perf_counter()
+            try:
                 # TODO: parse payload and update state. For now we just echo.
                 if direction == "RX":
                     # naive echo logic for proof-of-wiring
                     try:
-                        q_put(self._out, payload, "proxy_out")
+                        self._put_nowait(self._out, payload, "proxy_out")
                     except asyncio.QueueFull:
                         from bot.core import alerts
 
@@ -97,5 +113,6 @@ class TankPitEngine(ServiceABC):
             except Exception as exc:  # pragma: no cover – dev aid
                 logger.error("TankPitEngine error: %s", exc, exc_info=True)
             finally:
-                record_frame(direction, time.perf_counter() - t0)
-                q_task_done(self._in, "proxy_in")
+                # Always record telemetry and mark task done, even if an error occurred.
+                self._record_frame(direction, time.perf_counter() - t0)
+                self._task_done(self._in, "proxy_in")
