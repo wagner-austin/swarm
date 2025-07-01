@@ -119,6 +119,11 @@ class Container(containers.DeclarativeContainer):
 
     alert_pump_cog = providers.Factory(AlertPump)
 
+    # Chat cog factory
+    from bot.plugins.commands.chat import Chat
+
+    chat_cog = providers.Factory(Chat, history_backend=history_backend)
+
     # Browser runtime – one process-wide instance wired through DI
     browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(
         BrowserRuntime,
