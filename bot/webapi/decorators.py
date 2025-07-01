@@ -66,7 +66,8 @@ def read_only_guard() -> Callable[[Callable[..., Coroutine[Any, Any, Any]]], Any
         if is_owner or is_admin:
             return True
 
-        await inter.response.send_message(
+        await safe_send(
+            inter,
             "🔒 The browser is currently in **read-only** mode; mutating actions are disabled.",
             ephemeral=True,
         )

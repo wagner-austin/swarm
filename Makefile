@@ -51,8 +51,9 @@ lint: install               ## ruff fix + ruff format + mypy strict type-check +
 	$(RUFF) format .
 	$(RUFF) check . --select D401 --fix
 	$(MYPY) --strict .
+	$(PYTHON) scripts/ruff_no_direct_discord_response.py $(shell find bot/ tests/ -name '*.py')
 
-format: install             ## auto-format code base (ruff + black)
+format: lint               ## auto-format code base (ruff + black)
 	$(RUFF) format .
 
 check: lint test docker-status
