@@ -64,6 +64,9 @@ class Container(containers.DeclarativeContainer):
     # The default_port and cert_dir for ProxyService can be sourced from config.
     # The 'addon' parameter defaults to None as per ProxyService.__init__ signature.
     # Proxy service
+    import asyncio
+    import logging
+
     proxy_service: providers.Singleton["ProxyService"] = providers.Singleton(
         ProxyService,
         port=providers.Callable(
@@ -80,6 +83,8 @@ class Container(containers.DeclarativeContainer):
             providers.Object(GenericWSAddon),
         ),
         engine_factory=tankpit_engine_factory,
+        logger=logging.getLogger("bot.netproxy.service"),
+        subprocess_factory=asyncio.create_subprocess_exec,
     )
 
     # Browser runtime – one process-wide instance wired through DI

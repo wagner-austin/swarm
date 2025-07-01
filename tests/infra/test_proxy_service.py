@@ -10,8 +10,9 @@ or spawning subprocesses.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
-from typing import Any, Callable, Tuple
+from typing import Any, Callable
 
 import pytest
 
@@ -70,6 +71,38 @@ async def test_proxy_service_start_stop() -> None:  # noqa: D401 – imperative 
     fake_engine = FakeEngine()
     engine_factory = lambda q_in, q_out: fake_engine  # noqa: E731
 
+    # Fake logger and subprocess_factory for DI
+    class FakeLogger(logging.Logger):
+        """Lightweight logging.Logger subclass capturing log records for assertions."""
+
+        def __init__(self) -> None:  # noqa: D401 – simple init
+            super().__init__("fake")
+            self.infos: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+            self.warnings: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+            self.errors: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+        # Override log helpers to capture messages
+        def info(self, msg: str, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+            self.infos.append((msg, args, kwargs))
+
+        def warning(self, msg: str, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+            self.warnings.append((msg, args, kwargs))
+
+        def error(self, msg: str, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+            self.errors.append((msg, args, kwargs))
+
+    fake_logger = FakeLogger()
+    fake_subprocess_calls = []
+
+    async def fake_subprocess_factory(*args: Any, **kwargs: Any) -> object:  # noqa: ANN401
+        """Capture subprocess invocation without spawning real processes."""
+        fake_subprocess_calls.append((args, kwargs))
+
+        class DummyProc:  # Minimal stub for asyncio.subprocess.Process
+            pass
+
+        return DummyProc()
+
     # Prepare service with all helpers injected
     svc = ProxyService(
         port=9000,
@@ -81,6 +114,8 @@ async def test_proxy_service_start_stop() -> None:  # noqa: D401 – imperative 
         create_task_fn=asyncio.create_task,
         sleep_fn=sleep_fn,
         dump_master_factory=dump_master_factory,
+        logger=fake_logger,
+        subprocess_factory=fake_subprocess_factory,
     )
 
     # ------------------------------------------------------------------
