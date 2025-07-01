@@ -58,6 +58,8 @@ def test_crud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Import persona_admin after reload so it picks up patched _CUSTOM_DIR
     from bot.plugins.commands import persona_admin as adm
 
+    importlib.reload(adm)
+
     # Patch internal _CUSTOM_DIR used by adm helper (for safety)
     adm._CUSTOM_DIR = tmp_path  # type: ignore[attr-defined]
 
