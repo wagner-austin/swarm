@@ -46,6 +46,7 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",
   "pytest-randomly>=3.15",   # randomise import order & seed
+  "pytest-mock>=3.12",
   "ruff>=0.4",
   "black>=24.1",
   "mypy>=1.9",
