@@ -114,29 +114,34 @@ class BotLifecycle:
         logger.info("Services and bot instance initialized.")
 
     async def _load_extensions(self) -> None:
-        if not self._bot:
-            logger.error("Bot not initialized, cannot load extensions.")
-            raise RuntimeError("Bot not initialized for extension loading.")
+        if not self._bot or not self._container:
+            logger.error("Bot or container not initialized, cannot load extensions.")
+            raise RuntimeError("Bot or container not initialized for extension loading.")
 
         self._set_state(LifecycleState.LOADING_EXTENSIONS)
-        logger.info("Loading extensions...")
-        # Collect short cog names for summary line
-        loaded: list[str] = []
+        logger.info("Discovering and loading extensions (cogs)...")
+
+        # --- DI-Managed Cogs --- #
+        # Load specific cogs directly from the container
+        logger.info("Loading MetricsTracker cog from DI container...")
+        metrics_tracker_cog = self._container.metrics_tracker_cog()
+        await self._bot.add_cog(metrics_tracker_cog)
+        logger.info("📈 MetricsTracker cog added.")
+
+        # --- Standard Cogs --- #
+        # Use an allow-list to control which standard cogs are loaded.
+        keep = {"browser", "chat", "help", "proxy", "status", "shutdown"}
+        discovered_extensions = list(iter_submodules("bot.plugins"))
+        extensions_to_load = [
+            ext for ext in discovered_extensions if ext.rsplit(".", 1)[-1] in keep
+        ]
+
+        loaded: list[str] = ["metrics_tracker"]
         failed: list[str] = []
 
-        # Ensure critical AlertPump extension is loaded even if command package is skipped
-        try:
-            await self._bot.load_extension("bot.plugins.commands.alert_pump")
-        except commands.ExtensionAlreadyLoaded:
-            pass
-        except commands.ExtensionNotFound:
-            logger.error("AlertPump extension not found – runtime alerts disabled!")
-        except commands.ExtensionFailed as e:
-            logger.exception("AlertPump extension failed to load", exc_info=e)
-
-        for ext_name in iter_submodules("bot.plugins.commands"):
-            # Skip since we loaded it explicitly
-            if ext_name == "bot.plugins.commands.alert_pump":
+        for ext_name in extensions_to_load:
+            # metrics_tracker is loaded via DI, so we skip it here
+            if "metrics_tracker" in ext_name:
                 continue
             try:
                 await self._bot.load_extension(ext_name)
@@ -154,7 +159,7 @@ class BotLifecycle:
                 failed.append(ext_name.rsplit(".", 1)[-1])
                 logger.error(f"❌ Unexpected error loading {ext_name}: {e}")
         logger.info(
-            f"🧩 Cogs loaded: {', '.join(loaded) or '—'}"
+            f"🧩 Cogs loaded: {', '.join(sorted(loaded)) or '—'}"
             + (f" | ❌ failed: {', '.join(failed)}" if failed else "")
         )
 
