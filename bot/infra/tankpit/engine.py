@@ -46,6 +46,8 @@ class TankPitEngine(ServiceABC):
         q_in: asyncio.Queue[_DirFrame],
         q_out: asyncio.Queue[bytes],
         *,
+        in_queue_name: str = "proxy_in",
+        out_queue_name: str = "proxy_out",
         record_frame_fn: Callable[[str, float], None] = default_record_frame,
         task_done_fn: Callable[[asyncio.Queue[Any], str], None] = q_task_done,
         get_fn: Callable[[asyncio.Queue[Any], str], Any] = q_get,
@@ -53,6 +55,8 @@ class TankPitEngine(ServiceABC):
     ) -> None:
         self._in = q_in
         self._out = q_out
+        self._in_queue_name = in_queue_name
+        self._out_queue_name = out_queue_name
         self._task: asyncio.Task[None] | None = None
         self._record_frame = record_frame_fn
         self._task_done = task_done_fn
@@ -93,7 +97,7 @@ class TankPitEngine(ServiceABC):
         while True:
             try:
                 # Await the next frame from the proxy queue.
-                direction, payload = await self._get(self._in, "proxy_in")
+                direction, payload = await self._get(self._in, self._in_queue_name)
             except (asyncio.CancelledError, GeneratorExit):
                 # Graceful shutdown requested – exit the loop quietly so that
                 # the task finishes without raising unhandled exceptions.
@@ -105,7 +109,7 @@ class TankPitEngine(ServiceABC):
                 if direction == "RX":
                     # naive echo logic for proof-of-wiring
                     try:
-                        self._put_nowait(self._out, payload, "proxy_out")
+                        self._put_nowait(self._out, payload, self._out_queue_name)
                     except asyncio.QueueFull:
                         from bot.core import alerts
 
@@ -115,4 +119,4 @@ class TankPitEngine(ServiceABC):
             finally:
                 # Always record telemetry and mark task done, even if an error occurred.
                 self._record_frame(direction, time.perf_counter() - t0)
-                self._task_done(self._in, "proxy_in")
+                self._task_done(self._in, self._in_queue_name)

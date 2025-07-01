@@ -108,7 +108,17 @@ class ProxyService(ServiceABC):
         if engine_factory is None:
             from bot.infra.tankpit.engine import TankPitEngine
 
-            engine_factory = lambda q_in, q_out: TankPitEngine(q_in, q_out)  # noqa: E731
+            def default_engine_factory(
+                q_in: asyncio.Queue[tuple[str, bytes]],
+                q_out: asyncio.Queue[bytes],
+                in_queue_name: str = "proxy_in",
+                out_queue_name: str = "proxy_out",
+            ) -> TankPitEngine:
+                return TankPitEngine(
+                    q_in, q_out, in_queue_name=in_queue_name, out_queue_name=out_queue_name
+                )
+
+            engine_factory = default_engine_factory
 
         self._engine: GameEngine = engine_factory(self.in_q, self.out_q)
         self._process: asyncio.subprocess.Process | None = None
