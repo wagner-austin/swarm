@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from discord.ext import commands
 
-from bot.core.containers import Container
+if TYPE_CHECKING:
+    from bot.core.containers import Container
 
 
 # A light mix‑in that resolves the DI container once.

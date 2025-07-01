@@ -20,6 +20,7 @@ class Shutdown(BaseDIClientCog):
     def __init__(
         self,
         bot: commands.Bot,
+        lifecycle: Any = None,
         metrics_mod: MetricsProtocol | None = None,
         get_owner_func: Callable[[commands.Bot], Any] | None = None,
         safe_send_func: Callable[..., Any] | None = None,
@@ -34,6 +35,8 @@ class Shutdown(BaseDIClientCog):
         self.metrics = metrics_mod if metrics_mod is not None else default_metrics
         self.get_owner = get_owner_func if get_owner_func is not None else default_get_owner
         self.safe_send = safe_send_func if safe_send_func is not None else default_safe_send
+        # DI for lifecycle, fallback to bot.lifecycle for production
+        self.lifecycle = lifecycle if lifecycle is not None else getattr(bot, "lifecycle", None)
 
     @app_commands.command(name="shutdown", description="Cleanly shut the bot down (owner only).")
     async def shutdown(self, interaction: discord.Interaction) -> None:
@@ -50,8 +53,6 @@ class Shutdown(BaseDIClientCog):
             await self.safe_send(interaction, "❌ Owner only.", ephemeral=True)
             return
         await self.safe_send(interaction, "📴 Shutting down…")
-
-        bot = interaction.client  # Get the bot instance
 
         # 1️⃣ Auxiliary services are shut down by the bot's lifecycle handler.
 
@@ -74,7 +75,12 @@ class Shutdown(BaseDIClientCog):
         )
         await self.safe_send(interaction, embed=embed, ephemeral=True)
 
-        await bot.close()
+        # Call canonical shutdown via lifecycle
+        if self.lifecycle is not None:
+            await self.lifecycle.shutdown(signal_name="command")
+        else:
+            # Fallback: close bot directly (should not happen in production)
+            await interaction.client.close()
 
         # 3️⃣ one extra loop‑tick so CancelledErrors propagate
         await asyncio.sleep(0)

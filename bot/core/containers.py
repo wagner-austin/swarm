@@ -15,6 +15,10 @@ from bot.netproxy.service import ProxyService
 # generic WebSocket addon and TankPit engine factory
 from bot.netproxy.ws_addon import GenericWSAddon
 
+# DI cogs that must be referenced in providers.Factory at class-scope
+from bot.plugins.commands.status import Status
+from bot.utils.discord_interactions import safe_send
+
 
 class Container(containers.DeclarativeContainer):
     """Dependency Injection Container for the bot.
@@ -124,6 +128,24 @@ class Container(containers.DeclarativeContainer):
     from bot.plugins.commands.chat import Chat
 
     chat_cog = providers.Factory(Chat, bot=providers.Dependency(), history_backend=history_backend)
+
+    # Shutdown cog factory (DI: inject lifecycle)
+    from bot.plugins.commands.shutdown import Shutdown
+
+    shutdown_cog = providers.Factory(
+        Shutdown,
+        bot=providers.Dependency(),
+        lifecycle=providers.Dependency(),
+        metrics_mod=metrics_helper,
+    )
+
+    # Status cog factory (DI)
+    status_cog = providers.Factory(
+        Status,
+        bot=providers.Dependency(),
+        metrics_mod=metrics_helper,
+        safe_send_func=safe_send,
+    )
 
     # Browser runtime – one process-wide instance wired through DI
     browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(
