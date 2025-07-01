@@ -125,22 +125,22 @@ class BotLifecycle:
         # Load specific cogs directly from the container
         logger.info("Loading DI-managed cogs from container...")
         # MetricsTracker
-        metrics_tracker_cog = self._container.metrics_tracker_cog()
+        metrics_tracker_cog = self._container.metrics_tracker_cog(bot=self._bot)
         await self._bot.add_cog(metrics_tracker_cog)
         # LoggingAdmin
-        logging_admin_cog = self._container.logging_admin_cog()
+        logging_admin_cog = self._container.logging_admin_cog(bot=self._bot)
         await self._bot.add_cog(logging_admin_cog)
         # PersonaAdmin
-        persona_admin_cog = self._container.persona_admin_cog()
+        persona_admin_cog = self._container.persona_admin_cog(bot=self._bot)
         await self._bot.add_cog(persona_admin_cog)
         # About
-        about_cog = self._container.about_cog()
+        about_cog = self._container.about_cog(bot=self._bot)
         await self._bot.add_cog(about_cog)
         # AlertPump
-        alert_pump_cog = self._container.alert_pump_cog()
+        alert_pump_cog = self._container.alert_pump_cog(bot=self._bot)
         await self._bot.add_cog(alert_pump_cog)
         # Chat
-        chat_cog = self._container.chat_cog()
+        chat_cog = self._container.chat_cog(bot=self._bot)
         await self._bot.add_cog(chat_cog)
         logger.info(
             "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Chat."
