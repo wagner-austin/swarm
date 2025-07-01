@@ -4,6 +4,7 @@ from dependency_injector import containers, providers
 
 from bot.ai import providers as _ai_providers
 from bot.browser.runtime import BrowserRuntime
+from bot.core import metrics as default_metrics
 from bot.core.settings import Settings
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
@@ -85,6 +86,17 @@ class Container(containers.DeclarativeContainer):
         engine_factory=tankpit_engine_factory,
         logger=logging.getLogger("bot.netproxy.service"),
         subprocess_factory=asyncio.create_subprocess_exec,
+    )
+
+    # Metrics helper (global module, but now injectable)
+    metrics_helper = providers.Object(default_metrics)
+
+    # MetricsTracker cog factory with DI
+    from bot.plugins.commands.metrics_tracker import MetricsTracker
+
+    metrics_tracker = providers.Factory(
+        MetricsTracker,
+        metrics=metrics_helper,
     )
 
     # Browser runtime – one process-wide instance wired through DI

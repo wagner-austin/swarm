@@ -289,10 +289,3 @@ class ProxyService(ServiceABC):
         await self.stop()
 
         self._logger.info("ProxyService: aclose() completed.")
-
-
-# ------------------------------------------------------------------
-# module‑level singleton so other modules can just "from … import proxy_service"
-# ------------------------------------------------------------------
-
-proxy_service: ProxyService = ProxyService()

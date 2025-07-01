@@ -8,20 +8,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from typing import Any
 
 import discord  # need both Message & Interaction types
 from discord.ext import commands
 
-from bot.core import metrics
+from bot.core import metrics as default_metrics
 from bot.core.telemetry import BOT_LATENCY
 
 
 class MetricsTracker(commands.Cog):
     """Increment lightweight counters for /status."""
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: commands.Bot, metrics: Any = default_metrics) -> None:
         # keep a ref so we can recognise our own messages
         self.bot = bot
+        self.metrics = metrics
         # start latency updater background task
         self._latency_task: asyncio.Task[None] | None = None
 
@@ -56,9 +58,9 @@ class MetricsTracker(commands.Cog):
             self.bot.user  # may be None during early startup
             and message.author.id == self.bot.user.id
         ):
-            metrics.increment_message_count()
+            self.metrics.increment_message_count()
         else:
-            metrics.increment_discord_message_count()
+            self.metrics.increment_discord_message_count()
 
     # ------------------------------------------------------------------+
     # Slash-command / component / autocomplete traffic                  |
@@ -78,8 +80,8 @@ class MetricsTracker(commands.Cog):
                 or interaction.user.id != self.bot.user.id
             )
         ):
-            metrics.increment_discord_message_count()
+            self.metrics.increment_discord_message_count()
 
 
-async def setup(bot: commands.Bot) -> None:  # noqa: D401 – entry point
-    await bot.add_cog(MetricsTracker(bot))
+async def setup(bot: commands.Bot, metrics: Any | None = None) -> None:  # noqa: D401 – entry point
+    await bot.add_cog(MetricsTracker(bot, metrics=metrics or default_metrics))
