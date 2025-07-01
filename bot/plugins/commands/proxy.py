@@ -17,27 +17,41 @@ class ProxyCog(
     group_name="proxy",
     group_description="Manage the TankPit MITM proxy",
 ):
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(
+        self,
+        bot: commands.Bot,
+        proxy_service: ProxyService | None = None,
+    ) -> None:
         commands.GroupCog.__init__(self)
         BaseDIClientCog.__init__(self, bot)
-
-        self.svc: ProxyService = self.container.proxy_service()
+        # Allow explicit DI for testing; fall back to container for production
+        self.svc: ProxyService = (
+            proxy_service if proxy_service is not None else self.container.proxy_service()
+        )
 
     @app_commands.command(name="start", description="Start the proxy")
     async def start(self, interaction: discord.Interaction) -> None:
-        await safe_defer(interaction, thinking=True, ephemeral=True)
+        await self._start_impl(interaction)
 
+    async def _start_impl(self, interaction: discord.Interaction) -> None:
+        await safe_defer(interaction, thinking=True, ephemeral=True)
         await self.svc.start()
         await safe_send(interaction, self.svc.describe())
 
     @app_commands.command(name="stop", description="Stop the proxy")
     async def stop(self, interaction: discord.Interaction) -> None:
+        await self._stop_impl(interaction)
+
+    async def _stop_impl(self, interaction: discord.Interaction) -> None:
         await safe_defer(interaction, thinking=True, ephemeral=True)
         await self.svc.stop()
         await safe_send(interaction, "🛑 Proxy stopped.")
 
     @app_commands.command(name="status", description="Show proxy status")
     async def status(self, interaction: discord.Interaction) -> None:
+        await self._status_impl(interaction)
+
+    async def _status_impl(self, interaction: discord.Interaction) -> None:
         await safe_defer(interaction, thinking=True, ephemeral=True)
         desc: str = self.svc.describe()
         await safe_send(
