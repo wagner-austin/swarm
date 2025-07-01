@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from bot.core.settings import settings
 
@@ -41,6 +41,13 @@ def validate_and_normalise_web_url(raw: str, *, allowed_hosts: Iterable[str] | N
     allow = list(allowed_hosts) if allowed_hosts is not None else list(settings.allowed_hosts)
     if allow and "*" not in allow and host.lower() not in {h.lower() for h in allow}:
         raise ValueError(f"Navigation to '{host}' is not permitted by configuration")
+
+    # 3) Normalise host casing in the URL we return so callers work with the
+    #    validated, lower-case representation and cannot later bypass the
+    #    allow-list by using a mixed-case hostname.
+    if parsed.netloc != (lc_netloc := parsed.netloc.lower()):
+        parsed = parsed._replace(netloc=lc_netloc)
+        url = urlunparse(parsed)
 
     return url
 

@@ -67,7 +67,8 @@ class Web(
                     f"🟢 Started browser and navigated to **{processed_url}**",
                 )
             except ValueError as e:
-                await interaction.response.send_message(
+                await self.safe_send(
+                    interaction,
                     f"❌ Invalid URL: {e}. Please include a scheme (e.g., http:// or https://).",
                     ephemeral=True,
                 )
@@ -87,7 +88,8 @@ class Web(
             processed_url = self.validate_url(url)
             return ("goto", (processed_url,), f"🟢 Navigated to **{processed_url}**")
         except ValueError as e:
-            await interaction.response.send_message(
+            await self.safe_send(
+                interaction,
                 f"❌ Invalid URL: {e}. Please include a scheme (e.g., http:// or https://).",
                 ephemeral=True,
             )

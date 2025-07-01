@@ -97,22 +97,14 @@ async def test_web_start_command_invalid_url(dummy_bot: MagicMock, interaction: 
     # Assert validate_url was called and raised ValueError
     mock_validate_url.assert_called_once_with("not-a-url")
 
-    # Assert interaction.response.send_message was called directly (error case)
-    assert interaction.response.send_message.await_count > 0
+    # Assert our injected safe_send helper was called to send the error message
+    mock_safe_send.assert_awaited_once()
+    args, kwargs = mock_safe_send.call_args
+    assert "Invalid URL" in args[1]
+    assert kwargs.get("ephemeral") is True
 
-    # Get the call arguments - they could be positional or keyword
-    call_args, call_kwargs = interaction.response.send_message.call_args
-
-    # Check for content in either positional args or keyword args
-    if call_args:
-        content = call_args[0]  # First positional arg should be content
-    else:
-        content = call_kwargs.get("content", "")
-
-    assert "Invalid URL" in content
-
-    # Check ephemeral flag in kwargs
-    assert call_kwargs.get("ephemeral") is True
+    # Ensure no direct interaction.response.send_message bypass occurred
+    interaction.response.send_message.assert_not_called()
 
     # Assert browser runtime was NOT called in error case
     mock_browser_runtime.enqueue.assert_not_called()
