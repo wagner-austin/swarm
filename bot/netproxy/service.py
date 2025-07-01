@@ -67,6 +67,8 @@ class ProxyService(ServiceABC):
         create_task_fn: Callable[[Any], asyncio.Task[Any]] = asyncio.create_task,
         sleep_fn: Callable[[float], Any] = asyncio.sleep,
         dump_master_factory: Callable[[Any], Any] | None = None,
+        logger: logging.Logger | None = None,
+        subprocess_factory: Callable[..., Any] | None = None,
     ):
         self._default_port = port
         self.port = port
@@ -88,6 +90,14 @@ class ProxyService(ServiceABC):
         self._create_task_fn = create_task_fn
         self._sleep_fn = sleep_fn
         self._dump_master_factory: Callable[[Any], Any] = dump_master_factory
+
+        # Dependency-injected logger and subprocess factory
+        self._logger: logging.Logger = logger or logging.getLogger(__name__)
+        if subprocess_factory is None:
+            import asyncio
+
+            subprocess_factory = asyncio.create_subprocess_exec
+        self._subprocess_factory = subprocess_factory
 
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
@@ -201,12 +211,12 @@ class ProxyService(ServiceABC):
 
         # Check if proxy is not running but may have been started before
         if not self._dump:
-            logger.info("ProxyService: No active mitmproxy instance to stop.")
+            self._logger.info("ProxyService: No active mitmproxy instance to stop.")
             self._task = None
             self.port = self._default_port
             return
 
-        logger.info("ProxyService: Shutting down mitmproxy.")
+        self._logger.info("ProxyService: Shutting down mitmproxy.")
         assert self._dump is not None  # Ensured by the checks above
         self._dump.shutdown()  # type: ignore[no-untyped-call] # tell mitmproxy to stop
         if self._task:
@@ -216,17 +226,17 @@ class ProxyService(ServiceABC):
                     # wait up to 3 s so the OS definitely releases the socket
                     await asyncio.wait_for(self._task, timeout=3)
                 except asyncio.CancelledError:
-                    logger.info("ProxyService: mitmproxy task cancelled as expected.")
+                    self._logger.info("ProxyService: mitmproxy task cancelled as expected.")
                     # pass # Expected, no specific action needed beyond logging
                 except Exception as e:  # Catch other errors during await
-                    logger.error(
+                    self._logger.error(
                         f"ProxyService: Error awaiting mitmproxy task after cancellation: {e}"
                     )
             elif self._task.exception():  # If task is done and has an exception, log it
                 try:
                     self._task.result()  # This will re-raise the exception
                 except Exception as e:
-                    logger.error(
+                    self._logger.error(
                         f"ProxyService: mitmproxy task had already finished with an error: {e}"
                     )
             # If task is done without exception, it's fine.
@@ -237,13 +247,13 @@ class ProxyService(ServiceABC):
         # reset to the *original* preferred port so the next call to start()
         # tries the same number first (nice for humans, harmless for tests).
         self.port = self._default_port
-        logger.info("ProxyService: mitmproxy stopped.")
+        self._logger.info("ProxyService: mitmproxy stopped.")
 
         # Stop game engine
         try:
             await self._engine.stop()
         except Exception as exc:
-            logger.warning("ProxyService: engine stop raised %s", exc)
+            self._logger.warning("ProxyService: engine stop raised %s", exc)
 
     # convenience helper for unit tests
     def is_running(self) -> bool:
@@ -275,10 +285,10 @@ class ProxyService(ServiceABC):
         """Gracefully stop the mitmproxy service.
         This method ensures that the existing stop() logic is awaited.
         """
-        logger.info("ProxyService: aclose() called. Initiating shutdown via stop().")
+        self._logger.info("ProxyService: aclose() called. Initiating shutdown via stop().")
         await self.stop()
 
-        logger.info("ProxyService: aclose() completed.")
+        self._logger.info("ProxyService: aclose() completed.")
 
 
 # ------------------------------------------------------------------
