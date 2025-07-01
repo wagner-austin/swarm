@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from bot.utils.discord_interactions import safe_send
+from bot.utils.discord_owner import get_owner
 
 _VALID_LEVELS: tuple[str, ...] = (
     "DEBUG",
@@ -41,16 +42,13 @@ class LoggingAdmin(commands.Cog):
         """Show or change the root log level at runtime (owner-only)."""
 
         # Only the bot owner may adjust log levels.
-        # Resolve owner dynamically if not cached
-        owner_id = self.bot.owner_id
-        if owner_id is None:
-            try:
-                app_owner = (await self.bot.application_info()).owner
-                owner_id = app_owner.id if app_owner else None
-            except Exception:
-                owner_id = None
+        try:
+            owner = await get_owner(self.bot)
+        except RuntimeError:
+            await safe_send(interaction, "❌ Could not resolve bot owner.", ephemeral=True)
+            return
 
-        if owner_id is None or interaction.user.id != owner_id:
+        if interaction.user.id != owner.id:
             await safe_send(
                 interaction, "❌ Only the bot owner can use this command.", ephemeral=True
             )

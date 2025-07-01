@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bot.plugins.commands.alert_pump import AlertPump
+from bot.utils.discord_owner import clear_owner_cache
 
 
 @pytest.fixture
@@ -17,6 +18,16 @@ def mock_bot() -> MagicMock:
     bot.is_closed.return_value = False
     bot.lifecycle = MagicMock()
     bot.lifecycle.alerts_q = MagicMock()
+
+    # Mock the async methods that get_owner depends on
+    from discord import Object
+
+    bot.fetch_user = AsyncMock()
+    bot.fetch_user.return_value = Object(id=123)
+
+    bot.application_info = AsyncMock()
+    bot.application_info.return_value.owner = Object(id=123)
+
     return bot
 
 
@@ -27,6 +38,9 @@ def alert_pump_cog(mock_bot: MagicMock) -> AlertPump:
 
 @pytest.mark.asyncio
 async def test_cog_load_and_unload(alert_pump_cog: AlertPump, mock_bot: MagicMock) -> None:
+    # Clear owner cache for test isolation
+    clear_owner_cache()
+
     # Test that cog_load sets up the relay task and sends the startup embed
     with patch.object(
         alert_pump_cog, "_send_dm_with_retry", new_callable=AsyncMock

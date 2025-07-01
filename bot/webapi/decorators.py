@@ -21,6 +21,7 @@ from discord.ext import commands
 
 from bot.core.settings import settings
 from bot.utils.discord_interactions import safe_defer, safe_send
+from bot.utils.discord_owner import get_owner
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,15 @@ def read_only_guard() -> Callable[[Callable[..., Coroutine[Any, Any, Any]]], Any
             return True
 
         client = inter.client
-        is_owner = isinstance(client, commands.Bot) and await client.is_owner(inter.user)
+        if not isinstance(client, commands.Bot):
+            return False  # Not a bot context, cannot resolve owner
+
+        try:
+            owner = await get_owner(client)
+            is_owner = inter.user.id == owner.id
+        except RuntimeError:
+            is_owner = False
+
         is_admin = (
             isinstance(inter.user, discord.Member) and inter.user.guild_permissions.administrator
         )

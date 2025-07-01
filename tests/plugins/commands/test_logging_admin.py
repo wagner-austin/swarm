@@ -8,6 +8,7 @@ import pytest
 from discord import Object
 
 from bot.plugins.commands.logging_admin import LoggingAdmin
+from bot.utils.discord_owner import clear_owner_cache
 
 
 @pytest.fixture
@@ -15,8 +16,14 @@ def mock_bot() -> MagicMock:
     """Fixture for a mock bot instance."""
     bot = MagicMock()
     bot.owner_id = 12345
+
+    # Mock the async methods that get_owner depends on
+    bot.fetch_user = AsyncMock()
+    bot.fetch_user.return_value = Object(id=12345)
+
     bot.application_info = AsyncMock()
     bot.application_info.return_value.owner = Object(id=12345)
+
     return bot
 
 
@@ -34,6 +41,9 @@ async def test_loglevel_get_as_owner(
     mock_bot: MagicMock,
 ) -> None:
     """Test that the owner can get the current log level."""
+    # Clear owner cache for test isolation
+    clear_owner_cache()
+
     # Arrange
     mock_interaction = MagicMock()
     mock_interaction.user.id = mock_bot.owner_id
@@ -67,6 +77,9 @@ async def test_loglevel_set_valid_as_owner(
     mock_bot: MagicMock,
 ) -> None:
     """Test that the owner can set a valid log level."""
+    # Clear owner cache for test isolation
+    clear_owner_cache()
+
     # Arrange
     mock_interaction = MagicMock()
     mock_interaction.user.id = mock_bot.owner_id
@@ -98,6 +111,9 @@ async def test_loglevel_as_non_owner(
     mock_safe_send: AsyncMock, logging_admin_cog: LoggingAdmin
 ) -> None:
     """Test that a non-owner cannot use the loglevel command."""
+    # Clear owner cache for test isolation
+    clear_owner_cache()
+
     # Arrange
     mock_interaction = MagicMock()
     mock_interaction.user.id = 99999  # Not the owner

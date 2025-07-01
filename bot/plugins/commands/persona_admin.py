@@ -28,6 +28,8 @@ from bot.ai.personas import (  # noqa: F401 – re-export for tests
     Persona,
     _load as _reload,  # helper to (re)load from YAML
 )
+from bot.utils.discord_interactions import safe_send
+from bot.utils.discord_owner import get_owner
 
 __all__ = ["PersonaAdmin"]
 
@@ -172,8 +174,14 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
         """
 
         # Permission gate – owners only
-        if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
+        try:
+            owner = await get_owner(self.bot)
+        except RuntimeError:
+            await safe_send(interaction, "❌ Could not resolve bot owner.", ephemeral=True)
+            return
+
+        if interaction.user.id != owner.id:
+            await safe_send(interaction, "❌ Owner only.", ephemeral=True)
             return
 
         raw: bytes = await attachment.read()
