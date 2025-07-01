@@ -1,48 +1,34 @@
 """
-Package bootstrap **plus** a tiny Windows shim that quells the
-`PytestUnraisableExceptionWarning: unclosed transport _ProactorBasePipeTransport`
-shown at the end of the test‑suite on Windows/PyPI Python >= 3.11.
+Package bootstrap and startup patch importer.
 
-We do **not** silence the warning with a filter (which would mask real leaks),
-but instead patch the offending `__repr__` so that the transport's garbage
-collector finaliser no longer raises when the underlying pipe is already
-closed – the same approach used by CPython's own `asyncio` in 3.14 dev.
+This module applies startup-time patches to suppress benign warnings during
+interpreter shutdown. It also re-exports key sub-modules to make them
+accessible under the `bot` namespace.
 """
 
 from __future__ import annotations
 
 from importlib import import_module
 from types import ModuleType
-from typing import List
-
-# ------------------------------------------------------------------+
-#  Windows asyncio transport fixes                                  +
-# ------------------------------------------------------------------+
-
-try:
-    # Import **once**; the module monkey-patches asyncio at import time
-    if __import__("sys").platform.startswith("win"):
-        import bot.compat.win_asyncio  # noqa: F401  (side-effects only)
-except Exception:  # pragma: no cover
-    # Safe fallback – bot still works on non-Windows or stub changes
-    pass
 
 # ---------------------------------------------------------------------------+
-#  Re‑export public sub‑modules                                              +
+#  Apply shutdown-hygiene patches                                           +
+# ---------------------------------------------------------------------------+
+# Import once on startup to patch stdlib and third-party libraries.
+# This module is safe to import on any platform and with any dependency set,
+# as it internally handles platform-specific logic and optional dependencies.
+try:
+    import bot.compat.shutdown_hygiene  # noqa: F401
+except Exception:  # pragma: no cover
+    # This should not happen, but as a safeguard, we don't want to crash.
+    pass
+
+
+# ---------------------------------------------------------------------------+
+#  Re-export public sub-modules                                              +
 # ---------------------------------------------------------------------------+
 
 __all__: list[str] = []
-
-# ------------------------------------------------------------------+
-#  Aiohttp shutdown patch                                           +
-# ------------------------------------------------------------------+
-try:
-    import bot.compat.aiohttp_shutdown  # noqa: F401  (side-effects only)
-except SystemExit:
-    # aiohttp missing – e.g. stripped test env – safe to ignore
-    pass
-except Exception:  # pragma: no cover
-    pass
 
 for _name in ["core.logger_setup"]:
     mod: ModuleType = import_module(f".{_name}", __name__)
