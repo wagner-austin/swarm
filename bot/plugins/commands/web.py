@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from typing import Any, Callable
 
 import discord
 from discord import app_commands
@@ -13,9 +14,9 @@ from discord.ext.commands import Bot
 from bot.browser.runtime import BrowserRuntime
 from bot.plugins.base_di import BaseDIClientCog
 from bot.plugins.commands.decorators import background_app_command
-from bot.utils.discord_interactions import safe_defer, safe_send
-from bot.utils.urls import validate_and_normalise_web_url
+from bot.utils.discord_interactions import safe_defer
 
+# safe_send and validate_and_normalise_web_url are injected for testability
 # Import centralised Discord interaction helpers
 from bot.webapi.decorators import (
     CommandResult,
@@ -30,10 +31,25 @@ logger = logging.getLogger(__name__)
 class Web(
     BaseDIClientCog, commands.GroupCog, name="web", description="Control a web browser instance."
 ):
-    def __init__(self, bot: Bot) -> None:
+    def __init__(
+        self,
+        bot: Bot,
+        browser_runtime: BrowserRuntime | None = None,
+        safe_send_func: Callable[..., Any] | None = None,
+        validate_url_func: Callable[[str], str] | None = None,
+    ) -> None:
         BaseDIClientCog.__init__(self, bot)
         self.bot = bot
-        self.runtime: BrowserRuntime = self.container.browser_runtime()
+        self.runtime: BrowserRuntime = (
+            browser_runtime if browser_runtime is not None else self.container.browser_runtime()
+        )
+        from bot.utils.discord_interactions import safe_send as default_safe_send
+        from bot.utils.urls import validate_and_normalise_web_url as default_validate_url
+
+        self.safe_send = safe_send_func if safe_send_func is not None else default_safe_send
+        self.validate_url = (
+            validate_url_func if validate_url_func is not None else default_validate_url
+        )
 
     @app_commands.command(name="start", description="Start a browser session with an optional URL.")
     @app_commands.describe(url="Optional URL to navigate to.")
@@ -44,7 +60,7 @@ class Web(
         """Open a new browser page and optionally navigate to the specified URL."""
         if url:
             try:
-                processed_url = validate_and_normalise_web_url(url)
+                processed_url = self.validate_url(url)
                 return (
                     "goto",
                     (processed_url,),
@@ -68,7 +84,7 @@ class Web(
     async def open(self, interaction: discord.Interaction, url: str) -> CommandResult | None:
         """Navigates the current browser to the specified URL."""
         try:
-            processed_url = validate_and_normalise_web_url(url)
+            processed_url = self.validate_url(url)
             return ("goto", (processed_url,), f"🟢 Navigated to **{processed_url}**")
         except ValueError as e:
             await interaction.response.send_message(
@@ -127,18 +143,18 @@ class Web(
                 cmd_future = await self.runtime.enqueue(chan, "screenshot", screenshot_path)
                 await cmd_future  # ensures the file has been written
                 if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
-                    await safe_send(
+                    await self.safe_send(
                         interaction,
                         "✔️ Screenshot captured:",
                         file=discord.File(screenshot_path, filename=actual_filename),
                     )
                 else:
-                    await safe_send(
+                    await self.safe_send(
                         interaction,
                         "❌ Failed to capture screenshot (empty or missing file).",
                     )
             except Exception as e:
-                await safe_send(
+                await self.safe_send(
                     interaction,
                     f"❌ Error sending screenshot: {e}",
                 )
@@ -191,7 +207,7 @@ class Web(
 
         # Display status information
         if not rows:
-            await safe_send(interaction, "No active browser workers.", ephemeral=True)
+            await self.safe_send(interaction, "No active browser workers.", ephemeral=True)
             return
 
         embed = discord.Embed(title="Browser Workers Status")
@@ -202,7 +218,7 @@ class Web(
                 value=(f"📂 **Queue** {r['queue']}\n{status_emoji}\n"),
                 inline=False,
             )
-        await safe_send(interaction, embed=embed, ephemeral=True)
+        await self.safe_send(interaction, embed=embed, ephemeral=True)
 
     @app_commands.command(name="close", description="Close the browser for this channel")
     @browser_mutating(queued=False, defer_ephemeral=False)
@@ -215,7 +231,7 @@ class Web(
         # First check if a browser exists for this channel
         rows = [r for r in self.runtime.status() if r["channel"] == chan]
         if not rows:
-            await safe_send(
+            await self.safe_send(
                 interaction,
                 "No browser running for this channel.",
                 ephemeral=True,
@@ -225,9 +241,9 @@ class Web(
         try:
             # Close the browser for this channel
             await self.runtime.close_channel(chan)
-            await safe_send(interaction, "✅ Browser closed successfully.", ephemeral=True)
+            await self.safe_send(interaction, "✅ Browser closed successfully.", ephemeral=True)
         except Exception as exc:
-            await safe_send(
+            await self.safe_send(
                 interaction,
                 f"❌ Error closing browser: {type(exc).__name__}: {exc}",
                 ephemeral=True,
@@ -244,7 +260,7 @@ class Web(
         # Check if there are any active browsers
         rows = self.runtime.status()
         if not rows:
-            await safe_send(
+            await self.safe_send(
                 interaction,
                 "No active browser instances to close.",
                 ephemeral=True,
@@ -254,13 +270,13 @@ class Web(
         try:
             # Close all browsers
             await self.runtime.close_all()
-            await safe_send(
+            await self.safe_send(
                 interaction,
                 f"✅ Successfully closed {len(rows)} browser instance(s).",
                 ephemeral=True,
             )
         except Exception as exc:
-            await safe_send(
+            await self.safe_send(
                 interaction,
                 f"❌ Error closing browsers: {type(exc).__name__}: {exc}",
                 ephemeral=True,
