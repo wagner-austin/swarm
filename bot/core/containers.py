@@ -94,10 +94,20 @@ class Container(containers.DeclarativeContainer):
     # MetricsTracker cog factory with DI
     from bot.plugins.commands.metrics_tracker import MetricsTracker
 
-    metrics_tracker = providers.Factory(
+    metrics_tracker_cog = providers.Factory(
         MetricsTracker,
         metrics=metrics_helper,
     )
+
+    # LoggingAdmin cog factory
+    from bot.plugins.commands.logging_admin import LoggingAdmin
+
+    logging_admin_cog = providers.Factory(LoggingAdmin)
+
+    # PersonaAdmin cog factory
+    from bot.plugins.commands.persona_admin import PersonaAdmin
+
+    persona_admin_cog = providers.Factory(PersonaAdmin)
 
     # Browser runtime – one process-wide instance wired through DI
     browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(

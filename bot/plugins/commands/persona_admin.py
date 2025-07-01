@@ -197,9 +197,3 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
         # hot reload – merge secrets last
         PERSONALITIES.update(data)
         await interaction.response.send_message("Secret personas imported 👍", ephemeral=True)
-
-
-async def setup(bot: commands.Bot) -> None:  # mandated signature
-    """Set up the persona_admin extension for discord.py."""
-
-    await bot.add_cog(PersonaAdmin(bot))

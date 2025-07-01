@@ -89,7 +89,3 @@ class LoggingAdmin(commands.Cog):
             colour=discord.Colour.orange(),
         )
         await safe_send(interaction, embed=embed_ok, ephemeral=True)
-
-
-async def setup(bot: commands.Bot) -> None:  # discord.py extension entry-point
-    await bot.add_cog(LoggingAdmin(bot))
