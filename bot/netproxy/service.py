@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from types import TracebackType
 from typing import (
     Any,
     Callable,
@@ -61,12 +62,32 @@ class ProxyService(ServiceABC):
             [asyncio.Queue[tuple[str, bytes]], asyncio.Queue[bytes]], GameEngine
         ]
         | None = None,
+        queue_pair_fn: Callable[[str], tuple[asyncio.Queue[Any], asyncio.Queue[Any]]] = new_pair,
+        pick_free_port_fn: Callable[[int], Any] | None = None,
+        create_task_fn: Callable[[Any], asyncio.Task[Any]] = asyncio.create_task,
+        sleep_fn: Callable[[float], Any] = asyncio.sleep,
+        dump_master_factory: Callable[[Any], Any] | None = None,
     ):
         self._default_port = port
         self.port = port
         self.certdir = certdir or Path(".mitm_certs")
         # Centralised helper returns bounded queues sized per settings.queues
-        self.in_q, self.out_q = new_pair("proxy")
+        self.in_q, self.out_q = queue_pair_fn("proxy")
+
+        # Injected helpers for testability
+        if pick_free_port_fn is None:
+            from bot.utils.net import pick_free_port as _pick_free_port
+
+            pick_free_port_fn = _pick_free_port
+        if dump_master_factory is None:
+
+            def dump_master_factory(opts: Any) -> DumpMaster:
+                return DumpMaster(opts, with_termlog=False, with_dumper=False)
+
+        self._pick_free_port_fn = pick_free_port_fn
+        self._create_task_fn = create_task_fn
+        self._sleep_fn = sleep_fn
+        self._dump_master_factory: Callable[[Any], Any] = dump_master_factory
 
         self._dump: DumpMaster | None = None
         self._task: asyncio.Future[None] | None = None
@@ -86,15 +107,12 @@ class ProxyService(ServiceABC):
     async def start(self) -> None:
         if self._dump:
             return
-        # Always delegate to utils.net – single source of truth
-        from bot.utils.net import pick_free_port
-
-        self.port = await pick_free_port(self.port)
+        # Pick a free port via injected helper
+        self.port = await self._pick_free_port_fn(self.port)
 
         opts = options.Options(
             listen_host="127.0.0.1",
             listen_port=self.port,
-            confdir=str(self.certdir),
         )
         # Ignore *all* loop-back traffic so any localhost service bypasses the proxy.
         LOOPBACK_RE: str = r"^(localhost|127\.0\.0\.1)(:\d+)?$"
@@ -106,35 +124,71 @@ class ProxyService(ServiceABC):
         # prevent duplicate log lines once our own logging is configured.
         # Both flags default to True; overriding keeps proxy functionality but
         # stops extra StreamHandlers from being attached to the root logger.
-        self._dump = DumpMaster(opts, with_termlog=False, with_dumper=False)
+
+        # ------------------------------------------------------------------
+        # Create DumpMaster – factory may be sync or async
+        # ------------------------------------------------------------------
+        try:
+            dump_candidate = self._dump_master_factory(opts)
+            if asyncio.iscoroutine(dump_candidate):
+                dump_candidate = await dump_candidate
+            self._dump = dump_candidate
+        except Exception:
+            # If factory fails, ensure state is clean before propagating
+            self._dump = None
+            raise
 
         # mitmproxy <9 needs explicit server objects
         if ProxyConfig is not None and ProxyServer is not None:
             pconf = ProxyConfig(opts)
-            # .server is missing in type stubs
             cast(Any, self._dump).server = ProxyServer(pconf)
-        # mitmproxy 9/10: DumpMaster listens automatically
-        # wire addons
+
         for addon in self._addons:
             instance = addon(self.in_q, self.out_q) if isinstance(addon, type) else addon
-            self._dump.addons.add(instance)  # type: ignore[no-untyped-call]
+            self._dump.addons.add(instance)
         # Kick-off the game engine
         await self._engine.start()
 
         # Ensure the certdir exists
         self.certdir.mkdir(parents=True, exist_ok=True)
         # run mitmproxy in the background
+        run_coro = None
+        task_created = False
         try:
-            self._task = asyncio.create_task(self._dump.run())  # spawn the coroutine
-            await asyncio.sleep(0)  # let it start; surfaces import errors fast
+            run_coro = self._dump.run()  # create coroutine object
+            self._task = self._create_task_fn(run_coro)  # schedule task
+            task_created = True
+            await self._sleep_fn(0)  # let it start; surfaces import errors fast
             logger.info(
                 f"ProxyService: mitmproxy task created, listening on http://127.0.0.1:{self.port}"
             )
         except Exception:
-            self._task = None  # Ensure task is None if startup fails
-            if self._dump:  # Check if dump was initialized
-                self._dump.shutdown()  # type: ignore[no-untyped-call] # Attempt to shutdown dump master
-            raise  # Re-raise the exception so the caller knows startup failed
+            # ------------------------------------------------------------------
+            # Roll-back on *any* failure during startup so tests see clean state
+            # ------------------------------------------------------------------
+            if self._task and not self._task.done():
+                self._task.cancel()
+            self._task = None
+
+            # Close the coroutine to suppress "never awaited" warnings
+            if run_coro is not None:
+                try:
+                    run_coro.close()
+                except Exception:
+                    pass
+
+            # Only shutdown dump if task was successfully created and might be running
+            if self._dump is not None and task_created:
+                try:
+                    self._dump.shutdown()
+                except Exception:
+                    pass
+            # Always clear dump on failure since service is not running
+            self._dump = None
+
+            # Reset port so subsequent starts reuse the preferred port
+            self.port = self._default_port
+            raise  # Propagate to caller so they can handle failure
         return
 
     # _pick_free_port and _is_port_free are now in bot.utils.net
