@@ -189,7 +189,3 @@ class AlertPump(commands.Cog):
                 MAX_RETRY_ATTEMPTS,
                 exc,
             )
-
-
-async def setup(bot: commands.Bot) -> None:  # discord.py extension entry-point
-    await bot.add_cog(AlertPump(bot))
