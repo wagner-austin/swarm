@@ -139,8 +139,11 @@ class BotLifecycle:
         # AlertPump
         alert_pump_cog = self._container.alert_pump_cog()
         await self._bot.add_cog(alert_pump_cog)
+        # Chat
+        chat_cog = self._container.chat_cog()
+        await self._bot.add_cog(chat_cog)
         logger.info(
-            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump."
+            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Chat."
         )
 
         # --- Standard Cogs --- #
@@ -157,6 +160,7 @@ class BotLifecycle:
             "persona_admin",
             "about",
             "alert_pump",
+            "chat",
         ]
         failed: list[str] = []
 
@@ -166,6 +170,7 @@ class BotLifecycle:
             "persona_admin",
             "about",
             "alert_pump",
+            "chat",
         }
         for ext_name in extensions_to_load:
             # DI-managed cogs are loaded above, so we skip them here

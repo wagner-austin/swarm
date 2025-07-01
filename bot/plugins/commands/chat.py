@@ -227,18 +227,3 @@ class Chat(commands.Cog):
     # ------------------------------------------------------------------
     # /chat round-table
     # ------------------------------------------------------------------
-
-
-async def setup(bot: commands.Bot) -> None:
-    """Load the Chat cog, resolving the history backend from the DI container.
-
-    Falls back to the in-memory backend if the container is not wired or
-    mis-configured so the bot can still start in development.
-    """
-    backend = None
-    if hasattr(bot, "container"):
-        try:
-            backend = bot.container.history_backend()
-        except Exception:  # pragma: no cover – mis-configuration should not kill bot
-            backend = None
-    await bot.add_cog(Chat(bot, backend))
