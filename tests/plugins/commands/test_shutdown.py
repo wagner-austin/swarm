@@ -36,18 +36,23 @@ async def test_shutdown_owner_success(
     mock_metrics.format_hms.return_value = "1:00:00"
     mock_get_owner = AsyncMock(return_value=MagicMock(id=12345))
     mock_safe_send = AsyncMock()
+    mock_lifecycle = MagicMock()
+    mock_lifecycle.shutdown = AsyncMock()
     cog = Shutdown(
         dummy_bot,
         metrics_mod=mock_metrics,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
+        lifecycle=mock_lifecycle,
     )
     await cog._shutdown_impl(interaction)
     mock_safe_send.assert_any_call(interaction, "📴 Shutting down…")
     # Should send embed with stats
     assert mock_safe_send.call_args_list[-1][1]["embed"].title == "Shutdown complete"
-    # Bot close should be called
-    assert interaction.client.close.await_count == 1
+    # Lifecycle shutdown should be called
+    mock_lifecycle.shutdown.assert_awaited_once_with(signal_name="command")
+    # Bot close should NOT be called directly
+    assert interaction.client.close.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -56,13 +61,18 @@ async def test_shutdown_not_owner(
 ) -> None:
     mock_get_owner = AsyncMock(return_value=MagicMock(id=99999))
     mock_safe_send = AsyncMock()
+    mock_lifecycle = MagicMock()
+    mock_lifecycle.shutdown = AsyncMock()
     cog = Shutdown(
         dummy_bot,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
+        lifecycle=mock_lifecycle,
     )
     await cog._shutdown_impl(interaction)
     mock_safe_send.assert_awaited_with(interaction, "❌ Owner only.", ephemeral=True)
+    # Lifecycle shutdown should not be called
+    mock_lifecycle.shutdown.assert_not_awaited()
     # Bot close should not be called
     assert not interaction.client.close.await_count
 
@@ -73,13 +83,17 @@ async def test_shutdown_owner_lookup_failure(
 ) -> None:
     mock_get_owner = AsyncMock(side_effect=RuntimeError)
     mock_safe_send = AsyncMock()
+    mock_lifecycle = MagicMock()
+    mock_lifecycle.shutdown = AsyncMock()
     cog = Shutdown(
         dummy_bot,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
+        lifecycle=mock_lifecycle,
     )
     await cog._shutdown_impl(interaction)
     mock_safe_send.assert_awaited_with(
         interaction, "❌ Could not resolve bot owner.", ephemeral=True
     )
+    mock_lifecycle.shutdown.assert_not_awaited()
     assert not interaction.client.close.await_count

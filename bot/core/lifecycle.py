@@ -139,16 +139,22 @@ class BotLifecycle:
         # AlertPump
         alert_pump_cog = self._container.alert_pump_cog(bot=self._bot)
         await self._bot.add_cog(alert_pump_cog)
+        # Status (DI-managed)
+        status_cog = self._container.status_cog(bot=self._bot)
+        await self._bot.add_cog(status_cog)
         # Chat
         chat_cog = self._container.chat_cog(bot=self._bot)
         await self._bot.add_cog(chat_cog)
+        # Shutdown (DI-managed)
+        shutdown_cog = self._container.shutdown_cog(bot=self._bot, lifecycle=self)
+        await self._bot.add_cog(shutdown_cog)
         logger.info(
-            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Chat."
+            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Shutdown."
         )
 
         # --- Standard Cogs --- #
         # Use an allow-list to control which standard cogs are loaded.
-        keep = {"browser", "chat", "help", "proxy", "status", "shutdown"}
+        keep = {"browser", "chat", "help", "proxy"}
         discovered_extensions = list(iter_submodules("bot.plugins"))
         extensions_to_load = [
             ext for ext in discovered_extensions if ext.rsplit(".", 1)[-1] in keep
@@ -160,7 +166,9 @@ class BotLifecycle:
             "persona_admin",
             "about",
             "alert_pump",
+            "status",
             "chat",
+            "shutdown",
         ]
         failed: list[str] = []
 
@@ -170,7 +178,9 @@ class BotLifecycle:
             "persona_admin",
             "about",
             "alert_pump",
+            "status",
             "chat",
+            "shutdown",
         }
         for ext_name in extensions_to_load:
             # DI-managed cogs are loaded above, so we skip them here
