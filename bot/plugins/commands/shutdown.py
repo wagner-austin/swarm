@@ -1,42 +1,63 @@
 import asyncio
+from typing import Any, Callable, Protocol
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from bot.browser.runtime import BrowserRuntime
-from bot.core import metrics
 from bot.plugins.base_di import BaseDIClientCog
 from bot.utils.discord_interactions import safe_send
 from bot.utils.discord_owner import get_owner
 
 
+class MetricsProtocol(Protocol):
+    def get_stats(self) -> dict[str, Any]: ...
+    def format_hms(self, seconds: float) -> str: ...
+
+
 class Shutdown(BaseDIClientCog):
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(
+        self,
+        bot: commands.Bot,
+        metrics_mod: MetricsProtocol | None = None,
+        get_owner_func: Callable[[commands.Bot], Any] | None = None,
+        safe_send_func: Callable[..., Any] | None = None,
+    ) -> None:
         BaseDIClientCog.__init__(self, bot)
         self.bot = bot
+        # Allow DI for testing
+        import bot.core.metrics as default_metrics
+        from bot.utils.discord_interactions import safe_send as default_safe_send
+        from bot.utils.discord_owner import get_owner as default_get_owner
+
+        self.metrics = metrics_mod if metrics_mod is not None else default_metrics
+        self.get_owner = get_owner_func if get_owner_func is not None else default_get_owner
+        self.safe_send = safe_send_func if safe_send_func is not None else default_safe_send
 
     @app_commands.command(name="shutdown", description="Cleanly shut the bot down (owner only).")
     async def shutdown(self, interaction: discord.Interaction) -> None:
-        """Shut the bot down (owner-only)."""
+        await self._shutdown_impl(interaction)
+
+    async def _shutdown_impl(self, interaction: discord.Interaction) -> None:
         try:
-            owner = await get_owner(self.bot)
+            owner = await self.get_owner(self.bot)
         except RuntimeError:
-            await safe_send(interaction, "❌ Could not resolve bot owner.", ephemeral=True)
+            await self.safe_send(interaction, "❌ Could not resolve bot owner.", ephemeral=True)
             return
 
         if interaction.user.id != owner.id:
-            await safe_send(interaction, "❌ Owner only.", ephemeral=True)
+            await self.safe_send(interaction, "❌ Owner only.", ephemeral=True)
             return
-        await safe_send(interaction, "📴 Shutting down…")
+        await self.safe_send(interaction, "📴 Shutting down…")
 
         bot = interaction.client  # Get the bot instance
 
         # 1️⃣ Auxiliary services are shut down by the bot's lifecycle handler.
 
         # 2️⃣ gather stats & send final confirmation then logout
-        stats = metrics.get_stats()
-        uptime_hms = metrics.format_hms(stats["uptime_s"])
+        stats = self.metrics.get_stats()
+        uptime_hms = self.metrics.format_hms(stats["uptime_s"])
         uptime_hrs = f"{stats['uptime_s'] / 3600:.1f}"
         SPACER = " │ "
         embed = discord.Embed(
@@ -51,7 +72,7 @@ class Shutdown(BaseDIClientCog):
             ),
             inline=False,
         )
-        await safe_send(interaction, embed=embed, ephemeral=True)
+        await self.safe_send(interaction, embed=embed, ephemeral=True)
 
         await bot.close()
 
