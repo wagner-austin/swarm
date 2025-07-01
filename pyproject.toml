@@ -52,7 +52,11 @@ dev = [
   "types-requests",
   "types-psutil",     # ⇐ optional: stub package for mypy
   "pytest-env>=1.1",    # enable [pytest] env= option
+  "yamllint>=1.35.1"
 ]
+
+[tool.yamllint]
+# yamllint configuration can be added here if desired
 
 
 

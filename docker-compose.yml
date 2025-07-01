@@ -1,3 +1,4 @@
+---
 services:
   redis:
     image: redis:7
@@ -34,7 +35,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin  # change after first login
       # Keep Grafana output terse; WARN and above matches Loki & bot
       - GF_LOG_LEVEL=warn  # Reduce from default 'info' to 'warn'
-      - GF_LOG_FILTERS=tsdb.loki:warn  # Specifically reduce Loki data source logging
+      - GF_LOG_FILTERS=tsdb.loki:warn  # Reduce Loki data source logging
     depends_on:
       - prometheus
     healthcheck:
@@ -71,13 +72,21 @@ services:
     # Allow Alloy's non-root user to access the Docker socket
     group_add:
       - "${DOCKER_GID:-0}"
-    command: ["run", "/etc/alloy/config.river", "--server.http.listen-addr=0.0.0.0:12345"]
+    command:
+      - run
+      - /etc/alloy/config.river
+      - --server.http.listen-addr=0.0.0.0:12345
     ports:
       - "12345:12345"  # Alloy UI
     depends_on:
       - loki
     healthcheck:
-      test: ["CMD", "sh", "-c", "ps aux | grep -v grep | grep '/bin/alloy run' || exit 1"]
+      test:
+        - CMD
+        - sh
+        - -c
+        - |
+          ps aux | grep -v grep | grep '/bin/alloy run' || exit 1
       interval: 30s
       timeout: 5s
       retries: 3
@@ -103,7 +112,15 @@ services:
       - "9200:9200"      # Prometheus metrics
       - "5900:5900"      # VNC for browser viewing
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9200/metrics', timeout=5).getcode()==200 else 1)"]
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(
+            'http://localhost:9200/metrics', timeout=5
+          ).getcode() == 200 else 1)
       interval: 30s
       timeout: 5s
       retries: 3
