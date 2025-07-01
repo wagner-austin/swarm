@@ -133,7 +133,10 @@ class BotLifecycle:
         # PersonaAdmin
         persona_admin_cog = self._container.persona_admin_cog()
         await self._bot.add_cog(persona_admin_cog)
-        logger.info("📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin.")
+        # About
+        about_cog = self._container.about_cog()
+        await self._bot.add_cog(about_cog)
+        logger.info("📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About.")
 
         # --- Standard Cogs --- #
         # Use an allow-list to control which standard cogs are loaded.
@@ -143,10 +146,10 @@ class BotLifecycle:
             ext for ext in discovered_extensions if ext.rsplit(".", 1)[-1] in keep
         ]
 
-        loaded: list[str] = ["metrics_tracker", "logging_admin", "persona_admin"]
+        loaded: list[str] = ["metrics_tracker", "logging_admin", "persona_admin", "about"]
         failed: list[str] = []
 
-        di_cogs_to_skip = {"metrics_tracker", "logging_admin", "persona_admin"}
+        di_cogs_to_skip = {"metrics_tracker", "logging_admin", "persona_admin", "about"}
         for ext_name in extensions_to_load:
             # DI-managed cogs are loaded above, so we skip them here
             if any(di_cog in ext_name for di_cog in di_cogs_to_skip):

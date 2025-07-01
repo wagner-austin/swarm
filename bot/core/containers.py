@@ -109,6 +109,11 @@ class Container(containers.DeclarativeContainer):
 
     persona_admin_cog = providers.Factory(PersonaAdmin)
 
+    # About cog factory
+    from bot.plugins.commands.about import About
+
+    about_cog = providers.Factory(About)
+
     # Browser runtime – one process-wide instance wired through DI
     browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(
         BrowserRuntime,

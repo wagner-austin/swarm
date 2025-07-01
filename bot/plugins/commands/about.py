@@ -46,7 +46,3 @@ class About(commands.Cog):
         )
 
         await safe_send(interaction, embed=embed, ephemeral=True)
-
-
-async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(About(bot))
