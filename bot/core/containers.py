@@ -96,18 +96,19 @@ class Container(containers.DeclarativeContainer):
 
     metrics_tracker_cog = providers.Factory(
         MetricsTracker,
+        bot=providers.Dependency(),
         metrics=metrics_helper,
     )
 
     # LoggingAdmin cog factory
     from bot.plugins.commands.logging_admin import LoggingAdmin
 
-    logging_admin_cog = providers.Factory(LoggingAdmin)
+    logging_admin_cog = providers.Factory(LoggingAdmin, bot=providers.Dependency())
 
     # PersonaAdmin cog factory
     from bot.plugins.commands.persona_admin import PersonaAdmin
 
-    persona_admin_cog = providers.Factory(PersonaAdmin)
+    persona_admin_cog = providers.Factory(PersonaAdmin, bot=providers.Dependency())
 
     # About cog factory
     from bot.plugins.commands.about import About
@@ -117,12 +118,12 @@ class Container(containers.DeclarativeContainer):
     # AlertPump cog factory
     from bot.plugins.commands.alert_pump import AlertPump
 
-    alert_pump_cog = providers.Factory(AlertPump)
+    alert_pump_cog = providers.Factory(AlertPump, bot=providers.Dependency())
 
     # Chat cog factory
     from bot.plugins.commands.chat import Chat
 
-    chat_cog = providers.Factory(Chat, history_backend=history_backend)
+    chat_cog = providers.Factory(Chat, bot=providers.Dependency(), history_backend=history_backend)
 
     # Browser runtime – one process-wide instance wired through DI
     browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(

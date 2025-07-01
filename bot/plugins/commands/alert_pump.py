@@ -34,48 +34,41 @@ class AlertPump(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:  # noqa: D401 – simple description
         self.bot = bot
         self._task: asyncio.Task[None] | None = None
+        self._startup_alert_sent: bool = False
         # Alerts that could not be sent yet because the owner is unresolved.
         self._pending: list[str | discord.Embed] = []
 
     async def cog_load(self) -> None:  # Called by discord.py 2.3+
-        # Wait until bot is ready only if it's already logging in; avoid calling
-        # before the Client has been initialised which raises RuntimeError.
-        if hasattr(self.bot, "wait_until_ready"):
-            try:
-                if not self.bot.is_ready():
-                    await self.bot.wait_until_ready()
-            except RuntimeError:
-                # Client not yet initialised; we'll proceed and owner resolution
-                # will retry inside the relay loop once the bot is ready.
-                pass
         lifecycle = getattr(self.bot, "lifecycle", None)
         if lifecycle is None or not hasattr(lifecycle, "alerts_q"):
             logger.warning("AlertPump loaded but lifecycle.alerts_q not available – disabled")
             return  # cannot proceed without a queue
 
-        # At this point lifecycle is guaranteed to have 'alerts_q'
         q: asyncio.Queue[str] = cast("asyncio.Queue[str]", lifecycle.alerts_q)
+        loop = asyncio.get_running_loop()
+        self._task = loop.create_task(self._relay_loop(q))
 
-        # Prepare startup notification and try to send it. If the owner is not
-        # yet available, queue it for later delivery.
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Send startup message to owner once connected to Discord."""
+        if self._startup_alert_sent:
+            return  # Do not send on subsequent reconnects
+
         embed_online = discord.Embed(
             title="Bot online",
             description="✅ The bot has started and is now online.",
             colour=discord.Colour.green(),
         )
-        logger.info("AlertPump: queuing startup notification")
+        logger.info("AlertPump: sending startup notification")
         try:
             owner = await get_owner(self.bot)
-            logger.info("AlertPump: sending startup notification to owner %s", owner.id)
             await self._send_dm_with_retry(owner, content=None, embed=embed_online)
-            logger.info("AlertPump: startup notification sent successfully")
-        except RuntimeError:
-            # Owner not resolved yet – queue for first delivery pass
-            self._pending.append(embed_online)
-            logger.info("AlertPump: owner not resolved yet – startup message queued")
-
-        loop = asyncio.get_running_loop()
-        self._task = loop.create_task(self._relay_loop(q))
+            self._startup_alert_sent = True
+            logger.info("AlertPump: startup notification sent successfully to %s", owner.id)
+        except RuntimeError as e:
+            logger.error("AlertPump: could not resolve owner to send startup DM: %s", e)
+        except discord.HTTPException as e:
+            logger.error("AlertPump: failed to send startup DM: %s", e)
 
     async def cog_unload(self) -> None:
         if self._task and not self._task.done():
