@@ -15,6 +15,7 @@ import discord
 from discord.ext import commands
 
 from bot.utils.async_helpers import with_retries
+from bot.utils.discord_owner import get_owner
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,6 @@ class AlertPump(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:  # noqa: D401 – simple description
         self.bot = bot
         self._task: asyncio.Task[None] | None = None
-        self.owner: discord.User | None = None
         # Alerts that could not be sent yet because the owner is unresolved.
         self._pending: list[str | discord.Embed] = []
 
@@ -55,27 +55,21 @@ class AlertPump(commands.Cog):
 
         # At this point lifecycle is guaranteed to have 'alerts_q'
         q: asyncio.Queue[str] = cast("asyncio.Queue[str]", lifecycle.alerts_q)
-        owner_id = self.bot.owner_id
-        if owner_id is not None:
-            self.owner = self.bot.get_user(owner_id)
-        else:
-            self.owner = None
 
-        # Prepare startup notification
+        # Prepare startup notification and try to send it. If the owner is not
+        # yet available, queue it for later delivery.
         embed_online = discord.Embed(
             title="Bot online",
             description="✅ The bot has started and is now online.",
             colour=discord.Colour.green(),
         )
         logger.info("AlertPump: queuing startup notification")
-        if self.owner is not None:
-            logger.info(
-                "AlertPump: sending startup notification to owner %s",
-                getattr(self.owner, "id", "unknown"),
-            )
-            await self._send_dm_with_retry(self.owner, content=None, embed=embed_online)
+        try:
+            owner = await get_owner(self.bot)
+            logger.info("AlertPump: sending startup notification to owner %s", owner.id)
+            await self._send_dm_with_retry(owner, content=None, embed=embed_online)
             logger.info("AlertPump: startup notification sent successfully")
-        else:
+        except RuntimeError:
             # Owner not resolved yet – queue for first delivery pass
             self._pending.append(embed_online)
             logger.info("AlertPump: owner not resolved yet – startup message queued")
@@ -108,16 +102,10 @@ class AlertPump(commands.Cog):
             # No 'continue' above: we want to attempt delivery for any pending
             # alerts each time the loop wakes up, even if no new alert arrived.
             owner: discord.User | None = None
-            if self.bot.owner_id:
-                owner = self.bot.get_user(self.bot.owner_id)
-
-            if owner is None:
-                # Ensure application info has been fetched and owner cached
-                try:
-                    app_info = await self.bot.application_info()
-                    owner = app_info.owner
-                except Exception as exc:
-                    logger.error("Cannot resolve bot owner: %s", exc)
+            try:
+                owner = await get_owner(self.bot)
+            except RuntimeError as exc:
+                logger.debug("Could not resolve owner during relay loop pass: %s", exc)
 
             if owner is None:
                 # Owner still not available – keep messages in the _pending list

@@ -8,6 +8,7 @@ from bot.browser.runtime import BrowserRuntime
 from bot.core import metrics
 from bot.plugins.base_di import BaseDIClientCog
 from bot.utils.discord_interactions import safe_send
+from bot.utils.discord_owner import get_owner
 
 
 class Shutdown(BaseDIClientCog):
@@ -18,6 +19,15 @@ class Shutdown(BaseDIClientCog):
     @app_commands.command(name="shutdown", description="Cleanly shut the bot down (owner only).")
     async def shutdown(self, interaction: discord.Interaction) -> None:
         """Shut the bot down (owner-only)."""
+        try:
+            owner = await get_owner(self.bot)
+        except RuntimeError:
+            await safe_send(interaction, "❌ Could not resolve bot owner.", ephemeral=True)
+            return
+
+        if interaction.user.id != owner.id:
+            await safe_send(interaction, "❌ Owner only.", ephemeral=True)
+            return
         await safe_send(interaction, "📴 Shutting down…")
 
         bot = interaction.client  # Get the bot instance

@@ -63,7 +63,9 @@ class Chat(commands.Cog):
         # Handle clearing history first
         if clear:
             chan_id_clear: int = interaction.channel_id or 0
-            if personality is not None and not persona_visible(personality, interaction.user.id):
+            if personality is not None and not await persona_visible(
+                personality, interaction.user.id, self.bot
+            ):
                 await safe_send(
                     interaction,
                     "You are not allowed to use that persona.",
@@ -104,7 +106,9 @@ class Chat(commands.Cog):
             or 0
         )
 
-        if personality is not None and persona_visible(personality, interaction.user.id):
+        if personality is not None and await persona_visible(
+            personality, interaction.user.id, self.bot
+        ):
             # Explicit valid choice – remember it for this channel
             self._channel_persona[channel_id_int] = personality
         else:
@@ -115,7 +119,7 @@ class Chat(commands.Cog):
                 personality = "Default"
 
         # Visibility check
-        if not persona_visible(personality, interaction.user.id):
+        if not await persona_visible(personality, interaction.user.id, self.bot):
             await safe_send(interaction, "You are not allowed to use that persona.", ephemeral=True)
             return
 
@@ -214,15 +218,16 @@ class Chat(commands.Cog):
     async def personality_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        visible = [
-            app_commands.Choice(name=k.capitalize(), value=k)
-            for k in PERSONALITIES.keys()
-            if persona_visible(k, interaction.user.id)
-        ]
+        visible_choices = []
+        for k in PERSONALITIES:
+            if await persona_visible(k, interaction.user.id, self.bot):
+                visible_choices.append(app_commands.Choice(name=k.capitalize(), value=k))
+
         if not current:
-            return visible[:25]
+            return visible_choices[:25]
+
         lowered = current.lower()
-        return [c for c in visible if lowered in c.name.lower()][:25]
+        return [c for c in visible_choices if lowered in c.name.lower()][:25]
 
     # ------------------------------------------------------------------
     # /chat round-table

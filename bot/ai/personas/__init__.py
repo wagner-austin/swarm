@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 import yaml  # PyYAML (dev dependency already present)
+from discord.ext import commands
 
 from bot.core.settings import settings
 
@@ -92,9 +93,6 @@ def _load(fp: Path) -> dict[str, Persona]:
         return {}
 
     raw: str = fp.read_text("utf-8")
-    # interpolate owner ID placeholder – allow empty fallback so yaml parses
-    raw = raw.replace("${OWNER_ID}", str(settings.owner_id or ""))
-
     data: Any = yaml.safe_load(raw) or {}
     # ensure structure – mypy will validate below cast
     return _coerce(data)
@@ -122,8 +120,7 @@ def _populate(target: dict[str, Persona]) -> None:
     _secret_env: str | None = os.getenv("BOT_SECRET_PERSONAS")
     if _secret_env:
         try:
-            _env_raw: str = _secret_env.replace("${OWNER_ID}", str(settings.owner_id or ""))
-            target.update(_coerce(yaml.safe_load(_env_raw) or {}))
+            target.update(_coerce(yaml.safe_load(_secret_env) or {}))
         except Exception:
             # Fail soft – malformed env secrets shouldn't crash the bot
             pass
@@ -132,9 +129,7 @@ def _populate(target: dict[str, Persona]) -> None:
     _runtime_secret_file: Path = Path("/secrets") / "BOT_SECRET_PERSONAS"
     if _runtime_secret_file.exists():
         try:
-            _runtime_raw: str = _runtime_secret_file.read_text("utf-8").replace(
-                "${OWNER_ID}", str(settings.owner_id or "")
-            )
+            _runtime_raw: str = _runtime_secret_file.read_text("utf-8")
             target.update(_coerce(yaml.safe_load(_runtime_raw) or {}))
         except Exception:
             pass
@@ -179,18 +174,37 @@ def prompt(name: str, *, default: str | None = None) -> str:
         raise
 
 
-def visible(name: str, user_id: int) -> bool:
+async def visible(name: str, user_id: int, bot: commands.Bot) -> bool:
     """Return *True* if *user_id* may use persona *name*.
 
-    Missing persona ➜ *False* (avoids unexpected ``KeyError``).
+    - If ``allowed_users`` is not set, the persona is public.
+    - If ``allowed_users`` is set, the user must be in the list.
+    - The special value ``${OWNER_ID}`` is resolved to the bot's owner.
     """
+    from bot.utils.discord_owner import get_owner  # late import
 
     persona = PERSONALITIES.get(name)
-    if persona is None:
+    if not persona:
         return False
+
     allowed = persona.get("allowed_users")
-    # accept both ints and strings for user IDs to tolerate quoted YAML scalars in Fly secrets
-    return allowed is None or str(user_id) in (str(uid) for uid in allowed)
+    if allowed is None:
+        return True  # public
+
+    # Resolve owner ID on-demand
+    allowed_ids = set()
+    if "${OWNER_ID}" in allowed:
+        try:
+            owner = await get_owner(bot)
+            allowed_ids.add(str(owner.id))
+        except RuntimeError:
+            pass  # owner not resolvable, so can't match
+
+    for uid in allowed:
+        if uid != "${OWNER_ID}":
+            allowed_ids.add(str(uid))
+
+    return str(user_id) in allowed_ids
 
 
 __all__ = ["PERSONALITIES", "prompt", "visible", "Persona"]
