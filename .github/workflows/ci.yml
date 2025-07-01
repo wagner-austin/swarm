@@ -1,8 +1,11 @@
+---
 name: CI
 
-on:
+"on":
   push:
-    branches: ["main", "master"]
+    branches:
+      - main
+      - master
   pull_request:
 
 jobs:
@@ -21,9 +24,13 @@ jobs:
           cache: "poetry"
 
       - name: Install Poetry
-        uses: abatilo/actions-poetry@v2
-        with:
-          poetry-version: "1.7.1"
+        run: |
+          pip install --upgrade pip
+          pip install poetry==1.7.1
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Check Poetry version
+        run: poetry --version
 
       - name: Install dependencies
         run: poetry install --with dev

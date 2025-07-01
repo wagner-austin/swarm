@@ -3015,6 +3015,26 @@ files = [
 h11 = ">=0.9.0,<1"
 
 [[package]]
+name = "yamllint"
+version = "1.37.1"
+description = "A linter for YAML files."
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"dev\""
+files = [
+    {file = "yamllint-1.37.1-py3-none-any.whl", hash = "sha256:364f0d79e81409f591e323725e6a9f4504c8699ddf2d7263d8d2b539cd66a583"},
+    {file = "yamllint-1.37.1.tar.gz", hash = "sha256:81f7c0c5559becc8049470d86046b36e96113637bcbe4753ecef06977c00245d"},
+]
+
+[package.dependencies]
+pathspec = ">=0.5.3"
+pyyaml = "*"
+
+[package.extras]
+dev = ["doc8", "flake8", "flake8-import-order", "rstcheck[sphinx]", "sphinx"]
+
+[[package]]
 name = "yarl"
 version = "1.20.0"
 description = "Yet another URL library"
@@ -3247,10 +3267,10 @@ cffi = {version = ">=1.11", markers = "platform_python_implementation == \"PyPy\
 cffi = ["cffi (>=1.11)"]
 
 [extras]
-dev = ["black", "mypy", "pytest", "pytest-asyncio", "pytest-env", "pytest-randomly", "ruff", "types-psutil", "types-requests"]
+dev = ["black", "mypy", "pytest", "pytest-asyncio", "pytest-env", "pytest-randomly", "ruff", "types-psutil", "types-requests", "yamllint"]
 discord = ["discord.py"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "319d4731b501e8d10e46965ba9eac59afb336ac2257c47022f5de21b136e93dd"
+content-hash = "4719122189e30b1ad740c5864ebf5e229aec0888b4dd15c26440485e3292e5ba"

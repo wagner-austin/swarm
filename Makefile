@@ -44,8 +44,9 @@ shell:              ## activate Poetry shell (interactive)
 # ---------------------------------------------------------------------------
 # Code quality
 # ---------------------------------------------------------------------------
-lint: install               ## ruff fix + ruff format + mypy strict type-check
+lint: install               ## ruff fix + ruff format + mypy strict type-check + yamllint
 	$(PIP) install --quiet --disable-pip-version-check types-requests types-PyYAML
+	$(RUN) yamllint .
 	$(RUFF) check --fix .
 	$(RUFF) format .
 	$(RUFF) check . --select D401 --fix
