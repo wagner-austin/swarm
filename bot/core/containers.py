@@ -7,8 +7,7 @@ from bot.browser.runtime import BrowserRuntime
 from bot.core import metrics as default_metrics
 from bot.core.settings import Settings
 from bot.history.backends import HistoryBackend
-from bot.history.in_memory import MemoryBackend
-from bot.history.redis_backend import RedisBackend
+from bot.history.factory import choose as history_backend_factory
 from bot.infra.tankpit import engine_factory as tankpit_engine_factory
 from bot.netproxy.service import ProxyService
 
@@ -35,30 +34,8 @@ class Container(containers.DeclarativeContainer):
     # Conversation history backend (pluggable)
 
     # Conversation history backend – pluggable
-    @staticmethod
-    def _choose_backend(cfg: Settings) -> HistoryBackend:
-        redis_enabled = cfg.redis.enabled
-        redis_url = cfg.redis.url
-        import logging
-
-        logger = logging.getLogger(__name__)
-        import socket  # retained for backward-compat
-
-        if redis_enabled and redis_url:
-            logger.info("History backend: Redis (%s)", redis_url)
-            try:
-                return RedisBackend(redis_url, cfg.conversation_max_turns)
-            except Exception as exc:
-                logger.warning(
-                    "Redis backend unreachable (%s), falling back to in-memory. Error: %s",
-                    redis_url,
-                    exc,
-                )
-        logger.info("History backend: In-memory (fallback)")
-        return MemoryBackend(cfg.conversation_max_turns)
-
     history_backend: providers.Singleton[HistoryBackend] = providers.Singleton(
-        _choose_backend, config
+        history_backend_factory, config
     )
 
     # Mapping of LLM provider singletons discovered in bot.ai.providers
