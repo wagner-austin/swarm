@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Any, Awaitable, Callable
 
 import discord
 import yaml
@@ -72,9 +73,21 @@ def _delete_yaml(name: str) -> bool:
 class PersonaAdmin(commands.GroupCog, group_name="persona"):
     """Admin-only CRUD for YAML-backed personas."""
 
-    def __init__(self, bot: commands.Bot):  # noqa: D401 – simple init
+    def __init__(
+        self,
+        bot: commands.Bot,
+        safe_send_func: Callable[..., Awaitable[Any]] | None = None,
+        safe_defer_func: Callable[..., Awaitable[Any]] | None = None,
+    ) -> None:
         super().__init__()
         self.bot = bot
+        from bot.utils.discord_interactions import (
+            safe_defer as default_safe_defer,
+            safe_send as default_safe_send,
+        )
+
+        self.safe_send = safe_send_func if safe_send_func is not None else default_safe_send
+        self.safe_defer = safe_defer_func if safe_defer_func is not None else default_safe_defer
 
     # ---------------------------------------------------------------------
     # Static helpers removed – use module-level _write_yaml / _delete_yaml directly
@@ -92,7 +105,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
             f"• **{n}**  ({'custom' if (_CUSTOM_DIR / (n + '.yaml')).exists() else 'built-in'})"
             for n in sorted(PERSONALITIES)
         ]
-        await interaction.response.send_message("\n".join(lines) or "None", ephemeral=True)
+        await self.safe_send(interaction, "\n".join(lines) or "None", ephemeral=True)
 
     # ------------------------------------------------------------------
     # /persona show – read-only display
@@ -112,7 +125,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
 
         # --- ensure persona exists ---
         if name not in PERSONALITIES:
-            await interaction.response.send_message("No such persona.", ephemeral=True)
+            await self.safe_send(interaction, "No such persona.", ephemeral=True)
             return
 
         # Display prompt
@@ -124,7 +137,8 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
             if allowed
             else "(visible to everyone)"
         )
-        await interaction.response.send_message(
+        await self.safe_send(
+            interaction,
             f"**{name}** {allowed_str}\n```text\n{prompt}\n```",
             ephemeral=True,
         )
@@ -147,12 +161,13 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
         busy bots or slow disks).
         """
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.safe_defer(interaction, ephemeral=True, thinking=True)
 
         import bot.ai.personas as p  # runtime import
 
         p.refresh()  # mutate existing dict so all cogs see updates
-        await interaction.followup.send(
+        await self.safe_send(
+            interaction,
             f"Reloaded {len(p.PERSONALITIES)} personas from disk.",
             ephemeral=True,
         )
@@ -194,7 +209,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
                 if not isinstance(val, dict) or "prompt" not in val:
                     raise ValueError(f"{key}: missing prompt field")
         except Exception as exc:  # pragma: no cover – tested via path above
-            await interaction.response.send_message(f"YAML error: {exc}", ephemeral=True)
+            await self.safe_send(interaction, f"YAML error: {exc}", ephemeral=True)
             return
 
         from bot.ai.personas import _SECRET_FILE, PERSONALITIES
@@ -204,4 +219,4 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
 
         # hot reload – merge secrets last
         PERSONALITIES.update(data)
-        await interaction.response.send_message("Secret personas imported 👍", ephemeral=True)
+        await self.safe_send(interaction, "Secret personas imported 👍", ephemeral=True)

@@ -122,8 +122,10 @@ class Web(
         screenshot_path = screenshots_dir / unique_name
 
         if screenshot_path.exists():
-            await interaction.response.send_message(
-                f"❌ File already exists: {actual_filename}", ephemeral=True
+            await self.safe_send(
+                interaction,
+                f"❌ File already exists: {actual_filename}",
+                ephemeral=True,
             )
             return None
 
