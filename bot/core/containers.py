@@ -114,6 +114,11 @@ class Container(containers.DeclarativeContainer):
 
     about_cog = providers.Factory(About)
 
+    # AlertPump cog factory
+    from bot.plugins.commands.alert_pump import AlertPump
+
+    alert_pump_cog = providers.Factory(AlertPump)
+
     # Browser runtime – one process-wide instance wired through DI
     browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(
         BrowserRuntime,
