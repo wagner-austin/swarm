@@ -9,8 +9,25 @@ STREAM = os.getenv("JOB_STREAM", "jobs")
 
 
 class Broker:
+    """
+    Distributed job broker using Redis streams. Ensures the stream and consumer group exist.
+    """
+
     def __init__(self, redis_url: str) -> None:
         self._r = aioredis.from_url(redis_url, decode_responses=True)  # type: ignore[no-untyped-call]
+
+    async def ensure_stream_and_group(self, group: str) -> None:
+        """
+        Ensure the Redis stream and consumer group exist. Idempotent and safe for concurrent startup.
+        """
+        try:
+            await self._r.xgroup_create(STREAM, group, id="$", mkstream=True)
+        except Exception as exc:
+            # BUSYGROUP = group already exists; ignore
+            if "BUSYGROUP" in str(exc):
+                pass
+            else:
+                raise
 
     async def publish(self, job: Job) -> None:
         await self._r.xadd(STREAM, {"json": job.dumps()})

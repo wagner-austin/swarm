@@ -36,6 +36,7 @@ from bot.browser.engine import BrowserEngine
 from bot.browser.runtime import BrowserRuntime  # If still needed elsewhere
 from bot.distributed.broker import Broker
 from bot.distributed.model import Job
+from bot.distributed.monitoring.state import BaseStateMachine, WorkerState
 from bot.infra.tankpit.engine import TankPitEngine
 from bot.utils.dispatch import filter_kwargs_for_method
 
@@ -45,10 +46,11 @@ logging.basicConfig(level=logging.INFO)
 HandlerFunc = Callable[[Job], Awaitable[Any]]
 
 
-class Worker:
+class Worker(BaseStateMachine):
     """
     Generic distributed worker that consumes jobs from the broker
     and dispatches them to registered handlers based on job type.
+    Uses a formal state machine for robust operation and observability.
     """
 
     def __init__(
@@ -58,12 +60,22 @@ class Worker:
         job_type_prefix: str | None = None,
         settings: Any | None = None,
     ) -> None:
+        super().__init__(WorkerState.IDLE)
         self.broker = broker
         self.worker_id = worker_id
         self.job_type_prefix = job_type_prefix
         self.handlers: dict[str, HandlerFunc] = {}
         self.settings = settings
         self._shutdown = asyncio.Event()
+        self._backoff: float = 1.0
+        self._backoff_min: float = 1.0
+        self._backoff_max: float = 10.0
+        # Log state transitions
+        self.on_transition(
+            lambda old, new: logger.info(
+                f"Worker {self.worker_id}: {old.name} \u001b[33m→\u001b[0m {new.name}"
+            )
+        )
 
     def register_handler(self, prefix: str, handler: HandlerFunc) -> None:
         """Register a handler function for a job type prefix (e.g., 'browser.')."""
@@ -75,21 +87,42 @@ class Worker:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self._shutdown.set)
 
+        self.set_state(WorkerState.IDLE)
         while not self._shutdown.is_set():
             try:
+                self.set_state(WorkerState.WAITING)
                 job = await self.broker.consume(
                     group=self.job_type_prefix or "all-workers",
                     consumer=self.worker_id,
                 )
+                self.set_state(WorkerState.BUSY)
+                self._backoff = self._backoff_min  # Reset backoff on job receipt
             except TimeoutError:
+                # No job available: enter/maintain IDLE state, backoff
+                self.set_state(WorkerState.IDLE)
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
                 continue
             except Exception as exc:
-                logger.error(f"Error consuming job: {exc}")
-                await asyncio.sleep(1)
+                self.set_state(WorkerState.ERROR)
+                logger.error(f"Worker {self.worker_id}: Error consuming job: {exc}")
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
                 continue
             if self.job_type_prefix and not job.type.startswith(self.job_type_prefix):
+                self.set_state(WorkerState.IDLE)
                 continue  # Not for this worker
-            await self.dispatch(job)
+            try:
+                await self.dispatch(job)
+                self.set_state(WorkerState.IDLE)
+            except Exception as exc:
+                self.set_state(WorkerState.ERROR)
+                logger.error(f"Worker {self.worker_id}: Error dispatching job: {exc}")
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
+                continue
+        self.set_state(WorkerState.SHUTDOWN)
+        logger.info(f"Worker {self.worker_id} shutting down.")
 
     async def dispatch(self, job: Job) -> None:
         """Dispatch the job to the appropriate handler based on its type prefix."""
@@ -242,9 +275,14 @@ async def _cleanup_orphaned_browsers() -> None:
 
 
 async def main() -> None:
+    from bot.distributed.monitoring.http import start_http_server
+
     args = parse_args()
     await _cleanup_orphaned_browsers()  # Clean up orphans before starting any engines
     broker = Broker(args.redis_url)
+    # Ensure robust, idempotent creation of the stream and group before consuming jobs
+    group = args.job_type_prefix or "all-workers"
+    await broker.ensure_stream_and_group(group)
     worker = Worker(broker, worker_id=args.worker_id, job_type_prefix=args.job_type_prefix)
     # Register dynamic handlers
     worker.register_handler("browser.", handle_browser_job)
@@ -271,8 +309,13 @@ async def main() -> None:
             await close_all_sessions()
             logger.info("Worker shutdown complete. All sessions cleaned up.")
 
-    # Run worker and cleanup on shutdown
-    await asyncio.gather(_run_and_cleanup(), shutdown_event.wait())
+    # Start HTTP server for /health and /metrics endpoints
+    metrics_port = int(os.getenv("METRICS_PORT", "9200"))
+    await asyncio.gather(
+        start_http_server(worker, port=metrics_port),
+        _run_and_cleanup(),
+        shutdown_event.wait(),
+    )
 
 
 if __name__ == "__main__":

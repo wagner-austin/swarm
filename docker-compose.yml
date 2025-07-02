@@ -96,8 +96,7 @@ services:
   bot:
     build: .
     container_name: discord-bot
-    # Use image entrypoint which starts persistent Xvfb and bot
-    # command overridden removed
+    # Main Discord bot process (default entrypoint)
     volumes:
       - .:/app
       - C:\Users\Test\.config\discord-bot\personas\personas.yaml:/root/.config/discord-bot/personas/personas.yaml:ro
@@ -126,3 +125,78 @@ services:
       retries: 3
       start_period: 90s
     restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: discord-worker
+    # Distributed worker process (uses entrypoint.worker.sh)
+    entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
+    # You can scale this service with: docker-compose up --scale worker=3
+    depends_on:
+      - redis
+    environment:
+      - WORKER_PORT=9100
+      - DISPLAY=:99
+      - REDIS_URL=redis://redis:6379/0
+      # - WORKER_ID=worker-001           # Uncomment to set a unique worker ID
+      # - JOB_TYPE_PREFIX=browser  # Uncomment to restrict to browser jobs
+      # - LOG_LEVEL=info                  # Uncomment to set log verbosity
+      # - EXTRA_CONFIG=some_value  # Add custom env vars your code supports
+    ports:
+      - "9100:9100"      # Worker metrics (Prometheus)
+    volumes:
+      - .:/app
+      # - ./worker-config.yaml:/app/config.yaml:ro  # Mount config file
+      # - ./worker-logs:/app/logs                    # Uncomment to persist logs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(
+            'http://localhost:9100/metrics', timeout=5
+          ).getcode() == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+    # Example: A special worker with custom config/logs and job type
+    # TEMPLATE: To add a special worker, copy this block and adjust as needed
+  # worker-special:
+  #   build: .
+  #   container_name: discord-worker-special
+  #   entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
+  #   depends_on:
+  #     - redis
+  #   environment:
+  #     - WORKER_PORT=9110
+  #     - DISPLAY=:99
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - WORKER_ID=worker-special
+  #     - JOB_TYPE_PREFIX=tankpit
+  #     - LOG_LEVEL=debug
+  #   ports:
+  #     - "9110:9110"
+  #   volumes:
+  #     - .:/app
+  #     - ./worker-special-config.yaml:/app/config.yaml:ro
+  #     - ./worker-special-logs:/app/logs
+  #   healthcheck:
+  #     test:
+  #       - CMD
+  #       - python
+  #       - -c
+  #       - >
+  #         import urllib.request,sys;
+  #         sys.exit(0 if urllib.request.urlopen(
+  #           'http://localhost:9110/metrics', timeout=5
+  #         ).getcode() == 200 else 1)
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 60s
+# Place 'restart: unless-stopped' outside the template block when copying
