@@ -1,7 +1,7 @@
 import asyncio
 import os
 
-import aioredis
+import redis.asyncio as aioredis
 
 from bot.distributed.model import Job
 
@@ -10,7 +10,7 @@ STREAM = os.getenv("JOB_STREAM", "jobs")
 
 class Broker:
     def __init__(self, redis_url: str) -> None:
-        self._r = aioredis.from_url(redis_url, decode_responses=True)
+        self._r = aioredis.from_url(redis_url, decode_responses=True)  # type: ignore[no-untyped-call]
 
     async def publish(self, job: Job) -> None:
         await self._r.xadd(STREAM, {"json": job.dumps()})
