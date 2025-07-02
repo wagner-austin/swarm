@@ -6,9 +6,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.browser.runtime import BrowserRuntime
+from bot.frontends.discord.discord_interactions import safe_send
+from bot.frontends.discord.discord_owner import get_owner
 from bot.plugins.base_di import BaseDIClientCog
-from bot.utils.discord_interactions import safe_send
-from bot.utils.discord_owner import get_owner
 
 
 class MetricsProtocol(Protocol):
@@ -29,8 +29,8 @@ class Shutdown(BaseDIClientCog):
         self.bot = bot
         # Allow DI for testing
         import bot.core.metrics as default_metrics
-        from bot.utils.discord_interactions import safe_send as default_safe_send
-        from bot.utils.discord_owner import get_owner as default_get_owner
+        from bot.frontends.discord.discord_interactions import safe_send as default_safe_send
+        from bot.frontends.discord.discord_owner import get_owner as default_get_owner
 
         self.metrics = metrics_mod if metrics_mod is not None else default_metrics
         self.get_owner = get_owner_func if get_owner_func is not None else default_get_owner

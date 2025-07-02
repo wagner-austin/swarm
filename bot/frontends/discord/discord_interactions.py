@@ -7,7 +7,7 @@ acknowledged` (**40060**) failures from propagating or causing double-respond
 bugs.
 
 Usage:
-    >>> from bot.utils.discord_interactions import safe_defer, safe_send, safe_followup
+    >>> from bot.frontends.discord.discord_interactions import safe_defer, safe_send, safe_followup
 
 These helpers should be the *only* API used by command cogs and global error
 handlers when they need to defer, send, or follow-up to an interaction.
@@ -20,7 +20,6 @@ import logging
 from typing import Any
 
 import discord
-
 from bot.core.settings import DISCORD_LIMIT, settings
 
 __all__ = [
@@ -35,6 +34,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _is_done(interaction: discord.Interaction) -> bool:
+    """Robustly check if an interaction response is done."""
+    try:
+        attr = interaction.response.is_done
+        if callable(attr):
+            maybe = attr()
+            if inspect.isawaitable(maybe):
+                import asyncio
+
+                loop = asyncio.get_event_loop()
+                maybe = loop.run_until_complete(maybe)
+            return bool(maybe)
+        return bool(attr)
+    except Exception:
+        return False
+
+
 async def safe_defer(
     interaction: discord.Interaction,
     *,
@@ -47,7 +63,6 @@ async def safe_defer(
     The noop-guard means callers can blindly call ``safe_defer`` without first
     checking ``interaction.response.is_done()``.
     """
-
     try:
         if ephemeral:
             await interaction.response.defer(thinking=thinking, ephemeral=True)
@@ -86,7 +101,6 @@ async def safe_send(
     Any ``discord.HTTPException`` not related to codes *10062* or *40060* is
     re-raised so upstream handlers can decide the appropriate action.
     """
-
     # Enforce Discord message length limits (settings.discord_chunk_size defaults to 1900)
     if content and isinstance(content, str):
         max_len: int = DISCORD_LIMIT

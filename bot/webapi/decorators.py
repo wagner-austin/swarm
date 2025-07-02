@@ -20,8 +20,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.core.settings import settings
-from bot.utils.discord_interactions import safe_defer, safe_send
-from bot.utils.discord_owner import get_owner
+from bot.frontends.discord.discord_interactions import safe_defer, safe_send
+from bot.frontends.discord.discord_owner import get_owner
 
 logger = logging.getLogger(__name__)
 

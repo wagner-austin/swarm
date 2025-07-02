@@ -14,8 +14,8 @@ from typing import cast
 import discord
 from discord.ext import commands
 
+from bot.frontends.discord.discord_owner import get_owner
 from bot.utils.async_helpers import with_retries
-from bot.utils.discord_owner import get_owner
 
 logger = logging.getLogger(__name__)
 

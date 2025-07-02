@@ -4,9 +4,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.GroupCog
 
+from bot.frontends.discord.discord_interactions import safe_defer, safe_send
 from bot.netproxy.service import ProxyService
 from bot.plugins.base_di import BaseDIClientCog  # <- move here
-from bot.utils.discord_interactions import safe_defer, safe_send
 
 logger = logging.getLogger(__name__)
 

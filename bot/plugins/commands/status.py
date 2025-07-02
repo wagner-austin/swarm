@@ -11,9 +11,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.core import metrics as default_metrics
+from bot.frontends.discord.discord_interactions import safe_send as default_safe_send
 from bot.plugins.base_di import BaseDIClientCog
 from bot.plugins.commands.decorators import background_app_command
-from bot.utils.discord_interactions import safe_send as default_safe_send
 
 SPACER = " │ "  # visual separator in a single embed field
 

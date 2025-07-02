@@ -12,9 +12,9 @@ from discord.ext import commands
 from discord.ext.commands import Bot
 
 from bot.browser.runtime import BrowserRuntime
+from bot.frontends.discord.discord_interactions import safe_defer
 from bot.plugins.base_di import BaseDIClientCog
 from bot.plugins.commands.decorators import background_app_command
-from bot.utils.discord_interactions import safe_defer
 
 # safe_send and validate_and_normalise_web_url are injected for testability
 # Import centralised Discord interaction helpers
@@ -43,7 +43,7 @@ class Web(
         self.runtime: BrowserRuntime = (
             browser_runtime if browser_runtime is not None else self.container.browser_runtime()
         )
-        from bot.utils.discord_interactions import safe_send as default_safe_send
+        from bot.frontends.discord.discord_interactions import safe_send as default_safe_send
         from bot.utils.urls import validate_and_normalise_web_url as default_validate_url
 
         self.safe_send = safe_send_func if safe_send_func is not None else default_safe_send

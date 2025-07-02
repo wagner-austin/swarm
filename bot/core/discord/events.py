@@ -84,7 +84,7 @@ def register_event_handlers(bot: MyBot) -> None:
     ) -> None:
         # Using CheckFailure and CommandOnCooldown imported at the top
         if isinstance(error, CheckFailure):
-            from bot.utils.discord_interactions import safe_send
+            from bot.frontends.discord.discord_interactions import safe_send
 
             await safe_send(
                 interaction,
@@ -94,7 +94,7 @@ def register_event_handlers(bot: MyBot) -> None:
             return
 
         if isinstance(error, CommandOnCooldown):
-            from bot.utils.discord_interactions import safe_send
+            from bot.frontends.discord.discord_interactions import safe_send
 
             await safe_send(
                 interaction,
@@ -104,7 +104,7 @@ def register_event_handlers(bot: MyBot) -> None:
             return
 
         logger.error(f"Unhandled app command error: {error}", exc_info=error)
-        from bot.utils.discord_interactions import safe_send
+        from bot.frontends.discord.discord_interactions import safe_send
 
         await safe_send(
             interaction,

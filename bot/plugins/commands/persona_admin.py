@@ -29,8 +29,8 @@ from bot.ai.personas import (  # noqa: F401 – re-export for tests
     Persona,
     _load as _reload,  # helper to (re)load from YAML
 )
-from bot.utils.discord_interactions import safe_send
-from bot.utils.discord_owner import get_owner
+from bot.frontends.discord.discord_interactions import safe_send
+from bot.frontends.discord.discord_owner import get_owner
 
 __all__ = ["PersonaAdmin"]
 
@@ -81,7 +81,7 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
     ) -> None:
         super().__init__()
         self.bot = bot
-        from bot.utils.discord_interactions import (
+        from bot.frontends.discord.discord_interactions import (
             safe_defer as default_safe_defer,
             safe_send as default_safe_send,
         )

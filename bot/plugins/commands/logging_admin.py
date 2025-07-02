@@ -13,8 +13,8 @@ import logging
 import discord
 from discord.ext import commands
 
-from bot.utils.discord_interactions import safe_send
-from bot.utils.discord_owner import get_owner
+from bot.frontends.discord.discord_interactions import safe_send
+from bot.frontends.discord.discord_owner import get_owner
 
 _VALID_LEVELS: tuple[str, ...] = (
     "DEBUG",
