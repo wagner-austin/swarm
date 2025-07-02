@@ -5,6 +5,7 @@ import logging
 
 from bot.core.lifecycle import BotLifecycle
 from bot.core.settings import settings as global_settings
+from bot.frontends.discord.adapter import DiscordFrontendAdapter
 
 # install_handlers import removed – SignalHandlers context manager used instead
 
@@ -33,12 +34,15 @@ async def launch_bot() -> None:
 
     _lc_mod._lifecycle_singleton = _lifecycle_manager_instance
 
-    loop = asyncio.get_running_loop()
+    # --- Frontend Adapter Integration ---
+    # In the future, select frontend here (Discord, Telegram, Web, etc)
+    frontend = DiscordFrontendAdapter(_lifecycle_manager_instance)
+    # ------------------------------------
 
-    # Install OS signal handlers via async context manager for automatic cleanup
+    loop = asyncio.get_running_loop()
     from bot.utils.signals import SignalHandlers
 
     async with SignalHandlers(loop, _lifecycle_manager_instance):
-        await _lifecycle_manager_instance.run()
+        await frontend.start()
 
     logger.info("launch_bot completed.")
