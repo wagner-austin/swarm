@@ -124,6 +124,16 @@ class Container(containers.DeclarativeContainer):
         safe_send_func=safe_send,
     )
 
+    # Web cog factory (DI)
+    from bot.plugins.commands.web import Web
+
+    web_cog = providers.Factory(Web, bot=providers.Dependency())
+
+    # Proxy cog factory (DI)
+    from bot.plugins.commands.proxy import ProxyCog
+
+    proxy_cog = providers.Factory(ProxyCog, bot=providers.Dependency())
+
     # Browser runtime – one process-wide instance wired through DI
     browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(
         BrowserRuntime,
