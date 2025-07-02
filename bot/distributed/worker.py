@@ -282,11 +282,19 @@ async def main() -> None:
     broker = Broker(args.redis_url)
     # Ensure robust, idempotent creation of the stream and group before consuming jobs
     group = args.job_type_prefix or "all-workers"
-    await broker.ensure_stream_and_group(group)
+    try:
+        await broker.ensure_stream_and_group(group)
+    except Exception as exc:
+        logger.error(
+            f"Failed to create Redis consumer group '{group}' on stream. Worker will not start. Exception: {exc}"
+        )
+        return
     worker = Worker(broker, worker_id=args.worker_id, job_type_prefix=args.job_type_prefix)
     # Register dynamic handlers
     worker.register_handler("browser.", handle_browser_job)
     worker.register_handler("tankpit.", handle_tankpit_job)
+
+    # [TEST PLACEHOLDER] Add distributed startup test to verify no NOGROUP errors occur.
 
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()

@@ -19,14 +19,18 @@ class Broker:
     async def ensure_stream_and_group(self, group: str) -> None:
         """
         Ensure the Redis stream and consumer group exist. Idempotent and safe for concurrent startup.
+        Logs all outcomes for observability.
         """
         try:
             await self._r.xgroup_create(STREAM, group, id="$", mkstream=True)
+            print(f"[Broker] Created consumer group '{group}' on stream '{STREAM}'.")
         except Exception as exc:
-            # BUSYGROUP = group already exists; ignore
             if "BUSYGROUP" in str(exc):
-                pass
+                print(f"[Broker] Consumer group '{group}' already exists on stream '{STREAM}'.")
             else:
+                print(
+                    f"[Broker] Error creating consumer group '{group}' on stream '{STREAM}': {exc}"
+                )
                 raise
 
     async def publish(self, job: Job) -> None:
@@ -34,10 +38,24 @@ class Broker:
 
     async def consume(self, group: str, consumer: str) -> Job:
         # ≤1 sec block; if nothing, function caller can loop/sleep
-        msgs = await self._r.xreadgroup(group, consumer, {STREAM: ">"}, count=1, block=1000)
-        if msgs:
-            _, entries = msgs[0]
-            msg_id, fields = entries[0]
-            await self._r.xack(STREAM, group, msg_id)
-            return Job.loads(fields["json"])
-        raise TimeoutError
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                msgs = await self._r.xreadgroup(group, consumer, {STREAM: ">"}, count=1, block=1000)
+                if msgs:
+                    _, entries = msgs[0]
+                    msg_id, fields = entries[0]
+                    await self._r.xack(STREAM, group, msg_id)
+                    return Job.loads(fields["json"])
+                raise TimeoutError
+            except Exception as exc:
+                if "NOGROUP" in str(exc):
+                    print(
+                        f"[Broker] NOGROUP error encountered in consume. Attempting to create group '{group}' on stream '{STREAM}'."
+                    )
+                    await self.ensure_stream_and_group(group)
+                    continue
+                raise
+        raise RuntimeError(
+            f"[Broker] Failed to consume from group '{group}' on stream '{STREAM}' after {max_retries} attempts due to repeated NOGROUP errors."
+        )

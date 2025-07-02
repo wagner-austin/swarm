@@ -95,7 +95,7 @@ services:
 
   bot:
     build: .
-    container_name: discord-bot
+    container_name: bot
     # Main Discord bot process (default entrypoint)
     volumes:
       - .:/app
@@ -128,13 +128,14 @@ services:
 
   worker:
     build: .
-    container_name: discord-worker
+    container_name: worker
     # Distributed worker process (uses entrypoint.worker.sh)
     entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
     # You can scale this service with: docker-compose up --scale worker=3
     depends_on:
       - redis
     environment:
+      - METRICS_PORT=9100
       - WORKER_PORT=9100
       - DISPLAY=:99
       - REDIS_URL=redis://redis:6379/0

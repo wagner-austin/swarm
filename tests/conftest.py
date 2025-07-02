@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 # Add the src directory to the Python path for all tests
 
-# Now import other modules
+import asyncio
 import warnings
 from collections.abc import Generator
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from bot.core.logger_setup import setup_logging
+from bot.core.settings import Settings
 
 # Silence noisy third-party deprecations we can’t fix locally.
 warnings.filterwarnings(
@@ -44,6 +46,55 @@ setup_logging({"root": {"level": "WARNING"}})
 
 # Ensure every test run keeps the browser headless and invisible to
 # avoid accidental UI launches (especially in CI environments).
+
+
+@pytest.fixture
+def mock_settings() -> Settings:
+    """
+    Robust Settings mock for all integration/startup tests.
+    Covers all attributes accessed during bot lifecycle startup.
+    If you add new required settings, update this fixture!
+    """
+    settings = MagicMock(spec=Settings)
+    settings.discord_token = "fake_token"
+    settings.owner_id = 123456789
+    settings.metrics_port = 0
+    settings.gemini_api_key = None
+    settings.openai_api_key = None
+    settings.conversation_max_turns = 8
+    settings.discord_chunk_size = 1900
+    settings.gemini_model = "gemini-2.5-flash-preview-04-17"
+    settings.personalities_file = None
+    # Proxy settings
+    settings.proxy_enabled = False
+    settings.proxy_port = None
+    settings.proxy_cert_dir = ".mitm_certs"
+    settings.proxy = MagicMock()
+    settings.proxy.enabled = False
+    # Browser settings
+    settings.chrome_profile_dir = None
+    settings.chrome_profile_name = "Profile 1"
+    settings.chromedriver_path = None
+    settings.browser_download_dir = None
+    settings.browser_version_main = None
+    settings.browser = MagicMock()
+    settings.browser.headless = False
+    settings.browser.visible = True
+    settings.browser.read_only = False
+    settings.browser.proxy_enabled = False
+    # Queue settings
+    settings.queues = MagicMock()
+    settings.queues.inbound = 500
+    settings.queues.outbound = 200
+    settings.queues.command = 100
+    settings.queues.alerts = 200
+    # Redis settings
+    settings.redis = MagicMock()
+    settings.redis.enabled = False
+    settings.redis.url = None
+    # Security and observability
+    settings.allowed_hosts = []
+    return settings
 
 
 # Type annotated autouse fixture (required by --strict mypy)

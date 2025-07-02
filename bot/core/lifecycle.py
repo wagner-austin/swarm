@@ -145,16 +145,22 @@ class BotLifecycle:
         # Chat
         chat_cog = self._container.chat_cog(bot=self._bot)
         await self._bot.add_cog(chat_cog)
+        # Web (DI-managed)
+        web_cog = self._container.web_cog(bot=self._bot)
+        await self._bot.add_cog(web_cog)
+        # Proxy (DI-managed)
+        proxy_cog = self._container.proxy_cog(bot=self._bot)
+        await self._bot.add_cog(proxy_cog)
         # Shutdown (DI-managed)
         shutdown_cog = self._container.shutdown_cog(bot=self._bot, lifecycle=self)
         await self._bot.add_cog(shutdown_cog)
         logger.info(
-            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Shutdown."
+            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Web, Proxy, Shutdown."
         )
 
         # --- Standard Cogs --- #
         # Use an allow-list to control which standard cogs are loaded.
-        keep = {"browser", "chat", "help", "proxy"}
+        keep = {"browser", "chat", "help"}
         discovered_extensions = list(iter_submodules("bot.plugins"))
         extensions_to_load = [
             ext for ext in discovered_extensions if ext.rsplit(".", 1)[-1] in keep
