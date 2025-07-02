@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.utils.discord_interactions import safe_send
+from bot.frontends.discord.discord_interactions import safe_send
 
 
 def get_bot_version() -> str:

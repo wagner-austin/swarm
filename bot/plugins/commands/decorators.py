@@ -3,7 +3,7 @@
 Currently provides:
     • ``background_app_command`` – run long-running command logic in a detached
       ``asyncio`` task after immediately deferring the interaction.  All
-      unhandled exceptions are routed through :pyfunc:`bot.utils.discord_interactions.safe_send`.
+      unhandled exceptions are routed through :pyfunc:`bot.frontends.discord.discord_interactions.safe_send`.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any, ParamSpec, TypeVar, cast
 import discord
 from discord.ext import commands
 
-from bot.utils.discord_interactions import safe_defer, safe_send
+from bot.frontends.discord.discord_interactions import safe_defer, safe_send
 
 P = ParamSpec("P")
 R = TypeVar("R")

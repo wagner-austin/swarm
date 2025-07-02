@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from bot.frontends.discord.discord_owner import clear_owner_cache
 from bot.plugins.commands.alert_pump import AlertPump
-from bot.utils.discord_owner import clear_owner_cache
 
 
 @pytest.fixture

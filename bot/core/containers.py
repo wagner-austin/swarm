@@ -6,6 +6,7 @@ from bot.ai import providers as _ai_providers
 from bot.browser.runtime import BrowserRuntime
 from bot.core import metrics as default_metrics
 from bot.core.settings import Settings
+from bot.frontends.discord.discord_interactions import safe_send
 from bot.history.backends import HistoryBackend
 from bot.history.factory import choose as history_backend_factory
 from bot.infra.tankpit import engine_factory as tankpit_engine_factory
@@ -16,7 +17,6 @@ from bot.netproxy.ws_addon import GenericWSAddon
 
 # DI cogs that must be referenced in providers.Factory at class-scope
 from bot.plugins.commands.status import Status
-from bot.utils.discord_interactions import safe_send
 
 
 class Container(containers.DeclarativeContainer):

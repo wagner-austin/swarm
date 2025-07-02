@@ -181,7 +181,7 @@ async def visible(name: str, user_id: int, bot: commands.Bot) -> bool:
     - If ``allowed_users`` is set, the user must be in the list.
     - The special value ``${OWNER_ID}`` is resolved to the bot's owner.
     """
-    from bot.utils.discord_owner import get_owner  # late import
+    from bot.frontends.discord.discord_owner import get_owner  # late import
 
     persona = PERSONALITIES.get(name)
     if not persona:

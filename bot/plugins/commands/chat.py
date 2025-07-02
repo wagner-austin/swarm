@@ -10,12 +10,12 @@ from bot.ai.personas import (
 )
 from bot.core.exceptions import ModelOverloaded
 from bot.core.settings import DISCORD_LIMIT, settings  # fully typed alias
+
+# Centralized interaction helpers
+from bot.frontends.discord.discord_interactions import safe_send
 from bot.history.backends import HistoryBackend
 from bot.history.in_memory import MemoryBackend
 from bot.plugins.commands.decorators import background_app_command
-
-# Centralized interaction helpers
-from bot.utils.discord_interactions import safe_send
 
 INTERNAL_ERROR = "An internal error occurred. Please try again later."
 

@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from discord import Object
 
+from bot.frontends.discord.discord_owner import clear_owner_cache
 from bot.plugins.commands.logging_admin import LoggingAdmin
-from bot.utils.discord_owner import clear_owner_cache
 
 
 @pytest.fixture
