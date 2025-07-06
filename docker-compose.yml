@@ -167,37 +167,37 @@ services:
 
     # Example: A special worker with custom config/logs and job type
     # TEMPLATE: To add a special worker, copy this block and adjust as needed
-  # worker-special:
-  #   build: .
-  #   container_name: discord-worker-special
-  #   entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
-  #   depends_on:
-  #     - redis
-  #   environment:
-  #     - WORKER_PORT=9110
-  #     - DISPLAY=:99
-  #     - REDIS_URL=redis://redis:6379/0
-  #     - WORKER_ID=worker-special
-  #     - JOB_TYPE_PREFIX=tankpit
-  #     - LOG_LEVEL=debug
-  #   ports:
-  #     - "9110:9110"
-  #   volumes:
-  #     - .:/app
-  #     - ./worker-special-config.yaml:/app/config.yaml:ro
-  #     - ./worker-special-logs:/app/logs
-  #   healthcheck:
-  #     test:
-  #       - CMD
-  #       - python
-  #       - -c
-  #       - >
-  #         import urllib.request,sys;
-  #         sys.exit(0 if urllib.request.urlopen(
-  #           'http://localhost:9110/metrics', timeout=5
-  #         ).getcode() == 200 else 1)
-  #     interval: 30s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 60s
-# Place 'restart: unless-stopped' outside the template block when copying
+    # worker-special:
+    #   build: .
+    #   container_name: discord-worker-special
+    #   entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
+    #   depends_on:
+    #     - redis
+    #   environment:
+    #     - WORKER_PORT=9110
+    #     - DISPLAY=:99
+    #     - REDIS_URL=redis://redis:6379/0
+    #     - WORKER_ID=worker-special
+    #     - JOB_TYPE_PREFIX=tankpit
+    #     - LOG_LEVEL=debug
+    #   ports:
+    #     - "9110:9110"
+    #   volumes:
+    #     - .:/app
+    #     - ./worker-special-config.yaml:/app/config.yaml:ro
+    #     - ./worker-special-logs:/app/logs
+    #   healthcheck:
+    #     test:
+    #       - CMD
+    #       - python
+    #       - -c
+    #       - >
+    #         import urllib.request,sys;
+    #         sys.exit(0 if urllib.request.urlopen(
+    #           'http://localhost:9110/metrics', timeout=5
+    #         ).getcode() == 200 else 1)
+    #     interval: 30s
+    #     timeout: 5s
+    #     retries: 3
+    #     start_period: 60s
+    # Place 'restart: unless-stopped' outside the template block when copying

@@ -36,7 +36,7 @@ help:               ## show this help message
 # ---------------------------------------------------------------------------
 install:            ## resolve & install all dependencies (incl. dev)
 	$(POETRY) lock
-	$(POETRY) install --extras dev
+	$(POETRY) install --with dev
 
 shell:              ## activate Poetry shell (interactive)
 	$(POETRY) shell
@@ -51,7 +51,7 @@ lint: install               ## ruff fix + ruff format + mypy strict type-check +
 	$(RUFF) format .
 	$(RUFF) check . --select D401 --fix
 	$(MYPY) --strict .
-	$(PYTHON) scripts/ruff_no_direct_discord_response.py $(shell find bot/ tests/ -name '*.py')
+	$(PYTHON) scripts/ruff_no_direct_discord_response.py bot/ tests/
 
 format: lint               ## auto-format code base (ruff + black)
 	$(RUFF) format .
