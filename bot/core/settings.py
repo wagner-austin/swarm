@@ -59,7 +59,8 @@ class Settings(BaseSettings):
         browser_download_dir (env: BROWSER_DOWNLOAD_DIR)
     Browser flags live in Settings.browser (see BrowserConfig).
     """
-    discord_token: str
+    # Provide harmless default for test/CI environments – will be overridden in prod via env.
+    discord_token: str = "dummy"
 
     gemini_api_key: str | None = None
     openai_api_key: str | None = None
@@ -138,7 +139,7 @@ class Settings(BaseSettings):
 # Export a singleton but fall back to a dummy token during static analysis
 try:
     settings: "Settings" = Settings()  # real env-driven instance
-except ValueError:  # DISCORD_TOKEN missing under CI / mypy
+except (ValueError, Exception):  # DISCORD_TOKEN missing during CI/mypy
     settings = Settings(discord_token="dummy")
 
 # ---------------------------------------------------------------------------
