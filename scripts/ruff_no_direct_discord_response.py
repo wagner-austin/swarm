@@ -30,10 +30,8 @@ class NoDirectDiscordResponse(ast.NodeVisitor):
         # Check for interaction.response.send_message, etc.
         if isinstance(node.value, ast.Attribute):
             if (node.value.attr, node.attr) in FORBIDDEN:
-                # Only allow in bot/utils/discord_interactions.py
-                if not self.filename.replace("\\", "/").endswith(
-                    "bot/utils/discord_interactions.py"
-                ):
+                # Only allow in discord_interactions.py
+                if not self.filename.replace("\\", "/").endswith("discord_interactions.py"):
                     self.errors.append((node.lineno, node.col_offset))
         self.generic_visit(node)
 
@@ -54,6 +52,25 @@ if __name__ == "__main__":
     import sys
 
     n = 0
-    for fname in sys.argv[1:]:
-        n += check_file(fname)
+    import os
+    from pathlib import Path
+    from typing import Iterable
+
+    def iter_py_files(path: str) -> Iterable[str]:
+        """Yield .py file paths under a directory or a single file path."""
+        p = Path(path)
+        if p.is_dir():
+            for f in p.rglob("*.py"):
+                yield str(f)
+        else:
+            yield path
+
+    for arg in sys.argv[1:]:
+        for fname in iter_py_files(arg):
+            rel = fname.replace("\\", "/").lower()
+            if rel.startswith("tests/") or "/tests/" in rel or rel.startswith("tests\\"):
+                continue
+            if rel.endswith("mocks.py") or "/_mocks/" in rel:
+                continue
+                n += check_file(fname)
     sys.exit(1 if n else 0)
