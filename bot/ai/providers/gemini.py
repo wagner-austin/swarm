@@ -32,11 +32,11 @@ class _GeminiProvider(LLMProvider):
     name: str = "gemini"
 
     def __init__(self) -> None:
-        if not settings.gemini_api_key:
-            raise RuntimeError("`GEMINI_API_KEY` is not configured – cannot use Gemini provider.")
-
         # Client and heavy SDK import are deferred until first use so that unit
-        # tests can stub the `google` package before it is required.
+        # tests can stub the `google` package before it is required. We also
+        # defer validating the API key so that the module can be imported even
+        # when GEMINI_API_KEY is missing (e.g. in CI), as long as the provider
+        # is not actually used.
         self._client: Any | None = None
         self._genai: Any = None
 
@@ -49,6 +49,8 @@ class _GeminiProvider(LLMProvider):
 
         if self._client is not None:
             return
+        if not settings.gemini_api_key:
+            raise RuntimeError("`GEMINI_API_KEY` is not configured – cannot use Gemini provider.")
         try:
             from google import genai
         except ModuleNotFoundError as exc:  # pragma: no cover – optional dependency
