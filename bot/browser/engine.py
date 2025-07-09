@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import datetime
 import logging
+import os
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -12,9 +15,15 @@ from playwright.async_api import (
     async_playwright,
 )
 
+from bot.browser.ws_logger import WSLogger, jsonl_sink
 from bot.core.service_base import ServiceABC
 
 logger = logging.getLogger(__name__)
+
+
+def make_log_path(experiment_id: str, session_id: str, browser_id: str) -> str:
+    ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d-%H%M%S")
+    return os.path.join("logs", experiment_id, session_id, f"{browser_id}-{ts}.jsonl.gz")
 
 
 class BrowserEngine(ServiceABC):
@@ -43,8 +52,6 @@ class BrowserEngine(ServiceABC):
         self._playwright = await async_playwright().start()
         assert self._playwright is not None  # mypy: narrows to Playwright
         try:
-            import os
-
             display = os.getenv("DISPLAY")
             logger.info(
                 "Launching Chromium (headless=%s, DISPLAY=%s) in BrowserEngine.start",
@@ -60,6 +67,24 @@ class BrowserEngine(ServiceABC):
             logger.exception("Browser launch failed in start()", exc_info=exc)
             raise
         self._page = await self._browser.new_page()
+
+        # --- WSLogger integration ---
+        browser_id = uuid.uuid4().hex
+        session_id = os.environ.get("SESSION_ID", uuid.uuid4().hex)
+        episode_id = uuid.uuid4().hex
+        experiment_id = os.environ.get("EXPERIMENT_ID", "default-exp")
+        protocol_version = os.environ.get("GIT_COMMIT", "unknown")
+        log_path = make_log_path(experiment_id, session_id, browser_id)
+        sink = await jsonl_sink(log_path, gzip_compress=True)
+        self._ws_logger = await WSLogger(
+            browser_id=browser_id,
+            session_id=session_id,
+            episode_id=episode_id,
+            experiment_id=experiment_id,
+            protocol_version=protocol_version,
+            sink=sink,
+        ).__aenter__()
+        await self._ws_logger.attach(self._page)
 
     # ------------------------------------------------------------------+
     # Self-healing helpers                                            #
@@ -155,6 +180,9 @@ class BrowserEngine(ServiceABC):
         return "running" if self.is_running() else "stopped"
 
     async def close(self) -> None:
+        # --- WSLogger shutdown ---
+        if getattr(self, "_ws_logger", None) is not None:
+            await self._ws_logger.close()
         if self._page:
             await self._page.close()  # Ensure page is closed before context
         if self._context:
