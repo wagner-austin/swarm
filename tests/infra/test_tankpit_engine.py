@@ -46,13 +46,13 @@ async def test_engine_echo_and_bookkeeping(monkeypatch: pytest.MonkeyPatch) -> N
             result = await qh.get(q, name)
         except (asyncio.CancelledError, GeneratorExit):
             raise
-        if q is in_q and name == "proxy_in":
+        if q is in_q and name == "ws_in":
             called.setdefault("get", 0)
             called["get"] += 1
         return result
 
     def test_put(q: asyncio.Queue[Any], item: Any, name: str) -> None:
-        if q is out_q and name == "proxy_out":
+        if q is out_q and name == "ws_out":
             called.setdefault("put", 0)
             called["put"] += 1
         qh.put_nowait(q, item, name)

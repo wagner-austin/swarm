@@ -57,7 +57,7 @@ async def test_engine_frame_processing_and_bookkeeping() -> None:
     # Assertions
     assert await q_out.get() == payload
     assert len(record_counter.calls) == 1
-    assert len(task_done_calls) == 1 and task_done_calls[0] == "proxy_in"
+    assert len(task_done_calls) == 1 and task_done_calls[0] == "ws_in"
 
     await engine.stop()
 
