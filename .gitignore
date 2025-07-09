@@ -29,5 +29,6 @@ volunteer_bot.egg-info/
 
 loki-data
 
-#ignore logs folder for git
+#ignore logs folder for git and *.log files
 logs/
+*.log
