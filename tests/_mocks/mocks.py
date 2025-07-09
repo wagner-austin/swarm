@@ -108,22 +108,3 @@ class StubInteraction(AsyncMock):
                 self.sent_messages.append(content)
 
         self.followup.send.side_effect = _capture
-
-
-# ------------------------------------------------------------------+
-# mitmproxy DummyDump – shared by all proxy tests                   +
-# ------------------------------------------------------------------+
-class DummyDump:
-    """Minimal stand‑in for mitmproxy.tools.dump.DumpMaster."""
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        from types import SimpleNamespace
-
-        # mitmproxy AddonManager expects an object exposing .addons.add()
-        self.addons = SimpleNamespace(add=lambda *_: None)
-
-    async def run(self) -> None:  # noqa: D401
-        return None
-
-    def shutdown(self) -> None:  # noqa: D401
-        return None

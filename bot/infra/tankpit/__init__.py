@@ -1,7 +1,7 @@
 """TankPit infrastructure package.
 
 Exposes :func:`engine_factory` that the DI container wires into
-:class:`bot.netproxy.service.ProxyService` so the proxy remains game-agnostic.
+
 """
 
 from __future__ import annotations

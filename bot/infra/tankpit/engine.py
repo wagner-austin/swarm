@@ -1,9 +1,8 @@
 """TankPitEngine
 ===============
 A minimal asynchronous game-state engine that consumes raw WebSocket frames
-from the TankPit mitmproxy addon and can inject responses back.  For now the
-engine is only a stub so that the surrounding infrastructure (proxy service
-and addon) can create and run it without raising `ImportError`.
+for TankPit and can inject responses back. For now the
+engine is only a stub so that the surrounding infrastructure can create and run it without raising `ImportError`.
 
 The actual game logic will be filled in a later PR.
 """
