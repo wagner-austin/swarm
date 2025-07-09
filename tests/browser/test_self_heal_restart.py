@@ -82,6 +82,12 @@ async def test_browser_engine_concurrent_restart(monkeypatch: pytest.MonkeyPatch
         lambda: _AsyncPlaywrightCtx(_inc),
     )
 
+    # Patch the logger attachment as this test uses a dummy page
+    async def dummy_attach(*args: Any, **kwargs: Any) -> None:  # noqa: ARG001
+        pass
+
+    monkeypatch.setattr("bot.browser.ws_logger.WSLogger.attach", dummy_attach)
+
     eng = BrowserEngine(headless=True, proxy=None, timeout_ms=100)
 
     # Initial start – should create first dummy browser

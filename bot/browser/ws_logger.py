@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import json
+import logging
+import pathlib
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -229,11 +231,10 @@ class WSLogger:
 async def jsonl_sink(
     filepath: str, gzip_compress: bool = False
 ) -> Callable[[WSFrameLog], Awaitable[None]]:
-    """
-    Write each WSFrameLog as a JSONL line to the given file using an async sink.
-    The returned sink exposes an async close() method.
-    If gzip_compress=True, writes .jsonl.gz (compressed) using gzip.
-    """
+    # Ensure the directory exists before trying to open the file
+    path = pathlib.Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
     import gzip
 
     lock = asyncio.Lock()
