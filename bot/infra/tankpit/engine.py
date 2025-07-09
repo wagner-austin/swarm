@@ -45,8 +45,8 @@ class TankPitEngine(ServiceABC):
         q_in: asyncio.Queue[_DirFrame],
         q_out: asyncio.Queue[bytes],
         *,
-        in_queue_name: str = "proxy_in",
-        out_queue_name: str = "proxy_out",
+        in_queue_name: str = "ws_in",
+        out_queue_name: str = "ws_out",
         record_frame_fn: Callable[[str, float], None] = default_record_frame,
         task_done_fn: Callable[[asyncio.Queue[Any], str], None] = q_task_done,
         get_fn: Callable[[asyncio.Queue[Any], str], Any] = q_get,
@@ -95,7 +95,7 @@ class TankPitEngine(ServiceABC):
         """Run the main consume loop (placeholder implementation)."""
         while True:
             try:
-                # Await the next frame from the proxy queue.
+                # Await the next frame from the ws_in queue.
                 direction, payload = await self._get(self._in, self._in_queue_name)
             except (asyncio.CancelledError, GeneratorExit):
                 # Graceful shutdown requested – exit the loop quietly so that
@@ -112,7 +112,7 @@ class TankPitEngine(ServiceABC):
                     except asyncio.QueueFull:
                         from bot.core import alerts
 
-                        alerts.alert("Proxy outbound queue overflow – dropping frame")
+                        alerts.alert("WebSocket outbound queue overflow – dropping frame")
             except Exception as exc:  # pragma: no cover – dev aid
                 logger.error("TankPitEngine error: %s", exc, exc_info=True)
             finally:
