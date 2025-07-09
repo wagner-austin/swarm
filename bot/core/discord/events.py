@@ -59,20 +59,14 @@ def register_event_handlers(bot: MyBot) -> None:
             and not bot.proxy_service.is_running()  # Only start if not already running
         ):
             try:
-                logger.info(
-                    f"Attempting to start ProxyService on port {bot.proxy_service.port} from on_ready..."
-                )
+                logger.info("(ProxyService logic removed: no action taken)")
                 await bot.proxy_service.start()  # Assumes bot.proxy_service is an instance
-                logger.info(
-                    f"ProxyService started successfully from on_ready on port {bot.proxy_service.port}"
-                )
+                logger.info("(ProxyService logic removed: no action taken)")
             except Exception as e:
                 logger.exception(f"Proxy failed to start in on_ready: {e}; shutting bot down")
                 await bot.close()  # Critical: shuts down bot on proxy failure
         else:
-            logger.info(
-                "ProxyService not available/configured as expected, or already running, skipping start attempt in on_ready."
-            )
+            logger.info("(ProxyService logic removed: no action taken)")
 
     @bot.event
     async def on_disconnect() -> None:

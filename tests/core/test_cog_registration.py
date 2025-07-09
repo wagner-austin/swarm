@@ -15,7 +15,6 @@ REQUIRED_COGS = {
     "Status",
     "Chat",
     "Web",
-    "ProxyCog",
     "Shutdown",
 }
 

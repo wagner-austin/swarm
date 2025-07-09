@@ -83,7 +83,6 @@ class Settings(BaseSettings):
     # --- Proxy settings ---
     proxy_enabled: bool = False
     proxy_port: int | None = None
-    proxy_cert_dir: str | None = ".mitm_certs"  # Default cert directory for mitmproxy
 
     # --- Browser session config ---
     chrome_profile_dir: str | None = None

@@ -10,11 +10,8 @@ from bot.frontends.discord.discord_interactions import safe_send
 from bot.history.backends import HistoryBackend
 from bot.history.factory import choose as history_backend_factory
 from bot.infra.tankpit import engine_factory as tankpit_engine_factory
-from bot.netproxy.service import ProxyService
 
-# generic WebSocket addon and TankPit engine factory
-from bot.netproxy.ws_addon import GenericWSAddon
-
+# TankPit engine factory (netproxy and ws_addon removed)
 # DI cogs that must be referenced in providers.Factory at class-scope
 from bot.plugins.commands.status import Status
 
@@ -41,33 +38,6 @@ class Container(containers.DeclarativeContainer):
     # Mapping of LLM provider singletons discovered in bot.ai.providers
     # Resolve the registry lazily so newly registered providers are seen.
     llm_providers = providers.Callable(lambda: _ai_providers.all())
-
-    # Proxy service
-    # The default_port and cert_dir for ProxyService can be sourced from config.
-    # The 'addon' parameter defaults to None as per ProxyService.__init__ signature.
-    # Proxy service
-    import asyncio
-    import logging
-
-    proxy_service: providers.Singleton["ProxyService"] = providers.Singleton(
-        ProxyService,
-        port=providers.Callable(
-            lambda cfg: cfg.proxy_port or 9000,  # Use OR for default
-            config,
-        ),
-        certdir=providers.Callable(
-            lambda cfg: Path(cfg.proxy_cert_dir),  # Path conversion is correct
-            config,
-        ),
-        # Explicit list provider makes the "list-ness" clear and allows DI container
-        # to resolve each element individually if they become providers themselves.
-        addons=providers.List(
-            providers.Object(GenericWSAddon),
-        ),
-        engine_factory=tankpit_engine_factory,
-        logger=logging.getLogger("bot.netproxy.service"),
-        subprocess_factory=asyncio.create_subprocess_exec,
-    )
 
     # Metrics helper (global module, but now injectable)
     metrics_helper = providers.Object(default_metrics)
@@ -128,11 +98,6 @@ class Container(containers.DeclarativeContainer):
     from bot.plugins.commands.web import Web
 
     web_cog = providers.Factory(Web, bot=providers.Dependency())
-
-    # Proxy cog factory (DI)
-    from bot.plugins.commands.proxy import ProxyCog
-
-    proxy_cog = providers.Factory(ProxyCog, bot=providers.Dependency())
 
     # Browser runtime – one process-wide instance wired through DI
     browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(

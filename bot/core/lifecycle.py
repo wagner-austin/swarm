@@ -15,7 +15,6 @@ from bot.core import telemetry
 from bot.core.discord.boot import MyBot
 from bot.core.discord.di import initialize_and_wire_container
 from bot.core.discord.events import register_event_handlers
-from bot.core.discord.proxy import start_proxy_service_if_enabled, stop_proxy_service
 from bot.core.settings import Settings
 from bot.utils.module_discovery import iter_submodules
 
@@ -110,7 +109,6 @@ class BotLifecycle:
         self._bot.container = self._container
         self._bot.lifecycle = self
 
-        await start_proxy_service_if_enabled(self._container, self._bot)
         logger.info("Services and bot instance initialized.")
 
     async def _load_extensions(self) -> None:
@@ -148,9 +146,6 @@ class BotLifecycle:
         # Web (DI-managed)
         web_cog = self._container.web_cog(bot=self._bot)
         await self._bot.add_cog(web_cog)
-        # Proxy (DI-managed)
-        proxy_cog = self._container.proxy_cog(bot=self._bot)
-        await self._bot.add_cog(proxy_cog)
         # Shutdown (DI-managed)
         shutdown_cog = self._container.shutdown_cog(bot=self._bot, lifecycle=self)
         await self._bot.add_cog(shutdown_cog)
@@ -259,8 +254,6 @@ class BotLifecycle:
             except Exception as e:
                 logger.exception("Error during browser runtime shutdown:", exc_info=e)
 
-        if self._bot:
-            await stop_proxy_service(self._bot)
         logger.info("Finished service shutdown attempts.")
 
         if self._bot and not self._bot.is_closed():
