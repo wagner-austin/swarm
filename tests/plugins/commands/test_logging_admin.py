@@ -7,15 +7,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from discord import Object
 
+from bot.core.containers import Container
 from bot.frontends.discord.discord_owner import clear_owner_cache
-from bot.plugins.commands.logging_admin import LoggingAdmin
 
 
 @pytest.fixture
-def mock_bot() -> MagicMock:
-    """Fixture for a mock bot instance."""
+def container_with_bot() -> tuple[Container, MagicMock]:
+    """Create real DI container with mocked bot."""
+    container = Container()
+
+    # Mock bot
     bot = MagicMock()
     bot.owner_id = 12345
+    bot.container = container
 
     # Mock the async methods that get_owner depends on
     bot.fetch_user = AsyncMock()
@@ -24,25 +28,23 @@ def mock_bot() -> MagicMock:
     bot.application_info = AsyncMock()
     bot.application_info.return_value.owner = Object(id=12345)
 
-    return bot
-
-
-@pytest.fixture
-def logging_admin_cog(mock_bot: MagicMock) -> LoggingAdmin:
-    """Fixture for the LoggingAdmin cog instance."""
-    return LoggingAdmin(bot=mock_bot)
+    return container, bot
 
 
 @pytest.mark.asyncio
 @patch("bot.plugins.commands.logging_admin.safe_send")
 async def test_loglevel_get_as_owner(
     mock_safe_send: AsyncMock,
-    logging_admin_cog: LoggingAdmin,
-    mock_bot: MagicMock,
+    container_with_bot: tuple[Container, MagicMock],
 ) -> None:
-    """Test that the owner can get the current log level."""
+    """Test that the owner can get the current log level using real DI container."""
+    container, mock_bot = container_with_bot
+
     # Clear owner cache for test isolation
     clear_owner_cache()
+
+    # Create LoggingAdmin cog using REAL DI container factory
+    logging_admin_cog = container.logging_admin_cog(bot=mock_bot)
 
     # Arrange
     mock_interaction = MagicMock()
@@ -73,12 +75,16 @@ async def test_loglevel_get_as_owner(
 @patch("bot.plugins.commands.logging_admin.safe_send")
 async def test_loglevel_set_valid_as_owner(
     mock_safe_send: AsyncMock,
-    logging_admin_cog: LoggingAdmin,
-    mock_bot: MagicMock,
+    container_with_bot: tuple[Container, MagicMock],
 ) -> None:
-    """Test that the owner can set a valid log level."""
+    """Test that the owner can set a valid log level using real DI container."""
+    container, mock_bot = container_with_bot
+
     # Clear owner cache for test isolation
     clear_owner_cache()
+
+    # Create LoggingAdmin cog using REAL DI container factory
+    logging_admin_cog = container.logging_admin_cog(bot=mock_bot)
 
     # Arrange
     mock_interaction = MagicMock()
@@ -108,11 +114,16 @@ async def test_loglevel_set_valid_as_owner(
 @pytest.mark.asyncio
 @patch("bot.plugins.commands.logging_admin.safe_send")
 async def test_loglevel_as_non_owner(
-    mock_safe_send: AsyncMock, logging_admin_cog: LoggingAdmin
+    mock_safe_send: AsyncMock, container_with_bot: tuple[Container, MagicMock]
 ) -> None:
-    """Test that a non-owner cannot use the loglevel command."""
+    """Test that a non-owner cannot use the loglevel command using real DI container."""
+    container, mock_bot = container_with_bot
+
     # Clear owner cache for test isolation
     clear_owner_cache()
+
+    # Create LoggingAdmin cog using REAL DI container factory
+    logging_admin_cog = container.logging_admin_cog(bot=mock_bot)
 
     # Arrange
     mock_interaction = MagicMock()

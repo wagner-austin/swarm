@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import discord
 from discord import Intents
@@ -38,8 +38,9 @@ class LifecycleState(Enum):
 
 
 class BotLifecycle:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, bot_factory: Callable[..., MyBot] | None = None):
         self._settings: Settings = settings
+        self._bot_factory = bot_factory
         self._state: LifecycleState = LifecycleState.IDLE
         self._bot: MyBot | None = None
         self._container: Container | None = None
@@ -114,8 +115,15 @@ class BotLifecycle:
         )
 
         intents = Intents.default()
-        self._bot = MyBot(command_prefix="!", intents=intents, settings=self._settings)
-        self._bot.container = self._container
+        if self._bot_factory:
+            self._bot = self._bot_factory(intents=intents, container=self._container)
+        else:
+            self._bot = MyBot(
+                command_prefix="-",  # Prefix is not used for slash commands
+                intents=intents,
+                container=self._container,
+                settings=self._settings,
+            )
         self._bot.lifecycle = self
 
         logger.info("Services and bot instance initialized.")
@@ -144,7 +152,7 @@ class BotLifecycle:
         about_cog = self._container.about_cog(bot=self._bot)
         await self._bot.add_cog(about_cog)
         # AlertPump
-        alert_pump_cog = self._container.alert_pump_cog(bot=self._bot)
+        alert_pump_cog = self._container.alert_pump_cog(bot=self._bot, lifecycle=self)
         await self._bot.add_cog(alert_pump_cog)
         # Status (DI-managed)
         status_cog = self._container.status_cog(bot=self._bot)
@@ -158,8 +166,11 @@ class BotLifecycle:
         # Shutdown (DI-managed)
         shutdown_cog = self._container.shutdown_cog(bot=self._bot, lifecycle=self)
         await self._bot.add_cog(shutdown_cog)
+        # BrowserHealthMonitor (DI-managed)
+        browser_health_monitor_cog = self._container.browser_health_monitor_cog(bot=self._bot)
+        await self._bot.add_cog(browser_health_monitor_cog)
         logger.info(
-            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Web, Proxy, Shutdown."
+            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Web, Shutdown, BrowserHealthMonitor."
         )
 
         # --- Standard Cogs --- #

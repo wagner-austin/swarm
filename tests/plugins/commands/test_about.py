@@ -6,22 +6,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from discord import Object
 
-from bot.plugins.commands.about import About
+from bot.core.containers import Container
 
 
 @pytest.fixture
-def mock_bot() -> MagicMock:
+def container_with_bot() -> tuple[Container, MagicMock]:
+    """Create real DI container with mocked bot."""
+    container = Container()
+
     bot = MagicMock()
     bot.user = MagicMock()
     bot.user.id = 123
     bot.user.name = "TestBot"
     bot.user.avatar = None
-    return bot
+    bot.container = container
 
-
-@pytest.fixture
-def about_cog(mock_bot: MagicMock) -> About:
-    return About(bot=mock_bot)
+    return container, bot
 
 
 @pytest.mark.asyncio
@@ -30,11 +30,19 @@ def about_cog(mock_bot: MagicMock) -> About:
 async def test_about_command(
     mock_get_version: MagicMock,
     mock_safe_send: AsyncMock,
-    about_cog: About,
-    mock_bot: MagicMock,
+    container_with_bot: tuple[Container, MagicMock],
 ) -> None:
+    """Test /about command using real DI container."""
+    container, mock_bot = container_with_bot
     mock_interaction = AsyncMock()
+
+    # Create About cog using REAL DI container factory
+    about_cog = container.about_cog(
+        bot=mock_bot,
+    )
+
     await cast(Any, about_cog.about.callback)(about_cog, mock_interaction)
+
     mock_safe_send.assert_called_once()
     args, kwargs = mock_safe_send.call_args
     embed = kwargs["embed"]

@@ -23,3 +23,19 @@ class BotError(DomainError):
     """Generic, non-domain-specific error raised by core helpers."""
 
     pass
+
+
+class WorkerUnavailableError(BotError):
+    """Raised when distributed workers are temporarily unavailable."""
+
+    def __init__(self, component: str = "workers"):
+        super().__init__(f"{component} temporarily unavailable")
+        self.component = component
+
+
+class OperationTimeoutError(BotError):
+    """Raised when operations exceed expected duration."""
+
+    def __init__(self, operation: str = "operation"):
+        super().__init__(f"{operation} timed out")
+        self.operation = operation

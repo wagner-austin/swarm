@@ -5,41 +5,40 @@ import discord
 import pytest
 from discord.ext import commands
 
-from bot.plugins.commands.metrics_tracker import MetricsTracker
+from bot.core.containers import Container
 
 
-class DummyBot(commands.Bot):
-    def __init__(self) -> None:
-        intents = discord.Intents.default()
-        super().__init__(command_prefix="!", intents=intents)
-        self._user: MagicMock = MagicMock(id=1234)
-        self._latency: float = 0.123
+@pytest.fixture
+def container_with_mocked_metrics() -> tuple[Container, MagicMock, MagicMock]:
+    """Create real DI container with mocked metrics."""
+    container = Container()
 
-    # Expose user as non-optional to avoid "None" checks in tests
-    @property
-    def user(self) -> MagicMock:  # pragma: no cover
-        return self._user
+    # Mock metrics
+    mock_metrics = MagicMock()
+    container.metrics_helper.override(mock_metrics)
 
-    # Provide read/write latency property
-    @property
-    def latency(self) -> float:  # pragma: no cover
-        return self._latency
+    # Mock bot
+    mock_bot = MagicMock(spec=commands.Bot)
+    mock_bot.user = MagicMock(id=1234)
+    mock_bot.latency = 0.123
+    mock_bot.container = container
 
-    @latency.setter
-    def latency(self, value: float) -> None:  # pragma: no cover
-        self._latency = value
+    return container, mock_bot, mock_metrics
 
 
 @pytest.mark.asyncio
-async def test_metrics_tracker_increments_metrics() -> None:
-    mock_metrics = MagicMock()
-    bot: DummyBot = DummyBot()
-    cog = MetricsTracker(bot, metrics=mock_metrics)
+async def test_metrics_tracker_increments_metrics(
+    container_with_mocked_metrics: tuple[Container, MagicMock, MagicMock],
+) -> None:
+    """Test metrics tracker increments metrics using real DI container."""
+    container, mock_bot, mock_metrics = container_with_mocked_metrics
+
+    # Create MetricsTracker cog using REAL DI container factory
+    cog = container.metrics_tracker_cog(bot=mock_bot)
 
     # Simulate on_message from self
     message = MagicMock()
-    assert bot.user is not None  # narrow Optional[ClientUser | None]
-    message.author.id = bot.user.id
+    message.author.id = mock_bot.user.id
     await cog.on_message(message)
     mock_metrics.increment_message_count.assert_called_once()
     mock_metrics.increment_discord_message_count.assert_not_called()
@@ -55,12 +54,11 @@ async def test_metrics_tracker_increments_metrics() -> None:
     interaction = MagicMock()
     interaction.type.name = "application_command"
     interaction.user.id = 9999
-    bot.user.id = 1234
     await cog.on_interaction(interaction)
     mock_metrics.increment_discord_message_count.assert_called()
 
     # Simulate on_interaction from self (should not increment)
     mock_metrics.reset_mock()
-    interaction.user.id = bot.user.id
+    interaction.user.id = mock_bot.user.id
     await cog.on_interaction(interaction)
     mock_metrics.increment_discord_message_count.assert_not_called()

@@ -9,9 +9,21 @@ from bot.core.lifecycle import BotLifecycle, LifecycleState
 from bot.core.settings import Settings
 
 
+@pytest.fixture
+def test_settings() -> Settings:
+    """Provides a real Settings object for integration tests."""
+    return Settings(
+        discord_token="fake-token-for-test",
+        owner_id=12345,
+        # Disable external services for this test
+        redis_enabled=False,
+        proxy_enabled=False,
+    )
+
+
 @pytest.mark.asyncio
 async def test_full_bot_startup_wiring(
-    mock_settings: Settings, caplog: pytest.LogCaptureFixture
+    test_settings: Settings, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Verify that the bot's DI container and lifecycle can be fully wired without errors."""
     # Create an event to control when the mocked bot.start() should finish
@@ -27,7 +39,7 @@ async def test_full_bot_startup_wiring(
         patch("bot.core.discord.boot.MyBot.close", new_callable=AsyncMock),
         patch("bot.core.discord.boot.MyBot.login", new_callable=AsyncMock),
     ):
-        lifecycle = BotLifecycle(settings=mock_settings)
+        lifecycle = BotLifecycle(settings=test_settings)
 
         # The `run` method normally blocks forever. We'll run it as a task and
         # cancel it once we've verified it has reached the connecting state.

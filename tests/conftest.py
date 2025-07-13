@@ -124,18 +124,6 @@ async def _cleanup_asyncio_tasks() -> AsyncGenerator[None, None]:
         await asyncio.gather(*pending, return_exceptions=True)
 
 
-# Type annotated autouse fixture (required by --strict mypy)
-@pytest.fixture(autouse=True)
-def _force_headless(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force Playwright to run headless for the entire test session."""
-
-    # Patch the global settings object if it exists. `raising=False` means
-    # the attribute will be created if missing, so this works even if the
-    # settings module gets imported lazily during tests.
-    monkeypatch.setattr("bot.core.settings.settings.browser.headless", True, raising=False)
-    monkeypatch.setattr("bot.core.settings.settings.browser.visible", False, raising=False)
-
-
 @pytest.fixture
 def cli_runner() -> Generator[Any, None, None]:
     """

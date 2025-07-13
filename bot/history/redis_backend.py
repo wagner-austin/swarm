@@ -1,48 +1,33 @@
 from __future__ import annotations
 
 import json
-from types import ModuleType
+import logging
 from typing import Any, cast
+
+import redis.asyncio as redis_asyncio
 
 from .backends import (
     HistoryBackend,
     Turn,
 )  # must precede runtime code to satisfy ruff E402
 
-redis_async: ModuleType | None
-try:
-    import redis.asyncio as _redis_mod
-
-    redis_async = _redis_mod
-except ModuleNotFoundError:  # pragma: no cover – optional dependency
-    redis_async = None
-
-# Using `Any` for Redis client type avoids mismatches with stubs that declare
-# sync return types (ints, lists) even for async API. This keeps `mypy --strict`
-# happy without sprinkling type: ignore comments.
-
 # Using `Any` for Redis client type avoids mismatches with stubs that declare
 # sync return types (ints, lists) even for async API. This keeps `mypy --strict`
 # happy without sprinkling type: ignore comments.
 RedisT = Any
 
-_redis: ModuleType | None = redis_async
+logger = logging.getLogger(__name__)
 
 
 class RedisBackend(HistoryBackend):
     """Redis-based implementation of :class:`HistoryBackend`."""
 
     def __init__(self, url: str, max_turns: int) -> None:
-        if _redis is None:
-            raise ImportError(
-                "Redis backend selected but optional 'redis' package is not installed.\n"
-                "Install via `pip install redis[asyncio]` or disable REDIS_ENABLED."
-            )
         self._max_turns = max_turns
         # Decode responses (str) so we get strings not bytes.  Cast keeps mypy strict happy.
         self._r: RedisT = cast(
             RedisT,
-            _redis.from_url(url, encoding="utf-8", decode_responses=True),
+            redis_asyncio.from_url(url, encoding="utf-8", decode_responses=True),  # type: ignore[no-untyped-call]
         )
 
     # Internal helper -----------------------------------------------------
@@ -73,8 +58,9 @@ class RedisBackend(HistoryBackend):
                 else:  # Fallback for sync generator
                     for key in iterator:
                         await cast(Any, self._r).delete(key)
-            except Exception:
+            except Exception as exc:
                 # Fallback to KEYS if SCAN not available or fails
+                logger.warning(f"Redis SCAN operation failed, falling back to KEYS: {exc}")
                 keys = await cast(Any, self._r).keys(pattern)
                 if keys:
                     await cast(Any, self._r).delete(*keys)

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import asyncio
 
-import redis.asyncio as aioredis
+import redis.asyncio as redis_asyncio
 
 
 async def clear_stream() -> None:
-    r = aioredis.from_url("redis://localhost:6379/0", decode_responses=True)  # type: ignore[no-untyped-call]
+    r = redis_asyncio.from_url("redis://localhost:6379/0", decode_responses=True)  # type: ignore[no-untyped-call]
 
     # Delete the entire stream to clear all pending jobs
     result = await r.delete("jobs")

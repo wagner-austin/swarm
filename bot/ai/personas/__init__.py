@@ -14,6 +14,7 @@ control the persona set.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
@@ -32,6 +33,8 @@ __all__ = [
     "_CUSTOM_DIR",
     "_load",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class Persona(TypedDict):
@@ -121,9 +124,9 @@ def _populate(target: dict[str, Persona]) -> None:
     if _secret_env:
         try:
             target.update(_coerce(yaml.safe_load(_secret_env) or {}))
-        except Exception:
+        except Exception as exc:
             # Fail soft – malformed env secrets shouldn't crash the bot
-            pass
+            logger.warning(f"Failed to load personas from BOT_SECRET_PERSONAS env: {exc}")
 
     # runtime secret file mounted by Fly (highest precedence)
     _runtime_secret_file: Path = Path("/secrets") / "BOT_SECRET_PERSONAS"
@@ -131,8 +134,10 @@ def _populate(target: dict[str, Persona]) -> None:
         try:
             _runtime_raw: str = _runtime_secret_file.read_text("utf-8")
             target.update(_coerce(yaml.safe_load(_runtime_raw) or {}))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                f"Failed to load personas from runtime secret file {_runtime_secret_file}: {exc}"
+            )
 
     # operator secrets file (local dev) – precedence just below runtime secret
     if _SECRET_FILE.exists():

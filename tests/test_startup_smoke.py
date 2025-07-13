@@ -2,58 +2,59 @@
 
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 # ── internal entry-points we want to exercise ─────────────────────────
-from bot.core.launcher import launch_bot
+# ── internal entry-points we want to exercise ─────────────────────────
+from bot.core.lifecycle import BotLifecycle
+from bot.core.settings import Settings
 
 
 @pytest.mark.asyncio
-async def test_bot_startup_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_bot_startup_smoke() -> None:
     """
-    Boots the full discord-runner stack, but with every external side-effect
-    (Discord API, mitmproxy, Chrome) stubbed out so the coroutine returns
-    immediately.  The goal is to detect regressions in the startup path
-    (import cycles, bad awaits, missing attrs) without hitting the network.
+    Boots the full discord-runner stack, but with the primary external side-effect
+    (the Discord API) stubbed out so the coroutine returns immediately.
+
+    The goal is to detect regressions in the startup path (import cycles, bad
+    awaits, missing attrs) without hitting the network.
     """
 
     # ------------------------------------------------------------------
-    # 1.  Guarantee a valid token in the already-imported settings singleton
+    # 1.  Create a fake bot factory that produces a mock bot instance.
+    #     This mock simulates the behavior needed for the smoke test.
     # ------------------------------------------------------------------
-    monkeypatch.setattr("bot.core.settings.settings.discord_token", "stub-token", raising=False)
+    def fake_bot_factory(*args: Any, **kwargs: Any) -> MagicMock:
+        mock_bot = MagicMock()
+
+        # The bot factory receives intents and container, we need to store the container
+        # so that cogs can access it via bot.container during initialization
+        mock_bot.container = kwargs.get("container")
+
+        async def fake_start(*args: Any, **kwargs: Any) -> None:
+            # Immediately raise KeyboardInterrupt to simulate a graceful shutdown signal,
+            # allowing us to test the full startup and shutdown sequence.
+            raise KeyboardInterrupt
+
+        mock_bot.start = fake_start
+        mock_bot.close = AsyncMock()
+        mock_bot.is_closed.return_value = True
+        return mock_bot
 
     # ------------------------------------------------------------------
-    # 2.  Stub discord.ext.commands.Bot.start/close so we don’t touch Discord
+    # 2.  Create a settings object for the test.
     # ------------------------------------------------------------------
-    async def fake_bot_start(
-        self: Any,
-        *args: Any,
-        **kwargs: Any,
-    ) -> None:  # noqa: D401
-        # Immediately drop back into the caller the same way a Ctrl-C would,
-        # which the lifecycle manager already handles gracefully.
-        raise KeyboardInterrupt
-
-    async def fake_bot_close(self: Any) -> None:  # noqa: D401
-        return None
-
-    monkeypatch.setattr("discord.ext.commands.Bot.start", fake_bot_start, raising=True)
-    monkeypatch.setattr("discord.ext.commands.Bot.close", fake_bot_close, raising=True)
-    monkeypatch.setattr("discord.ext.commands.Bot.is_closed", lambda self: True, raising=False)
+    settings = Settings(discord_token="fake-token-for-test")
 
     # ------------------------------------------------------------------
-    # 3.  Stub the TankPit ProxyService so no mitmproxy subprocess kicks off
+    # 3.  Instantiate the lifecycle manager, injecting our fake bot factory.
     # ------------------------------------------------------------------
-    async def fake_proxy_start(self: Any) -> str:  # noqa: D401
-        return "proxy-started"
-
-    async def fake_proxy_stop(self: Any) -> str:  # noqa: D401
-        return "proxy-stopped"
+    lifecycle = BotLifecycle(settings=settings, bot_factory=fake_bot_factory)
 
     # ------------------------------------------------------------------
-    # 4.  Finally exercise the runner.  If any step raises, pytest will fail.
+    # 4.  Run the lifecycle. If any step raises an unexpected error,
+    #     pytest will fail the test.
     # ------------------------------------------------------------------
-    # ProxyService is now managed by the DI container within run_bot.
-    # The monkeypatches for ProxyService.start/stop will affect the instance created by the container.
-    await launch_bot()
+    await lifecycle.run()

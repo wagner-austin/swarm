@@ -4,13 +4,35 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
-from bot.plugins.commands.status import Status
+from bot.core.containers import Container
 
 
 @pytest.fixture
-def dummy_bot() -> MagicMock:
+def container_with_mocked_metrics() -> tuple[Container, MagicMock]:
+    """Create real DI container with mocked metrics."""
+    container = Container()
+
+    # Mock metrics helper
+    mock_metrics = MagicMock()
+    mock_metrics.get_stats.return_value = {
+        "uptime_s": 7200,
+        "discord_messages_processed": 42,
+        "messages_sent": 24,
+    }
+    mock_metrics.format_hms.return_value = "2:00:00"
+    mock_metrics.get_cpu_mem.return_value = ("5%", "256MB")
+    container.metrics_helper.override(mock_metrics)
+
+    return container, mock_metrics
+
+
+@pytest.fixture
+def dummy_bot(container_with_mocked_metrics: tuple[Container, MagicMock]) -> MagicMock:
+    """Create a mocked bot with real DI container."""
+    container, _ = container_with_mocked_metrics
+
     bot = MagicMock(spec=discord.ext.commands.Bot)
-    bot.container = MagicMock()
+    bot.container = container
     bot.latency = 0.123
     bot.guilds = [MagicMock(), MagicMock()]
     bot.shard_id = 0
@@ -20,6 +42,7 @@ def dummy_bot() -> MagicMock:
 
 @pytest.fixture
 def interaction() -> MagicMock:
+    """Create a properly mocked Discord interaction."""
     inter = MagicMock(spec=discord.Interaction)
     inter.user.id = 12345
     inter.response.defer = AsyncMock()
@@ -28,22 +51,28 @@ def interaction() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_status_embed_fields(dummy_bot: MagicMock, interaction: MagicMock) -> None:
-    mock_metrics = MagicMock()
-    mock_metrics.get_stats.return_value = {
-        "uptime_s": 7200,
-        "discord_messages_processed": 42,
-        "messages_sent": 24,
-    }
-    mock_metrics.format_hms.return_value = "2:00:00"
-    mock_metrics.get_cpu_mem.return_value = ("5%", "256MB")
+async def test_status_embed_fields(
+    dummy_bot: MagicMock,
+    interaction: MagicMock,
+    container_with_mocked_metrics: tuple[Container, MagicMock],
+) -> None:
+    """Test /status command using real DI container."""
+    container, mock_metrics = container_with_mocked_metrics
     mock_safe_send = AsyncMock()
-    cog = Status(
-        dummy_bot,
-        metrics_mod=mock_metrics,
-        safe_send_func=mock_safe_send,
+
+    # Create Status cog using REAL DI container factory
+    cog = container.status_cog(
+        bot=dummy_bot,
+        safe_send_func=mock_safe_send,  # Override safe_send for testing
     )
+
     await cast(Any, cog.status.callback)(cog, interaction)
+
+    # Verify metrics were called via real DI
+    mock_metrics.get_stats.assert_called_once()
+    mock_metrics.format_hms.assert_called_once_with(7200)
+    mock_metrics.get_cpu_mem.assert_called_once()
+
     # Should send an embed with correct title and fields
     assert len(mock_safe_send.await_args_list) > 0, "safe_send was never called"
     assert mock_safe_send.await_args_list[0].kwargs["embed"].title == "Bot status"
@@ -57,8 +86,13 @@ async def test_status_embed_fields(dummy_bot: MagicMock, interaction: MagicMock)
 
 
 @pytest.mark.asyncio
-async def test_status_shard_info(dummy_bot: MagicMock, interaction: MagicMock) -> None:
-    mock_metrics = MagicMock()
+async def test_status_shard_info(
+    dummy_bot: MagicMock,
+    interaction: MagicMock,
+    container_with_mocked_metrics: tuple[Container, MagicMock],
+) -> None:
+    """Test /status command with shard info using real DI container."""
+    container, mock_metrics = container_with_mocked_metrics
     mock_metrics.get_stats.return_value = {
         "uptime_s": 3600,
         "discord_messages_processed": 10,
@@ -69,11 +103,13 @@ async def test_status_shard_info(dummy_bot: MagicMock, interaction: MagicMock) -
     mock_safe_send = AsyncMock()
     dummy_bot.shard_id = 1
     dummy_bot.shard_count = 3
-    cog = Status(
-        dummy_bot,
-        metrics_mod=mock_metrics,
+
+    # Create Status cog using REAL DI container factory
+    cog = container.status_cog(
+        bot=dummy_bot,
         safe_send_func=mock_safe_send,
     )
+
     await cast(Any, cog.status.callback)(cog, interaction)
     assert len(mock_safe_send.await_args_list) > 0, "safe_send was never called"
     embed = mock_safe_send.await_args_list[0].kwargs["embed"]
@@ -82,8 +118,13 @@ async def test_status_shard_info(dummy_bot: MagicMock, interaction: MagicMock) -
 
 
 @pytest.mark.asyncio
-async def test_status_no_shard(dummy_bot: MagicMock, interaction: MagicMock) -> None:
-    mock_metrics = MagicMock()
+async def test_status_no_shard(
+    dummy_bot: MagicMock,
+    interaction: MagicMock,
+    container_with_mocked_metrics: tuple[Container, MagicMock],
+) -> None:
+    """Test /status command without shard info using real DI container."""
+    container, mock_metrics = container_with_mocked_metrics
     mock_metrics.get_stats.return_value = {
         "uptime_s": 100,
         "discord_messages_processed": 1,
@@ -94,9 +135,10 @@ async def test_status_no_shard(dummy_bot: MagicMock, interaction: MagicMock) -> 
     mock_safe_send = AsyncMock()
     dummy_bot.shard_id = None
     dummy_bot.shard_count = None
-    cog = Status(
-        dummy_bot,
-        metrics_mod=mock_metrics,
+
+    # Create Status cog using REAL DI container factory
+    cog = container.status_cog(
+        bot=dummy_bot,
         safe_send_func=mock_safe_send,
     )
     await cast(Any, cog.status.callback)(cog, interaction)

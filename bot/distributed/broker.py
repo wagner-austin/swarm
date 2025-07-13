@@ -3,7 +3,7 @@ import logging
 import os
 from typing import Any
 
-import redis.asyncio as aioredis
+import redis.asyncio as redis_asyncio
 
 from bot.distributed.model import Job
 
@@ -18,7 +18,7 @@ class Broker:
     """
 
     def __init__(self, redis_url: str) -> None:
-        self._r = aioredis.from_url(redis_url, decode_responses=True)  # type: ignore[no-untyped-call]
+        self._r = redis_asyncio.from_url(redis_url, decode_responses=True)  # type: ignore[no-untyped-call]
 
     async def ensure_stream_and_group(self, group: str) -> None:
         """
@@ -66,7 +66,7 @@ class Broker:
                     logger.warning(f"Job result is not a dict: {data}")
                     continue
             except Exception as exc:
-                logger.warning(f"Failed to decode job result: {exc}")
+                logger.error(f"Failed to decode job result (data corruption): {exc}")
                 continue
             if data.get("job_id") == job.id:
                 logger.info(f"Received result for job {job.id}")

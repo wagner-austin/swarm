@@ -29,6 +29,11 @@ volunteer_bot.egg-info/
 
 loki-data
 
+# Ignore test coverage artefacts
+.coverage
+.coverage.*
+htmlcov/
+
 #ignore logs folder for git and *.log files
 logs/
 *.log
