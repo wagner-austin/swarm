@@ -3,7 +3,7 @@
 
 import asyncio
 import warnings
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -95,6 +95,33 @@ def mock_settings() -> Settings:
     # Security and observability
     settings.allowed_hosts = []
     return settings
+
+
+# Type annotated autouse fixture (required by --strict mypy)
+@pytest.fixture(autouse=True)
+async def _cleanup_asyncio_tasks() -> AsyncGenerator[None, None]:
+    """Ensure no pending tasks survive beyond each test function.
+
+    pytest-asyncio closes the event loop *after* test teardown.  If background
+    tasks spawned inside a test are still running, the loop closure logs
+    warnings like "Task was destroyed but it is pending".  We pre-emptively
+    cancel and await any leftover tasks so they finish cleanly.
+    """
+    # Run the test.
+    yield
+
+    # After the test function returns, cancel remaining tasks.
+    loop = asyncio.get_running_loop()
+    pending: list[asyncio.Task[Any]] = [
+        t
+        for t in asyncio.all_tasks(loop)
+        if t is not asyncio.current_task(loop=loop) and not t.done()
+    ]
+    for task in pending:
+        task.cancel()
+    if pending:
+        # Await their cancellation but ignore CancelledError results.
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 # Type annotated autouse fixture (required by --strict mypy)

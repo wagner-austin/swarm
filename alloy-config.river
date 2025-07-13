@@ -1,25 +1,59 @@
 // Grafana Alloy configuration for log shipping to Loki
-// Converted from Promtail configuration
 
-// Docker container log discovery and scraping
+// 1. Discover running Docker containers.
 discovery.docker "containers" {
   host             = "unix:///var/run/docker.sock"
   refresh_interval = "15s"
 }
 
-// Loki log source for Docker containers
+// 2. Scrape logs from discovered containers and forward for processing.
 loki.source.docker "containers" {
-  host             = "unix:///var/run/docker.sock"
-  targets          = discovery.docker.containers.targets
-  forward_to       = [loki.write.default.receiver]
-  refresh_interval = "15s"
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.containers.targets
+  forward_to = [loki.process.json_pipeline.receiver]
   
-
-  // Basic static labels; advanced relabeling can be added later once Alloy supports equivalent syntax
+  // Basic static labels; container name will be extracted in processing
   labels = { job = "docker-containers" }
 }
 
-// Loki write endpoint
+// 3. Process the logs: extract container info and parse JSON to create labels.
+loki.process "json_pipeline" {
+  // Forward the final, processed logs to the Loki write endpoint.
+  forward_to = [loki.write.default.receiver]
+
+  // First stage: Extract container name from Docker metadata
+  // The container name comes in as __meta_docker_container_name with a leading '/'
+  stage.regex {
+    expression = "^/(?P<container_name>.*)"
+    source     = "__meta_docker_container_name"
+  }
+
+  // Second stage: Parse the log line as JSON. This makes all JSON fields
+  // available for the next stages.
+  stage.json {
+    expressions = {
+      // Extract key fields into the temporary map for the next stage.
+      service   = "service",
+      worker_id = "worker_id",
+      job_id    = "job_id",
+      level     = "levelname",
+    }
+  }
+
+  // Third stage: Create Loki labels from the extracted fields.
+  // These labels are indexed by Loki and used for filtering in Grafana.
+  stage.labels {
+    values = {
+      container = `container_name`,
+      service   = `service`,
+      worker_id = `worker_id`,
+      job_id    = `job_id`,
+      level     = `level`,
+    }
+  }
+}
+
+// 4. Define the Loki endpoint where processed logs will be sent.
 loki.write "default" {
   endpoint {
     url = "http://loki:3100/loki/api/v1/push"

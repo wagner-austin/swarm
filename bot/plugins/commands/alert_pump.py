@@ -8,8 +8,9 @@ enqueue a human-readable string on that queue and it will be delivered.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from typing import cast
+from typing import Any, Coroutine, cast
 
 import discord
 from discord.ext import commands
@@ -78,47 +79,83 @@ class AlertPump(commands.Cog):
             except asyncio.CancelledError:
                 pass
 
-    async def _relay_loop(self, q: asyncio.Queue[str]) -> None:
-        """Forever consume the queue and DM the owner."""
-        while not self.bot.is_closed():
-            got_msg = False
+    def __del__(self) -> None:
+        # Fallback for tests that don't call cog_unload(). Ensure the task finishes
+        # so the event loop does not complain about pending tasks on shutdown.
+        if self._task and not self._task.done():
+            self._task.cancel()
             try:
-                # Wake up periodically even when no alerts arrive
-                msg = await asyncio.wait_for(q.get(), timeout=1.0)
-                # Always stash newly received message first
-                self._pending.append(msg)
-                got_msg = True
-            except TimeoutError:
+                loop = self._task.get_loop()
+                if loop.is_running() and not loop.is_closed():
+                    import concurrent.futures
+
+                    async def _await_task(t: asyncio.Task[None]) -> None:  # pragma: no cover
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await t
+
+                    fut: concurrent.futures.Future[None] = asyncio.run_coroutine_threadsafe(
+                        _await_task(self._task),
+                        loop,
+                    )
+                    try:
+                        fut.result(timeout=0.1)
+                    except (asyncio.CancelledError, concurrent.futures.TimeoutError):
+                        pass
+            except Exception:  # pragma: no cover – best-effort cleanup
+                pass
+
+    async def _relay_loop(self, q: asyncio.Queue[str]) -> None:
+        """Forever consume the queue and DM the owner.
+
+        The loop exits automatically when the bot is closed or when the task is
+        cancelled, preventing pending-task warnings during test teardown.
+        """
+        try:
+            while not self.bot.is_closed():
+                got_msg = False
+                try:
+                    # Wake up periodically even when no alerts arrive
+                    msg = await asyncio.wait_for(q.get(), timeout=1.0)
+                    # Always stash newly received message first
+                    self._pending.append(msg)
+                    got_msg = True
+                except TimeoutError:
+                    # No new message; fall through to retry pending sends
+                    pass
                 # No new message; fall through to retry pending sends
                 pass
 
-            # No 'continue' above: we want to attempt delivery for any pending
-            # alerts each time the loop wakes up, even if no new alert arrived.
-            owner: discord.User | None = None
-            try:
-                owner = await get_owner(self.bot)
-            except RuntimeError as exc:
-                logger.debug("Could not resolve owner during relay loop pass: %s", exc)
+                # Attempt to deliver any pending alerts on every loop pass.
+                try:
+                    owner = await get_owner(self.bot)
+                except RuntimeError as exc:
+                    logger.debug("Could not resolve owner during relay loop pass: %s", exc)
+                    owner = None
 
-            if owner is None:
-                # Owner still not available – keep messages in the _pending list
-                if self._pending:
-                    logger.debug(
-                        "Owner unresolved – deferring %d alert(s) for next pass",
-                        len(self._pending),
-                    )
-            else:
-                # We have an owner: try to flush all pending alerts (oldest first)
-                for pending_item in list(self._pending):
-                    if isinstance(pending_item, discord.Embed):
-                        await self._send_dm_with_retry(owner, content=None, embed=pending_item)
-                    else:
-                        await self._send_dm_with_retry(owner, f"⚠️ **Bot alert:** {pending_item}")
-                self._pending.clear()
+                if owner is None:
+                    # Owner still unavailable – keep messages queued for next pass.
+                    if self._pending:
+                        logger.debug(
+                            "Owner unresolved – deferring %d alert(s) for next pass",
+                            len(self._pending),
+                        )
+                else:
+                    # Flush all pending alerts (oldest first)
+                    for pending_item in list(self._pending):
+                        if isinstance(pending_item, discord.Embed):
+                            await self._send_dm_with_retry(owner, content=None, embed=pending_item)
+                        else:
+                            await self._send_dm_with_retry(
+                                owner, f"⚠️ **Bot alert:** {pending_item}"
+                            )
+                    self._pending.clear()
 
-            # Acknowledge the queue task only if we actually pulled one.
-            if got_msg:
-                q.task_done()
+                # Acknowledge the queue task only if we actually pulled one.
+                if got_msg:
+                    q.task_done()
+        except asyncio.CancelledError:
+            # Expected during shutdown – swallow to allow clean task finalisation.
+            pass
 
     # ------------------------------------------------------------------+
     # internal helpers                                                   +

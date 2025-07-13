@@ -33,7 +33,6 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 # Import local runtimes/engines for dispatch
 from bot.browser.engine import BrowserEngine
-from bot.browser.runtime import BrowserRuntime  # If still needed elsewhere
 from bot.distributed.broker import Broker
 from bot.distributed.model import Job
 from bot.distributed.monitoring.state import BaseStateMachine, WorkerState
@@ -41,7 +40,6 @@ from bot.infra.tankpit.engine import TankPitEngine
 from bot.utils.dispatch import filter_kwargs_for_method
 
 logger = logging.getLogger("worker")
-logging.basicConfig(level=logging.INFO)
 
 HandlerFunc = Callable[[Job], Awaitable[Any]]
 
@@ -126,15 +124,36 @@ class Worker(BaseStateMachine):
 
     async def dispatch(self, job: Job) -> None:
         """Dispatch the job to the appropriate handler based on its type prefix."""
-        for prefix, handler in self.handlers.items():
-            if job.type.startswith(prefix):
-                logger.info(f"Dispatching job {job.type} to handler {prefix}")
-                try:
-                    await handler(job)
-                except Exception as exc:
-                    logger.error(f"Handler error for job {job.type}: {exc}")
-                return
-        logger.warning(f"No handler registered for job type: {job.type}")
+        result = {"job_id": job.id, "success": False, "result": None, "error": None}
+
+        try:
+            for prefix, handler in self.handlers.items():
+                if job.type.startswith(prefix):
+                    logger.info(f"Dispatching job {job.type} to handler {prefix}")
+                    try:
+                        handler_result = await handler(job)
+                        result["success"] = True
+                        result["result"] = handler_result
+                        logger.info(f"✅ Job {job.id} completed successfully")
+                    except Exception as exc:
+                        result["error"] = str(exc)
+                        logger.error(f"❌ Handler error for job {job.type}: {exc}")
+                    break
+            else:
+                result["error"] = f"No handler registered for job type: {job.type}"
+                logger.warning(f"No handler registered for job type: {job.type}")
+        except Exception as exc:
+            result["error"] = f"Dispatch error: {str(exc)}"
+            logger.error(f"Dispatch error for job {job.id}: {exc}")
+        finally:
+            # Send result back to manager
+            try:
+                import json
+
+                await self.broker._r.rpush("job_results", json.dumps(result))
+                logger.debug(f"📤 Sent result for job {job.id} to manager")
+            except Exception as exc:
+                logger.error(f"Failed to send job result: {exc}")
 
 
 # --- Multi-engine-per-worker: session-keyed runtime/engine maps ---
@@ -180,6 +199,9 @@ async def handle_browser_job(job: Job) -> None:
     Each job is dispatched to a session-specific engine instance, keyed by session_id.
     If job.kwargs['close_session'] is True, the session is closed after the job.
     """
+    from bot.core.logger_setup import bind_log_context
+
+    bind_log_context(job_id=job.id)
     session_id = str(job.kwargs.get("session_id") or job.reply_to or job.id)
     engine = _browser_engines.get(session_id)
     if engine is None:
@@ -210,6 +232,9 @@ async def handle_tankpit_job(job: Job) -> None:
     Each job is dispatched to a session-specific engine instance, keyed by session_id.
     If job.kwargs['close_session'] is True, the session is closed after the job.
     """
+    from bot.core.logger_setup import bind_log_context
+
+    bind_log_context(job_id=job.id)
     session_id = str(job.kwargs.get("session_id") or job.reply_to or job.id)
     engine = _tankpit_engines.get(session_id)
     if engine is None:
@@ -275,9 +300,27 @@ async def _cleanup_orphaned_browsers() -> None:
 
 
 async def main() -> None:
+    # 1. Configure logging FIRST.
+    from bot.core.logger_setup import (
+        auto_detect_deployment_context,
+        bind_deployment_context,
+        bind_log_context,
+        setup_logging,
+    )
+
+    setup_logging()
+    args = parse_args()
+
+    # Detect and bind deployment context
+    deployment_context = auto_detect_deployment_context()
+    bind_deployment_context(context=deployment_context)
+    bind_log_context(service="worker", worker_id=args.worker_id)
+
+    logger.info(f"Worker starting with deployment context: {deployment_context}")
+
+    # 2. Start services.
     from bot.distributed.monitoring.http import start_http_server
 
-    args = parse_args()
     await _cleanup_orphaned_browsers()  # Clean up orphans before starting any engines
     broker = Broker(args.redis_url)
     # Ensure robust, idempotent creation of the stream and group before consuming jobs
@@ -317,11 +360,33 @@ async def main() -> None:
             await close_all_sessions()
             logger.info("Worker shutdown complete. All sessions cleaned up.")
 
+    # 3. Start heartbeat system
+    import redis.asyncio as redis
+
+    from bot.distributed.monitoring.heartbeat import WorkerHeartbeat
+
+    redis_client = redis.from_url(args.redis_url)  # type: ignore[no-untyped-call]
+    heartbeat = WorkerHeartbeat(
+        redis_client=redis_client,
+        worker_id=args.worker_id,
+        interval_seconds=float(os.getenv("HEARTBEAT_INTERVAL", "30")),
+        worker=worker,
+    )
+
+    async def _run_with_heartbeat() -> None:
+        """Run worker with heartbeat monitoring."""
+        try:
+            await heartbeat.start()
+            await _run_and_cleanup()
+        finally:
+            await heartbeat.stop()
+            await redis_client.close()
+
     # Start HTTP server for /health and /metrics endpoints
     metrics_port = int(os.getenv("METRICS_PORT", "9200"))
     await asyncio.gather(
         start_http_server(worker, port=metrics_port),
-        _run_and_cleanup(),
+        _run_with_heartbeat(),
         shutdown_event.wait(),
     )
 
