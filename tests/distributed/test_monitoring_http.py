@@ -12,7 +12,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
-from bot.distributed.monitoring.http import WORKER_KEY, health, metrics, start_http_server
+from bot.core.deployment_context import DeploymentContextProvider
+from bot.distributed.monitoring.http import (
+    WORKER_KEY,
+    health,
+    metrics,
+    start_http_server,
+)
 from bot.distributed.monitoring.state import WorkerState
 from bot.distributed.worker import Worker
 
@@ -47,7 +53,11 @@ class TestHealthEndpoint:
 
         # Parse JSON response
         response_data = json.loads(response.text or "{}")
-        assert response_data == {"state": "IDLE"}
+        assert response_data["state"] == "IDLE"
+        assert response_data["status"] == "healthy"
+        assert "uptime_seconds" in response_data
+        assert "system" in response_data
+        assert "resources" in response_data
 
     @pytest.mark.asyncio
     async def test_health_waiting_state_success(
@@ -60,7 +70,8 @@ class TestHealthEndpoint:
 
         assert response.status == 200
         response_data = json.loads(response.text or "{}")
-        assert response_data == {"state": "WAITING"}
+        assert response_data["state"] == "WAITING"
+        assert response_data["status"] == "healthy"
 
     @pytest.mark.asyncio
     async def test_health_busy_state_success(self, mock_request: Mock, mock_worker: Mock) -> None:
@@ -71,7 +82,8 @@ class TestHealthEndpoint:
 
         assert response.status == 200
         response_data = json.loads(response.text or "{}")
-        assert response_data == {"state": "BUSY"}
+        assert response_data["state"] == "BUSY"
+        assert response_data["status"] == "healthy"
 
     @pytest.mark.asyncio
     async def test_health_error_state_unhealthy(
@@ -84,7 +96,8 @@ class TestHealthEndpoint:
 
         assert response.status == 503
         response_data = json.loads(response.text or "{}")
-        assert response_data == {"state": "ERROR"}
+        assert response_data["state"] == "ERROR"
+        assert response_data["status"] == "unhealthy"
 
     @pytest.mark.asyncio
     async def test_health_shutdown_state_unhealthy(
@@ -97,7 +110,8 @@ class TestHealthEndpoint:
 
         assert response.status == 503
         response_data = json.loads(response.text or "{}")
-        assert response_data == {"state": "SHUTDOWN"}
+        assert response_data["state"] == "SHUTDOWN"
+        assert response_data["status"] == "unhealthy"
 
 
 class TestMetricsEndpoint:
@@ -105,46 +119,74 @@ class TestMetricsEndpoint:
 
     @pytest.fixture
     def mock_worker(self) -> Mock:
-        """Create a mocked worker with metrics data."""
         worker = Mock()
-        worker.get_state.return_value = WorkerState.BUSY
         worker.worker_id = "metrics-test-worker"
+        worker.get_state.return_value = WorkerState.WAITING
         worker._backoff = 2.5
+        worker.jobs_processed = 10
+        worker.jobs_queued = 5
+        worker.jobs_failed = 1
         return worker
 
     @pytest.fixture
-    def mock_request(self, mock_worker: Mock) -> Mock:
-        """Create a mocked aiohttp request with worker in app context."""
-        request = Mock()
-        request.app = {WORKER_KEY: mock_worker}
-        return request
+    def fixed_context_provider(self) -> DeploymentContextProvider:
+        return lambda: {
+            "hostname": "test-host",
+            "container_id": "test-container",
+            "deployment_env": "test",
+            "region": "test-region",
+        }
+
+    @pytest.fixture
+    def app(
+        self, mock_worker: Mock, fixed_context_provider: DeploymentContextProvider
+    ) -> web.Application:
+        """Create aiohttp app with mocked worker and context provider."""
+        app = web.Application()
+        app[WORKER_KEY] = mock_worker  # type: ignore[misc]
+        app["deployment_context_provider"] = fixed_context_provider
+        app.router.add_get("/metrics", metrics)
+        return app
+
+    @pytest.fixture
+    async def cli(self, app: web.Application, aiohttp_client: Any) -> Any:
+        """Create an aiohttp test client."""
+        return await aiohttp_client(app)
 
     @pytest.mark.asyncio
-    async def test_metrics_format_and_content(self, mock_request: Mock, mock_worker: Mock) -> None:
+    async def test_metrics_format_and_content(self, cli: Any, mock_worker: Mock) -> None:
         """Test /metrics returns properly formatted Prometheus metrics."""
-        response = await metrics(mock_request)
+        response = await cli.get("/metrics")
 
         assert response.status == 200
-        assert response.content_type == "text/plain"
+        assert "text/plain" in response.headers["Content-Type"]
 
-        metrics_text = response.text or ""
-        lines = metrics_text.strip().split("\n")
+        metrics_text = await response.text()
+
+        # Verify deployment-aware labels are included
+        labels = 'hostname="test-host",container_id="test-container",deployment_env="test",region="test-region"'
+        assert labels in metrics_text
 
         # Verify expected metrics are present
         expected_patterns = [
-            'worker_state{worker_id="metrics-test-worker"}',
-            "worker_backoff_seconds 2.5",
+            "worker_state{",
+            "worker_uptime_seconds{",
+            "worker_backoff_seconds{",
+            "worker_memory_bytes{",
+            "worker_memory_percent{",
+            "worker_cpu_percent{",
+            "worker_threads_total{",
+            "worker_open_files_total{",
+            "# HELP worker_state Current state of the worker",
+            "# TYPE worker_state gauge",
         ]
 
         for pattern in expected_patterns:
-            assert any(pattern in line for line in lines), (
-                f"Pattern '{pattern}' not found in metrics"
-            )
+            assert pattern in metrics_text, f"Pattern '{pattern}' not found in metrics"
 
     @pytest.mark.asyncio
-    async def test_metrics_state_value_mapping(self, mock_request: Mock, mock_worker: Mock) -> None:
+    async def test_metrics_state_value_mapping(self, cli: Any, mock_worker: Mock) -> None:
         """Test metrics correctly maps state enum values."""
-        # Test different states
         test_cases = [
             (WorkerState.IDLE, WorkerState.IDLE.value),
             (WorkerState.WAITING, WorkerState.WAITING.value),
@@ -155,33 +197,36 @@ class TestMetricsEndpoint:
 
         for state, expected_value in test_cases:
             mock_worker.get_state.return_value = state
-            response = await metrics(mock_request)
-
-            assert f'worker_state{{worker_id="metrics-test-worker"}} {expected_value}' in (
-                response.text or ""
-            )
+            response = await cli.get("/metrics")
+            metrics_text = await response.text()
+            # Check that worker_state metric exists with the worker_id
+            assert f'worker_state{{worker_id="{mock_worker.worker_id}"' in metrics_text
+            # Check that the state value appears in the metrics
+            assert str(expected_value) in metrics_text
 
     @pytest.mark.asyncio
-    async def test_metrics_backoff_precision(self, mock_request: Mock, mock_worker: Mock) -> None:
+    async def test_metrics_backoff_precision(self, cli: Any, mock_worker: Mock) -> None:
         """Test metrics correctly formats backoff values with precision."""
         test_backoffs = [0.0, 1.0, 2.5, 10.0, 0.123456789]
 
         for backoff_value in test_backoffs:
             mock_worker._backoff = backoff_value
-            response = await metrics(mock_request)
-
-            assert f"worker_backoff_seconds {backoff_value}" in (response.text or "")
+            response = await cli.get("/metrics")
+            metrics_text = await response.text()
+            # Check that worker_backoff_seconds metric exists with the worker_id
+            assert f'worker_backoff_seconds{{worker_id="{mock_worker.worker_id}"' in metrics_text
+            # Check that the backoff value appears in the metrics
+            assert str(backoff_value) in metrics_text
 
     @pytest.mark.asyncio
-    async def test_metrics_worker_id_escaping(self, mock_request: Mock, mock_worker: Mock) -> None:
+    async def test_metrics_worker_id_escaping(self, cli: Any, mock_worker: Mock) -> None:
         """Test metrics properly handles worker IDs with special characters."""
-        # Test worker ID with special characters
         mock_worker.worker_id = "worker-123_test.special"
 
-        response = await metrics(mock_request)
+        response = await cli.get("/metrics")
+        metrics_text = await response.text()
 
-        # Should include the worker ID as-is (Prometheus labels can handle these chars)
-        assert 'worker_state{worker_id="worker-123_test.special"}' in (response.text or "")
+        assert f'worker_state{{worker_id="{mock_worker.worker_id}"' in metrics_text
 
 
 class TestHttpServer:

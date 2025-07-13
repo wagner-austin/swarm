@@ -1,0 +1,146 @@
+---
+# Logging Configuration Examples for Distributed Bot System
+# =========================================================
+# This file shows various logging configurations for different deployment
+# scenarios. Copy and modify as needed for your environment.
+
+# Environment Variables for Logging Control:
+# LOG_LEVEL=DEBUG|INFO|WARNING|ERROR
+# LOG_FORMAT=json|pretty
+# LOG_TO_FILE=1|0
+# DEPLOYMENT_ENV=local|development|staging|production
+# HEARTBEAT_INTERVAL=30 (seconds)
+# METRICS_PORT=9200
+
+# Production Configuration (JSON logs to stdout for Alloy/Loki)
+production:
+  log_level: INFO
+  log_format: json
+  log_to_file: false
+  heartbeat_interval: 30
+
+  # Structured log output for each service type
+  log_files:
+    bot: "logs/bot/bot.jsonl"
+    worker: "logs/workers/worker-{worker_id}.jsonl"
+    browser: "logs/workers/browser-{worker_id}.jsonl"
+    tankpit: "logs/workers/tankpit-{worker_id}.jsonl"
+
+  # Log rotation settings
+  max_file_size: "50MB"
+  backup_count: 5
+
+  # Metrics and monitoring
+  metrics_port: 9200
+  health_check_port: 9201
+
+# Development Configuration (Pretty logs to console)
+development:
+  log_level: DEBUG
+  log_format: pretty
+  log_to_file: true
+  heartbeat_interval: 10
+
+  # File logging for debugging
+  log_files:
+    bot: "logs/bot/bot-dev.log"
+    worker: "logs/workers/worker-dev.log"
+
+  max_file_size: "10MB"
+  backup_count: 3
+  metrics_port: 9200
+
+# Local Testing Configuration
+local:
+  log_level: DEBUG
+  log_format: pretty
+  log_to_file: false
+  heartbeat_interval: 5
+  metrics_port: 9200
+
+# Docker Compose Configuration (JSON to stdout + structured files)
+docker:
+  log_level: INFO
+  log_format: json
+  log_to_file: true
+  heartbeat_interval: 15
+
+  # Container-aware logging
+  log_files:
+    bot: "/app/logs/bot/bot.jsonl"
+    worker: "/app/logs/workers/worker-{worker_id}.jsonl"
+
+  # Shorter retention for containers (external log aggregation)
+  max_file_size: "20MB"
+  backup_count: 2
+  metrics_port: 9200
+
+# Multi-Environment Deployment Matrix
+# -----------------------------------
+# Environment variables to set for each deployment:
+
+# Local Development:
+# LOG_LEVEL=DEBUG LOG_FORMAT=pretty LOG_TO_FILE=0 DEPLOYMENT_ENV=local
+
+# CI/Testing:
+# LOG_LEVEL=INFO LOG_FORMAT=json LOG_TO_FILE=1 DEPLOYMENT_ENV=testing
+
+# Staging:
+# LOG_LEVEL=INFO LOG_FORMAT=json LOG_TO_FILE=1 DEPLOYMENT_ENV=staging
+# HEARTBEAT_INTERVAL=20
+
+# Production:
+# LOG_LEVEL=INFO LOG_FORMAT=json LOG_TO_FILE=0 DEPLOYMENT_ENV=production
+# HEARTBEAT_INTERVAL=30
+
+# Sample Structured Log Fields
+# ----------------------------
+# Every log record will include:
+sample_log_structure:
+  timestamp: "2025-07-08T22:29:00.123Z"
+  level: "INFO"
+  service: "bot"  # bot|worker|browser|tankpit
+  worker_id: "worker-1"  # for distributed workers
+  job_id: "browser.navigate.abc123"  # current job being processed
+  hostname: "bot-server-01"
+  container_id: "a1b2c3d4e5f6"
+  deployment_env: "production"
+  region: "us-west-1"
+  logger: "bot.plugins.web_search"
+  message: "Processing search request"
+
+  # Additional context fields (job-specific)
+  session_id: "session_abc123"
+  user_id: "user_456"
+  guild_id: "guild_789"
+
+# Log Analysis and Monitoring
+# ---------------------------
+# Grafana Loki Queries:
+grafana_queries:
+  # All logs from production workers
+  - '{deployment_env="production", service="worker"}'
+
+  # Error logs across all services
+  - '{level="ERROR"}'
+
+  # Specific worker activity
+  - '{worker_id="worker-1"} |= "job"'
+
+  # Browser job failures
+  - '{service="worker", job_id=~"browser.*"} |= "ERROR"'
+
+  # Resource usage patterns
+  - '{service="worker"} | json | memory_mb > 500'
+
+# Prometheus Metrics Available
+# ----------------------------
+metrics_available:
+  - worker_state                    # Current worker state (0-4)
+  - worker_uptime_seconds          # Worker uptime
+  - worker_memory_bytes            # Memory usage
+  - worker_cpu_percent             # CPU usage
+  - worker_jobs_processed_total    # Jobs completed
+  - worker_jobs_failed_total       # Jobs failed
+  - worker_threads_total           # Thread count
+  - worker_open_files_total        # Open file handles

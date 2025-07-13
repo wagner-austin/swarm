@@ -55,9 +55,10 @@ COPY --from=builder /usr/local /usr/local
 COPY --from=builder /opt/venv/playwright-cache /root/.cache/ms-playwright
 # Copy application source (but NOT entrypoint.sh)
 COPY --from=builder /app /app
-# Copy the current entrypoint.sh (this ensures we get the updated version)
+# Copy all entrypoint scripts
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY entrypoint.manager.sh /usr/local/bin/entrypoint.manager.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint.manager.sh
 
 # Single source of truth – Settings.metrics_port defaults to 9200
 ARG METRICS_PORT=9200

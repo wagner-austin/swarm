@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any
+from typing import Any, Coroutine, cast
 
 import discord  # need both Message & Interaction types
 from discord.ext import commands
@@ -38,12 +38,55 @@ class MetricsTracker(commands.Cog):
             with contextlib.suppress(asyncio.CancelledError):
                 await self._latency_task
 
+    def __del__(self) -> None:
+        # Fallback for tests that don't call cog_unload(). Ensure the task finishes
+        # so the event loop does not complain about pending tasks on shutdown.
+        if self._latency_task and not self._latency_task.done():
+            self._latency_task.cancel()
+            try:
+                loop: asyncio.AbstractEventLoop = self._latency_task.get_loop()
+                # If the loop is still alive, give it a chance to finish the task.
+                if loop.is_running() and not loop.is_closed():
+                    import concurrent.futures
+
+                    # Run the coroutine completion in a thread-safe manner and
+                    # wait briefly (max 100 ms) – long enough for a clean
+                    # cancellation but short enough to stay non-blocking.
+                    async def _await_task(t: asyncio.Task[None]) -> None:  # pragma: no cover
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await t
+
+                    fut: concurrent.futures.Future[None] = asyncio.run_coroutine_threadsafe(
+                        _await_task(self._latency_task),
+                        loop,
+                    )
+                    try:
+                        fut.result(timeout=0.1)
+                    except (asyncio.CancelledError, concurrent.futures.TimeoutError):
+                        # Either expected cancellation or we ran out of time –
+                        # in both cases we do not care because the task is
+                        # already cancelled.
+                        pass
+            except Exception:  # pragma: no cover – best-effort cleanup
+                pass
+
     async def _latency_loop(self) -> None:
-        """Update the bot latency gauge every 30 s."""
-        while True:
-            latency = float(self.bot.latency or 0.0)
-            BOT_LATENCY.observe(latency)
-            await asyncio.sleep(30)
+        """Update the bot latency gauge every 30 s while the bot is running.
+
+        The loop exits automatically once the bot is closed or the task is
+        cancelled. This prevents spurious "Task was destroyed but it is pending"
+        warnings during test teardown when the event loop is closed before the
+        task naturally finishes.
+        """
+        try:
+            while not self.bot.is_closed():
+                latency = float(self.bot.latency or 0.0)
+                BOT_LATENCY.observe(latency)
+                # Sleep *inside* the running loop so cancellation can interrupt
+                await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            # Expected during shutdown – swallow to mark the task as finished
+            pass
 
     # ------------------------------------------------------------------+
     # Inbound messages – everything the gateway delivers in MESSAGE_CREATE

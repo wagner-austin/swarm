@@ -96,20 +96,22 @@ services:
   bot:
     build: .
     container_name: bot
-    # Main Discord bot process (default entrypoint)
+    # Discord frontend (no local workers)
     volumes:
       - .:/app
       - C:\Users\Test\.config\discord-bot\personas\personas.yaml:/root/.config/discord-bot/personas/personas.yaml:ro
     depends_on:
       - redis
+      - manager
     environment:
       - METRICS_PORT=9200
-      - DISPLAY=:99
-      - BROWSER_HEADLESS=false
+      - REDIS_URL=redis://redis:6379/0
+      - USE_DISTRIBUTED_WORKERS=true
+      # --- Logging Configuration ---
+      - LOG_FORMAT=json
+      - LOG_TO_FILE=0
     ports:
-      - "9000:9000"      # Main bot port (if used)
       - "9200:9200"      # Prometheus metrics
-      - "5900:5900"      # VNC for browser viewing
     healthcheck:
       test:
         - CMD
@@ -126,25 +128,55 @@ services:
       start_period: 90s
     restart: unless-stopped
 
-  worker:
+  manager:
     build: .
-    container_name: worker
-    # Distributed worker process (uses entrypoint.worker.sh)
-    entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
-    # You can scale this service with: docker-compose up --scale worker=3
+    container_name: manager
+    # Job orchestrator and callback handler
+    entrypoint: ["/usr/local/bin/entrypoint.manager.sh"]
     depends_on:
       - redis
     environment:
+      - METRICS_PORT=9150
+      - REDIS_URL=redis://redis:6379/0
+      # --- Logging Configuration ---
+      - LOG_FORMAT=json
+      - LOG_TO_FILE=0
+    ports:
+      - "9150:9150"      # Manager metrics
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(
+            'http://localhost:9150/metrics', timeout=5
+          ).getcode() == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: worker
+    # Generic workers (scalable)
+    entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
+    # Scale with: docker-compose up --scale worker=3
+    depends_on:
+      - redis
+      - manager
+    environment:
       - METRICS_PORT=9100
-      - WORKER_PORT=9100
       - DISPLAY=:99
       - REDIS_URL=redis://redis:6379/0
-      # - WORKER_ID=worker-001           # Uncomment to set a unique worker ID
-      # - JOB_TYPE_PREFIX=browser  # Uncomment to restrict to browser jobs
-      # - LOG_LEVEL=info                  # Uncomment to set log verbosity
-      # - EXTRA_CONFIG=some_value  # Add custom env vars your code supports
+      # --- Logging Configuration ---
+      - LOG_FORMAT=json
+      - LOG_TO_FILE=0
     ports:
-      - "9100:9100"      # Worker metrics (Prometheus)
+      - "9100"            # Expose worker metrics for Prometheus discovery
     volumes:
       - .:/app
       # - ./worker-config.yaml:/app/config.yaml:ro  # Mount config file

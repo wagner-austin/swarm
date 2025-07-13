@@ -3,7 +3,6 @@ from pathlib import Path
 from dependency_injector import containers, providers
 
 from bot.ai import providers as _ai_providers
-from bot.browser.runtime import BrowserRuntime
 from bot.core import metrics as default_metrics
 from bot.core.settings import Settings
 from bot.frontends.discord.discord_interactions import safe_send
@@ -99,11 +98,7 @@ class Container(containers.DeclarativeContainer):
 
     web_cog = providers.Factory(Web, bot=providers.Dependency())
 
-    # Browser runtime – one process-wide instance wired through DI
-    browser_runtime: providers.Singleton[BrowserRuntime] = providers.Singleton(
-        BrowserRuntime,
-        settings=config,
-    )
+    # NOTE: BrowserRuntime (local) has been removed. All browser commands are routed via distributed workers.
 
 
 # Example of how to initialize and use the container (typically in main.py or discord_runner.py):

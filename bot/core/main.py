@@ -12,6 +12,22 @@ async def main() -> None:
 
     Configure logging then delegate to the startup orchestrator.
     """
+    import logging
+
+    from bot.core.logger_setup import (
+        auto_detect_deployment_context,
+        bind_deployment_context,
+        bind_log_context,
+    )
+
+    # Detect and bind deployment metadata for comprehensive logging
+    deployment_context = auto_detect_deployment_context()
+    bind_deployment_context(context=deployment_context)
+    bind_log_context(service="bot")
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Bot starting with deployment context: {deployment_context}")
+
     # Logging is configured during the initial bootstrap in bot.core.__main__.
     # The new launch_bot and BotLifecycle handle KeyboardInterrupt/CancelledError internally.
     await launch_bot()

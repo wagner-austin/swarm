@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
@@ -57,6 +58,14 @@ class BotLifecycle:
         self._state = new_state
 
     async def run(self) -> None:
+        """Run the bot lifecycle."""
+        # Start metrics exporter early in lifecycle
+        try:
+            telemetry.start_exporter(self._settings.metrics_port)
+            logger.info("Telemetry metrics exporter started")
+        except Exception as e:
+            logger.warning(f"Failed to start telemetry exporter: {e}")
+
         if self._state != LifecycleState.IDLE:
             logger.warning(
                 f"Bot run() called when not in IDLE state (current: {self._state.name}). Ignoring."
@@ -246,14 +255,7 @@ class BotLifecycle:
 
         logger.info("Attempting to gracefully shutdown services...")
 
-        if self._container:
-            try:
-                browser_runtime = self._container.browser_runtime()
-                await browser_runtime.close_all()
-                logger.info("Closed all browser engines.")
-            except Exception as e:
-                logger.exception("Error during browser runtime shutdown:", exc_info=e)
-
+        # No local browser runtime shutdown needed in distributed-only architecture.
         logger.info("Finished service shutdown attempts.")
 
         if self._bot and not self._bot.is_closed():

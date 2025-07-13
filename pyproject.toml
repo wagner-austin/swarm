@@ -45,6 +45,7 @@ mypy = ">=1.9"
 types-requests = "*"
 types-psutil = "*"     # ⇐ optional: stub package for mypy
 pytest-env = ">=1.1"    # enable [pytest] env= option
+pytest-aiohttp = ">=1.0.5"  # aiohttp test fixtures
 yamllint = ">=1.35.1"
 
 [tool.poetry.scripts]

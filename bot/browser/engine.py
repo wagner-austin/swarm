@@ -16,7 +16,10 @@ from playwright.async_api import (
 )
 
 from bot.browser.ws_logger import WSLogger, jsonl_sink
+from bot.core.logger_setup import bind_log_context
 from bot.core.service_base import ServiceABC
+
+bind_log_context(service="browser")
 
 logger = logging.getLogger(__name__)
 

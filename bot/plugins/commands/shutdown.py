@@ -5,7 +5,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.browser.runtime import BrowserRuntime
 from bot.frontends.discord.discord_interactions import safe_send
 from bot.frontends.discord.discord_owner import get_owner
 from bot.plugins.base_di import BaseDIClientCog

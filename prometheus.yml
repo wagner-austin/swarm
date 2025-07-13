@@ -5,7 +5,21 @@ global:
 scrape_configs:
   - job_name: 'discord_bot'
     static_configs:
-      # Docker can reach the host via host.docker.internal on Windows/Mac. If
-      # this does not work on your OS, replace with the host's LAN IP
-      # or run the bot in another docker service and use its service name.
-      - targets: ['host.docker.internal:9200']
+      # Bot main process with Discord metrics (Docker service name)
+      - targets: ['bot:9200']
+    scrape_interval: 15s
+    metrics_path: /metrics
+
+  - job_name: 'discord_manager'
+    static_configs:
+      # Job manager with orchestration metrics
+      - targets: ['manager:9150']
+    scrape_interval: 15s
+    metrics_path: /metrics
+
+  - job_name: 'discord_worker'
+    static_configs:
+      # Worker process with system metrics and deployment context
+      - targets: ['worker:9100']
+    scrape_interval: 15s
+    metrics_path: /metrics

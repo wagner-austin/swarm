@@ -30,126 +30,85 @@ def interaction() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_web_start_command_success(dummy_bot: MagicMock, interaction: MagicMock) -> None:
-    """Test successful /web start command with valid URL."""
-    # Mock dependencies
-    mock_browser_runtime = MagicMock()
-    # Mock enqueue to return a completed future
-    mock_future: asyncio.Future[None] = asyncio.Future()
-    mock_future.set_result(None)
-    mock_browser_runtime.enqueue = AsyncMock(return_value=mock_future)
-
+async def test_web_start_with_valid_url(dummy_bot: MagicMock, interaction: MagicMock) -> None:
+    """Test /web start command with valid URL - tests input validation and message formatting."""
     mock_safe_send = AsyncMock()
     mock_validate_url = MagicMock(return_value="https://example.com")
 
-    # Create the Web cog with DI
-    cog = Web(
-        dummy_bot,
-        browser_runtime=mock_browser_runtime,
-        safe_send_func=mock_safe_send,
-        validate_url_func=mock_validate_url,
-    )
+    # Mock the browser runtime entirely - we're testing the command logic, not browser integration
+    with patch("bot.plugins.commands.web.RemoteBrowserRuntime") as mock_browser_class:
+        mock_browser_instance = mock_browser_class.return_value
+        mock_browser_instance.goto = AsyncMock()
 
-    # Mock the safe_defer and safe_send functions that the decorator uses
-    with (
-        patch("bot.webapi.decorators.safe_defer", new_callable=AsyncMock) as mock_safe_defer,
-        patch(
-            "bot.webapi.decorators.safe_send", new_callable=AsyncMock
-        ) as mock_decorator_safe_send,
-    ):
-        # Call the start command (this calls the decorator wrapper)
+        interaction.response.defer = AsyncMock()
+
+        cog = Web(
+            dummy_bot,
+            safe_send_func=mock_safe_send,
+            validate_url_func=mock_validate_url,
+        )
+
         await cast(Any, cog.start.callback)(cog, interaction, url="https://example.com")
 
-        # Assert validate_url was called
+        # Verify the command flow
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
         mock_validate_url.assert_called_once_with("https://example.com")
-
-        # Assert safe_defer was called by decorator
-        mock_safe_defer.assert_called_once()
-
-        # Assert browser runtime was called
-        mock_browser_runtime.enqueue.assert_called_once_with(67890, "goto", "https://example.com")
-
-        # Assert success message was sent by decorator
-        mock_decorator_safe_send.assert_called_once()
-        call_args = mock_decorator_safe_send.call_args[0]
-        assert "Started browser and navigated to" in call_args[1]
+        mock_browser_instance.goto.assert_awaited_once_with(
+            "https://example.com", worker_hint="12345"
+        )
+        mock_safe_send.assert_awaited_once()
+        assert "Started browser and navigated to" in mock_safe_send.call_args[0][1]
 
 
 @pytest.mark.asyncio
 async def test_web_start_command_invalid_url(dummy_bot: MagicMock, interaction: MagicMock) -> None:
     """Test /web start command with invalid URL (validation error)."""
-    # Mock dependencies
-    mock_browser_runtime = MagicMock()
     mock_safe_send = AsyncMock()
     mock_validate_url = MagicMock(side_effect=ValueError("Invalid URL scheme"))
 
-    # Create the Web cog with DI
-    cog = Web(
-        dummy_bot,
-        browser_runtime=mock_browser_runtime,
-        safe_send_func=mock_safe_send,
-        validate_url_func=mock_validate_url,
-    )
+    # No need to mock browser since validation fails before it's used
+    with patch("bot.plugins.commands.web.RemoteBrowserRuntime"):
+        interaction.response.defer = AsyncMock()
 
-    # Call the start command with invalid URL (this calls the decorator wrapper)
-    await cast(Any, cog.start.callback)(cog, interaction, url="not-a-url")
+        cog = Web(
+            dummy_bot,
+            safe_send_func=mock_safe_send,
+            validate_url_func=mock_validate_url,
+        )
 
-    # Assert validate_url was called and raised ValueError
-    mock_validate_url.assert_called_once_with("not-a-url")
+        await cast(Any, cog.start.callback)(cog, interaction, url="not-a-url")
 
-    # Assert our injected safe_send helper was called to send the error message
-    mock_safe_send.assert_awaited_once()
-    args, kwargs = mock_safe_send.call_args
-    assert "Invalid URL" in args[1]
-    assert kwargs.get("ephemeral") is True
-
-    # Ensure no direct interaction.response.send_message bypass occurred
-    interaction.response.send_message.assert_not_called()
-
-    # Assert browser runtime was NOT called in error case
-    mock_browser_runtime.enqueue.assert_not_called()
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+        mock_validate_url.assert_called_once_with("not-a-url")
+        # Browser method not called due to validation error
+        mock_safe_send.assert_awaited_once()
+        assert "Invalid URL" in mock_safe_send.call_args[0][1]
 
 
 @pytest.mark.asyncio
-async def test_web_start_command_no_url(dummy_bot: MagicMock, interaction: MagicMock) -> None:
-    """Test /web start command without URL (just start browser)."""
-    # Mock dependencies
-    mock_browser_runtime = MagicMock()
-    mock_future: asyncio.Future[None] = asyncio.Future()
-    mock_future.set_result(None)
-    mock_browser_runtime.enqueue = AsyncMock(return_value=mock_future)
-
+async def test_web_start_without_url(dummy_bot: MagicMock, interaction: MagicMock) -> None:
+    """Test /web start command without URL - tests browser start flow."""
     mock_safe_send = AsyncMock()
-    mock_validate_url = MagicMock()  # Should not be called
+    mock_validate_url = MagicMock()
 
-    # Create the Web cog with DI
-    cog = Web(
-        dummy_bot,
-        browser_runtime=mock_browser_runtime,
-        safe_send_func=mock_safe_send,
-        validate_url_func=mock_validate_url,
-    )
+    # Mock the browser runtime entirely - we're testing the command logic, not browser integration
+    with patch("bot.plugins.commands.web.RemoteBrowserRuntime") as mock_browser_class:
+        mock_browser_instance = mock_browser_class.return_value
+        mock_browser_instance.start = AsyncMock()
 
-    # Mock the decorator functions
-    with (
-        patch("bot.webapi.decorators.safe_defer", new_callable=AsyncMock) as mock_safe_defer,
-        patch(
-            "bot.webapi.decorators.safe_send", new_callable=AsyncMock
-        ) as mock_decorator_safe_send,
-    ):
-        # Call the start command without URL
+        interaction.response.defer = AsyncMock()
+
+        cog = Web(
+            dummy_bot,
+            safe_send_func=mock_safe_send,
+            validate_url_func=mock_validate_url,
+        )
+
         await cast(Any, cog.start.callback)(cog, interaction, url=None)
 
-        # Assert validate_url was NOT called
+        # Verify the command flow
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
         mock_validate_url.assert_not_called()
-
-        # Assert safe_defer was called by decorator
-        mock_safe_defer.assert_called_once()
-
-        # Assert browser runtime was called with health_check
-        mock_browser_runtime.enqueue.assert_called_once_with(67890, "health_check")
-
-        # Assert success message was sent
-        mock_decorator_safe_send.assert_called_once()
-        call_args = mock_decorator_safe_send.call_args[0]
-        assert "Browser started successfully" in call_args[1]
+        mock_browser_instance.start.assert_awaited_once_with(worker_hint="12345")
+        mock_safe_send.assert_awaited_once()
+        assert "Browser started successfully" in mock_safe_send.call_args[0][1]

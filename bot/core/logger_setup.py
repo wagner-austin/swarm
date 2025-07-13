@@ -5,12 +5,132 @@ that can be used in both production and testing environments.
 """
 
 import collections
+import contextvars
 import copy
 import logging
 import logging.config
 import os
+import platform
+import socket
 import warnings
 from typing import Any
+
+from pythonjsonlogger import json as jsonlogger
+
+# ----------  New section: contextual metadata  ----------
+# Core service context
+_ctx_service: contextvars.ContextVar[str] = contextvars.ContextVar("service", default="unknown")
+_ctx_worker_id: contextvars.ContextVar[str] = contextvars.ContextVar("worker_id", default="unknown")
+_ctx_job_id: contextvars.ContextVar[str] = contextvars.ContextVar("job_id", default="-")
+
+# Deployment/infrastructure context (set once at startup)
+_ctx_hostname: contextvars.ContextVar[str] = contextvars.ContextVar("hostname", default="unknown")
+_ctx_container_id: contextvars.ContextVar[str] = contextvars.ContextVar("container_id", default="-")
+_ctx_deployment_env: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "deployment_env", default="local"
+)
+_ctx_region: contextvars.ContextVar[str] = contextvars.ContextVar("region", default="unknown")
+
+
+def bind_log_context(
+    *, service: str | None = None, worker_id: str | None = None, job_id: str | None = None
+) -> None:
+    """Bind service, worker_id, and job_id to the logging context."""
+    if service is not None:
+        _ctx_service.set(service)
+    if worker_id is not None:
+        _ctx_worker_id.set(worker_id)
+    if job_id is not None:
+        _ctx_job_id.set(job_id)
+
+
+def bind_deployment_context(
+    *,
+    hostname: str | None = None,
+    container_id: str | None = None,
+    deployment_env: str | None = None,
+    region: str | None = None,
+    context: dict[str, str] | None = None,
+) -> None:
+    """Bind deployment/infrastructure metadata to logging context.
+
+    Should be called once at service startup with deployment information.
+    If context is provided, uses its values; otherwise uses the keyword args or auto-detects.
+    """
+    if context is not None:
+        _ctx_hostname.set(context.get("hostname", "unknown"))
+        _ctx_container_id.set(context.get("container_id", "-"))
+        _ctx_deployment_env.set(context.get("deployment_env", "local"))
+        _ctx_region.set(context.get("region", "unknown"))
+        return
+    if hostname is not None:
+        _ctx_hostname.set(hostname)
+    if container_id is not None:
+        _ctx_container_id.set(container_id)
+    if deployment_env is not None:
+        _ctx_deployment_env.set(deployment_env)
+    if region is not None:
+        _ctx_region.set(region)
+
+
+def auto_detect_deployment_context() -> dict[str, str]:
+    """Auto-detect deployment context from environment variables and system info.
+
+    Returns a dict of detected values that can be passed to bind_deployment_context.
+    """
+    context = {}
+
+    # Hostname detection
+    try:
+        context["hostname"] = socket.getfqdn() or platform.node()
+    except Exception:
+        context["hostname"] = "unknown"
+
+    # Container ID detection (Docker)
+    container_id = os.getenv("HOSTNAME")  # Docker sets this to container ID
+    if not container_id:
+        try:
+            # Alternative: read from /proc/self/cgroup (Linux containers)
+            with open("/proc/self/cgroup") as f:
+                for line in f:
+                    if "docker" in line or "containerd" in line:
+                        container_id = line.split("/")[-1].strip()[:12]  # First 12 chars
+                        break
+        except Exception:
+            pass
+    context["container_id"] = container_id or "-"
+
+    # Environment detection
+    context["deployment_env"] = os.getenv("DEPLOYMENT_ENV", "local")
+
+    # Region detection (cloud providers)
+    region = (
+        os.getenv("FLY_REGION")  # Fly.io
+        or os.getenv("AWS_REGION")  # AWS
+        or os.getenv("GOOGLE_CLOUD_REGION")  # GCP
+        or os.getenv("AZURE_REGION")  # Azure
+        or "unknown"
+    )
+    context["region"] = region
+
+    return context
+
+
+# ----------  New section: context filter  ----------
+class _ContextFilter(logging.Filter):
+    """Adds service/worker_id/job_id and deployment metadata fields to every LogRecord."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Core service context
+        record.service = _ctx_service.get()
+        record.worker_id = _ctx_worker_id.get()
+        record.job_id = _ctx_job_id.get()
+        # Deployment/infrastructure context
+        record.hostname = _ctx_hostname.get()
+        record.container_id = _ctx_container_id.get()
+        record.deployment_env = _ctx_deployment_env.get()
+        record.region = _ctx_region.get()
+        return True
 
 
 def merge_dicts(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
@@ -42,26 +162,50 @@ DEFAULT_LOGGING_CONFIG: dict[str, Any] = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        # RichHandler ignores most format string except datefmt,
-        # keep formatter minimal and pass only datefmt.
+        # Human-friendly for dev runs (`LOG_FORMAT=pretty`)
         "rich": {"datefmt": "%Y-%m-%d %H:%M:%S"},
+        # Machine-friendly for Alloy/Loki (`LOG_FORMAT=json`, default in prod)
+        "json": {
+            "()": "pythonjsonlogger.json.JsonFormatter",
+            "fmt": "%(asctime)s %(levelname)s %(service)s %(worker_id)s %(job_id)s %(hostname)s %(container_id)s %(deployment_env)s %(region)s %(name)s %(message)s",
+            "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+        },
+        # Fallback plain text (kept for unit-tests & legacy)
         "default": {"format": "%(asctime)s [%(levelname)s] %(message)s"},
     },
-    "filters": {"dedupe": {"()": "bot.core.logger_setup._DuplicateFilter"}},
+    "filters": {
+        "dedupe": {"()": "bot.core.logger_setup._DuplicateFilter"},
+        # Inject ctx-vars into every record
+        "context": {"()": "bot.core.logger_setup._ContextFilter"},
+    },
     "handlers": {
+        # always present – goes to stdout so Alloy can scrape
+        "stdout": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+            "filters": ["dedupe", "context"],
+            "stream": "ext://sys.stdout",
+        },
+        # pretty console for local hacking – enabled when LOG_FORMAT=pretty
         "rich": {
             "class": "rich.logging.RichHandler",
-            "markup": True,
-            "rich_tracebacks": True,
-            "show_path": False,
             "formatter": "rich",
-            "filters": ["dedupe"],
+            "filters": ["dedupe", "context"],
+            "markup": True,
+            "show_path": False,
+            "rich_tracebacks": True,
+        },
+        # optional rotating file – enable with LOG_TO_FILE=1 (local debug)
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "logs/bot.log",
+            "maxBytes": 20_000_000,
+            "backupCount": 3,
+            "formatter": "json",
+            "filters": ["dedupe", "context"],
         },
     },
-    "root": {
-        "handlers": ["rich"],
-        "level": "INFO",
-    },
+    "root": {"handlers": ["stdout"], "level": "INFO"},
 }
 
 
@@ -96,8 +240,6 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
     Returns:
         None
     """
-    # Modern approach – rely on ``dictConfig(force=True)`` to wipe any pre-existing
-    # handlers instead of manual loops.
     global _CONFIGURED
     if _CONFIGURED:
         return  # already configured – avoid duplicate handlers
@@ -108,10 +250,16 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
     env_level = os.getenv("LOG_LEVEL")
     if env_level:
         config.setdefault("root", {})["level"] = env_level.upper()
-    # Ensure force is set so *all* previous handlers are removed in one go.
     config["force"] = True
     if config_overrides:
         merge_dicts(config, config_overrides)
+
+    # Override default handler set selected via LOG_FORMAT/LOG_TO_FILE flags.
+    log_format = os.getenv("LOG_FORMAT", "json").lower()
+    if log_format == "pretty":
+        config["root"]["handlers"] = ["rich"]
+    if os.getenv("LOG_TO_FILE"):
+        config["root"]["handlers"].append("file")
 
     # Check for empty or missing handlers in overall config or in the root logger.
     if (
@@ -129,7 +277,6 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
         if "root" in config:
             config["root"]["handlers"] = ["console"]
 
-    # Apply final configuration now that defaults are ensured.
     logging.config.dictConfig(config)
     _CONFIGURED = True
 
