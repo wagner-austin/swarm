@@ -31,6 +31,7 @@ prometheus-client = ">=0.21"
 # --- dependency injection ---
 dependency-injector = ">=4.41"
 PyYAML = ">=6.0"
+# --- redis backend (use redis-py with asyncio, not legacy aioredis) ---
 redis = {extras = ["asyncio"], version = ">=5"}
 python-json-logger = "^3.3.0"
 

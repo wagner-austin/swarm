@@ -17,14 +17,15 @@ from typing import Any, Dict, Optional
 import psutil
 from aiohttp import web
 
+from bot.browser.exceptions import BrowserError
 from bot.core.deployment_context import (
     DeploymentContextProvider,
     default_deployment_context_provider,
 )
+from bot.core.exceptions import BotError, OperationTimeoutError, WorkerUnavailableError
 from bot.core.logger_setup import setup_logging
-
-from .broker import Broker
-from .model import Job
+from bot.distributed.broker import Broker
+from bot.distributed.model import Job
 
 
 @dataclass
@@ -103,8 +104,17 @@ class JobManager:
                 request_data = json.loads(message[1])
                 await self._handle_job_request(request_data)
 
+            except (WorkerUnavailableError, OperationTimeoutError) as e:
+                logger.warning(f"Worker/timeout error in job processing: {e}")
+                await asyncio.sleep(1)
+            except BrowserError as e:
+                logger.error(f"Browser error in job processing: {e}")
+                await asyncio.sleep(1)
+            except BotError as e:
+                logger.error(f"Bot error in job processing: {e}")
+                await asyncio.sleep(1)
             except Exception as e:
-                logger.error(f"Error processing job request: {e}")
+                logger.exception(f"Unexpected error processing job request: {e}")
                 await asyncio.sleep(1)
 
     async def _handle_job_request(self, request_data: dict[str, Any]) -> None:
@@ -132,8 +142,13 @@ class JobManager:
 
             logger.info(f"📋 Job {job.id} enqueued from {callback_info.get('frontend', 'unknown')}")
 
+        except (WorkerUnavailableError, OperationTimeoutError) as e:
+            logger.warning(f"Worker unavailable or timeout for job {job.id}: {e}")
+            # Could trigger circuit breaker logic here
+        except BotError as e:
+            logger.error(f"Bot error handling job {job.id}: {e}")
         except Exception as e:
-            logger.error(f"Failed to handle job request: {e}")
+            logger.exception(f"Unexpected error handling job {job.id}: {e}")
 
     async def _listen_for_job_results(self) -> None:
         """Listen for job completion from workers."""

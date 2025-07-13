@@ -1,3 +1,5 @@
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.Cog
@@ -19,6 +21,7 @@ from bot.plugins.commands.decorators import background_app_command
 
 INTERNAL_ERROR = "An internal error occurred. Please try again later."
 
+logger = logging.getLogger(__name__)
 
 # Static fallback list for autocomplete defaults
 _ALL_CHOICES = [app_commands.Choice(name=k.capitalize(), value=k) for k in PERSONALITIES.keys()]
@@ -154,7 +157,13 @@ class Chat(commands.Cog):
             )
             return
         except Exception as exc:
-            await safe_send(interaction, f"LLM error: {exc}")
+            # Don't expose internal errors to users
+            await safe_send(
+                interaction,
+                "❌ Sorry, the language model encountered an error. Please try again.",
+                ephemeral=True,
+            )
+            logger.exception(f"LLM provider error during generation: {exc}")
             return
 
         # Providers may still return an async iterator – normalise to a string
@@ -173,7 +182,13 @@ class Chat(commands.Cog):
                 )
                 return
             except Exception as exc:  # handle unforeseen provider errors mid-stream
-                await safe_send(interaction, f"LLM error: {exc}")
+                # Don't expose internal errors to users
+                await safe_send(
+                    interaction,
+                    "❌ Sorry, the language model encountered an error during response. Please try again.",
+                    ephemeral=True,
+                )
+                logger.exception(f"LLM provider error during streaming: {exc}")
                 return
             response_text = "".join(parts)
 

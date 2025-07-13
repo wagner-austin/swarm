@@ -32,20 +32,20 @@ INITIAL_RETRY_DELAY = 1.0  # seconds; doubled each time
 class AlertPump(commands.Cog):
     """Listens on ``lifecycle.alerts_q`` and forwards messages to the owner."""
 
-    def __init__(self, bot: commands.Bot) -> None:  # noqa: D401 – simple description
+    def __init__(self, bot: commands.Bot, lifecycle: Any) -> None:  # noqa: D401 – simple description
         self.bot = bot
+        self.lifecycle = lifecycle
         self._task: asyncio.Task[None] | None = None
         self._startup_alert_sent: bool = False
         # Alerts that could not be sent yet because the owner is unresolved.
         self._pending: list[str | discord.Embed] = []
 
     async def cog_load(self) -> None:  # Called by discord.py 2.3+
-        lifecycle = getattr(self.bot, "lifecycle", None)
-        if lifecycle is None or not hasattr(lifecycle, "alerts_q"):
+        if self.lifecycle is None or not hasattr(self.lifecycle, "alerts_q"):
             logger.warning("AlertPump loaded but lifecycle.alerts_q not available – disabled")
             return  # cannot proceed without a queue
 
-        q: asyncio.Queue[str] = cast("asyncio.Queue[str]", lifecycle.alerts_q)
+        q: asyncio.Queue[str] = cast("asyncio.Queue[str]", self.lifecycle.alerts_q)
         loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._relay_loop(q))
 

@@ -6,25 +6,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from discord import Attachment, Object
 
-from bot.plugins.commands.persona_admin import PersonaAdmin
+from bot.core.containers import Container
 
 
 @pytest.fixture
-def mock_bot() -> MagicMock:
-    """Fixture for a mock bot instance."""
+def container_with_bot() -> tuple[Container, MagicMock]:
+    """Create real DI container with mocked bot."""
+    container = Container()
+
+    # Mock bot
     bot = MagicMock()
     bot.owner_id = 12345
     bot.is_owner = AsyncMock(return_value=True)
     bot.application_info = AsyncMock()
     bot.application_info.return_value.owner = Object(id=12345)
-    return bot
+    bot.container = container
 
-
-@pytest.fixture
-def persona_admin_cog(mock_bot: MagicMock) -> tuple[PersonaAdmin, AsyncMock]:
-    """Fixture for the PersonaAdmin cog instance with injected safe_send."""
-    mock_safe_send = AsyncMock()
-    return PersonaAdmin(bot=mock_bot, safe_send_func=mock_safe_send), mock_safe_send
+    return container, bot
 
 
 @pytest.mark.asyncio
@@ -32,10 +30,14 @@ def persona_admin_cog(mock_bot: MagicMock) -> tuple[PersonaAdmin, AsyncMock]:
 @patch("bot.plugins.commands.persona_admin._CUSTOM_DIR")
 async def test_list_cmd(
     mock_custom_dir: MagicMock,
-    persona_admin_cog: tuple[PersonaAdmin, AsyncMock],
+    container_with_bot: tuple[Container, MagicMock],
 ) -> None:
-    """Test that the list command shows all personas."""
-    cog, mock_safe_send = persona_admin_cog
+    """Test that the list command shows all personas using real DI container."""
+    container, mock_bot = container_with_bot
+
+    # Create PersonaAdmin cog using REAL DI container factory
+    mock_safe_send = AsyncMock()
+    cog = container.persona_admin_cog(bot=mock_bot, safe_send_func=mock_safe_send)
     mock_interaction = AsyncMock()
 
     # Mock the path operations properly
@@ -59,9 +61,13 @@ async def test_list_cmd(
     "bot.plugins.commands.persona_admin.PERSONALITIES",
     {"test1": {"prompt": "Hello", "allowed_users": [123]}},
 )
-async def test_show_cmd_found(persona_admin_cog: tuple[PersonaAdmin, AsyncMock]) -> None:
-    """Test showing a persona that exists."""
-    cog, mock_safe_send = persona_admin_cog
+async def test_show_cmd_found(container_with_bot: tuple[Container, MagicMock]) -> None:
+    """Test showing a persona that exists using real DI container."""
+    container, mock_bot = container_with_bot
+
+    # Create PersonaAdmin cog using REAL DI container factory
+    mock_safe_send = AsyncMock()
+    cog = container.persona_admin_cog(bot=mock_bot, safe_send_func=mock_safe_send)
     mock_interaction = AsyncMock()
     await cast(Any, cog.show_cmd.callback)(cog, mock_interaction, name="test1")
     mock_safe_send.assert_awaited_once()
@@ -74,10 +80,14 @@ async def test_show_cmd_found(persona_admin_cog: tuple[PersonaAdmin, AsyncMock])
 @patch("bot.ai.personas.refresh", new_callable=MagicMock)
 @patch("bot.ai.personas.PERSONALITIES", {"test1": {}}, create=True)
 async def test_reload_cmd(
-    mock_refresh: MagicMock, persona_admin_cog: tuple[PersonaAdmin, AsyncMock]
+    mock_refresh: MagicMock, container_with_bot: tuple[Container, MagicMock]
 ) -> None:
-    """Test that the reload command refreshes personas from disk."""
-    cog, _ = persona_admin_cog
+    """Test that the reload command refreshes personas from disk using real DI container."""
+    container, mock_bot = container_with_bot
+
+    # Create PersonaAdmin cog using REAL DI container factory
+    mock_safe_send = AsyncMock()
+    cog = container.persona_admin_cog(bot=mock_bot, safe_send_func=mock_safe_send)
     mock_interaction = AsyncMock()
 
     await cast(Any, cog.reload_cmd.callback)(cog, mock_interaction)
@@ -87,7 +97,6 @@ async def test_reload_cmd(
     # PersonaAdmin now uses safe_send for this response
     # So we need to check the injected safe_send mock
     # The message is the second positional argument
-    safe_send_mock = cast(AsyncMock, cog.safe_send)
-    safe_send_mock.assert_awaited_once()
-    message_content = safe_send_mock.call_args[0][1]
+    mock_safe_send.assert_awaited_once()
+    message_content = mock_safe_send.call_args[0][1]
     assert "Reloaded 1 personas from disk." in message_content

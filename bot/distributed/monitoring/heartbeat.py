@@ -20,7 +20,7 @@ import time
 from typing import TYPE_CHECKING, Any, Awaitable, Dict, Optional, cast
 
 import psutil
-import redis.asyncio as redis
+import redis.asyncio as redis_asyncio
 
 from bot.core.deployment_context import (
     DeploymentContextProvider,
@@ -43,7 +43,7 @@ class WorkerHeartbeat:
 
     def __init__(
         self,
-        redis_client: redis.Redis,
+        redis_client: redis_asyncio.Redis,
         worker_id: str,
         interval_seconds: float = 30.0,
         worker: Optional["Worker"] = None,
@@ -216,7 +216,9 @@ class WorkerHeartbeat:
         return data
 
 
-async def get_all_worker_heartbeats(redis_client: redis.Redis) -> dict[str, dict[str, Any]]:
+async def get_all_worker_heartbeats(
+    redis_client: redis_asyncio.Redis,
+) -> dict[str, dict[str, Any]]:
     """
     Retrieve heartbeat data for all active workers.
 
@@ -255,7 +257,9 @@ async def get_all_worker_heartbeats(redis_client: redis.Redis) -> dict[str, dict
     return workers
 
 
-async def cleanup_stale_heartbeats(redis_client: redis.Redis, max_age_seconds: int = 300) -> int:
+async def cleanup_stale_heartbeats(
+    redis_client: redis_asyncio.Redis, max_age_seconds: int = 300
+) -> int:
     """
     Clean up heartbeat data for workers that haven't reported in max_age_seconds.
 

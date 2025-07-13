@@ -1,18 +1,23 @@
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+import redis.asyncio as redis_asyncio
 from dependency_injector import containers, providers
 
 from bot.ai import providers as _ai_providers
 from bot.core import metrics as default_metrics
 from bot.core.settings import Settings
+from bot.distributed.broker import Broker
+from bot.distributed.remote_browser import RemoteBrowserRuntime
+from bot.distributed.runtime_wrappers import CircuitBreakerRuntime
 from bot.frontends.discord.discord_interactions import safe_send
 from bot.history.backends import HistoryBackend
 from bot.history.factory import choose as history_backend_factory
 from bot.infra.tankpit import engine_factory as tankpit_engine_factory
+from bot.plugins.commands.status import Status
 
 # TankPit engine factory (netproxy and ws_addon removed)
 # DI cogs that must be referenced in providers.Factory at class-scope
-from bot.plugins.commands.status import Status
 
 
 class Container(containers.DeclarativeContainer):
@@ -58,17 +63,25 @@ class Container(containers.DeclarativeContainer):
     # PersonaAdmin cog factory
     from bot.plugins.commands.persona_admin import PersonaAdmin
 
-    persona_admin_cog = providers.Factory(PersonaAdmin, bot=providers.Dependency())
+    persona_admin_cog = providers.Factory(
+        PersonaAdmin,
+        bot=providers.Dependency(),
+        safe_send_func=safe_send,
+    )
 
     # About cog factory
     from bot.plugins.commands.about import About
 
-    about_cog = providers.Factory(About)
+    about_cog = providers.Factory(About, bot=providers.Dependency())
 
     # AlertPump cog factory
     from bot.plugins.commands.alert_pump import AlertPump
 
-    alert_pump_cog = providers.Factory(AlertPump, bot=providers.Dependency())
+    alert_pump_cog = providers.Factory(
+        AlertPump,
+        bot=providers.Dependency(),
+        lifecycle=providers.Dependency(),
+    )
 
     # Chat cog factory
     from bot.plugins.commands.chat import Chat
@@ -96,7 +109,45 @@ class Container(containers.DeclarativeContainer):
     # Web cog factory (DI)
     from bot.plugins.commands.web import Web
 
-    web_cog = providers.Factory(Web, bot=providers.Dependency())
+    # Shared infrastructure providers ---------------------------------
+    redis_client: providers.Singleton[redis_asyncio.Redis] = providers.Singleton(
+        redis_asyncio.from_url,
+        config().redis.url if callable(config) else Settings().redis.url,
+        encoding="utf-8",
+        decode_responses=False,
+        max_connections=20,
+        retry_on_timeout=True,
+    )
+
+    broker = providers.Singleton(
+        Broker,
+        config().redis.url if callable(config) else Settings().redis.url,
+    )
+
+    _raw_remote_browser: providers.Factory[RemoteBrowserRuntime] = providers.Factory(
+        RemoteBrowserRuntime,
+        broker=broker,
+    )
+
+    remote_browser: providers.Factory[CircuitBreakerRuntime] = providers.Factory(
+        lambda raw_runtime: CircuitBreakerRuntime(raw_runtime),
+        raw_runtime=_raw_remote_browser,
+    )
+
+    web_cog = providers.Factory(
+        Web,
+        bot=providers.Dependency(),
+        browser=remote_browser,
+    )
+
+    # BrowserHealthMonitor cog factory
+    from bot.plugins.monitor.browser_health import BrowserHealthMonitor
+
+    browser_health_monitor_cog = providers.Factory(
+        BrowserHealthMonitor,
+        bot=providers.Dependency(),
+        redis_client=redis_client,
+    )
 
     # NOTE: BrowserRuntime (local) has been removed. All browser commands are routed via distributed workers.
 

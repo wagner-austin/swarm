@@ -33,6 +33,8 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 # Import local runtimes/engines for dispatch
 from bot.browser.engine import BrowserEngine
+from bot.browser.exceptions import BrowserError
+from bot.core.exceptions import BotError, OperationTimeoutError, WorkerUnavailableError
 from bot.distributed.broker import Broker
 from bot.distributed.model import Job
 from bot.distributed.monitoring.state import BaseStateMachine, WorkerState
@@ -101,9 +103,29 @@ class Worker(BaseStateMachine):
                 await asyncio.sleep(self._backoff)
                 self._backoff = min(self._backoff * 2, self._backoff_max)
                 continue
+            except (WorkerUnavailableError, OperationTimeoutError) as exc:
+                self.set_state(WorkerState.ERROR)
+                logger.warning(
+                    f"Worker {self.worker_id}: Worker/timeout error consuming job: {exc}"
+                )
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
+                continue
+            except BrowserError as exc:
+                self.set_state(WorkerState.ERROR)
+                logger.error(f"Worker {self.worker_id}: Browser error consuming job: {exc}")
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
+                continue
+            except BotError as exc:
+                self.set_state(WorkerState.ERROR)
+                logger.error(f"Worker {self.worker_id}: Bot error consuming job: {exc}")
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
+                continue
             except Exception as exc:
                 self.set_state(WorkerState.ERROR)
-                logger.error(f"Worker {self.worker_id}: Error consuming job: {exc}")
+                logger.exception(f"Worker {self.worker_id}: Unexpected error consuming job: {exc}")
                 await asyncio.sleep(self._backoff)
                 self._backoff = min(self._backoff * 2, self._backoff_max)
                 continue
@@ -113,9 +135,30 @@ class Worker(BaseStateMachine):
             try:
                 await self.dispatch(job)
                 self.set_state(WorkerState.IDLE)
+            except (WorkerUnavailableError, OperationTimeoutError) as exc:
+                self.set_state(WorkerState.ERROR)
+                logger.warning(
+                    f"Worker {self.worker_id}: Worker/timeout error dispatching job {job.id}: {exc}"
+                )
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
+            except BrowserError as exc:
+                self.set_state(WorkerState.ERROR)
+                logger.error(
+                    f"Worker {self.worker_id}: Browser error dispatching job {job.id}: {exc}"
+                )
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
+            except BotError as exc:
+                self.set_state(WorkerState.ERROR)
+                logger.error(f"Worker {self.worker_id}: Bot error dispatching job {job.id}: {exc}")
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 2, self._backoff_max)
             except Exception as exc:
                 self.set_state(WorkerState.ERROR)
-                logger.error(f"Worker {self.worker_id}: Error dispatching job: {exc}")
+                logger.exception(
+                    f"Worker {self.worker_id}: Unexpected error dispatching job {job.id}: {exc}"
+                )
                 await asyncio.sleep(self._backoff)
                 self._backoff = min(self._backoff * 2, self._backoff_max)
                 continue
@@ -292,8 +335,8 @@ async def _cleanup_orphaned_browsers() -> None:
         for proc_name in ["chromium", "chrome", "playwright"]:
             try:
                 subprocess.run(["pkill", "-f", proc_name], check=False)
-            except Exception:
-                pass  # Don't crash if pkill not available
+            except Exception as exc:
+                logger.debug(f"Failed to kill {proc_name} processes: {exc}")
         logger.info("Best-effort orphaned browser cleanup attempted.")
     except Exception as exc:
         logger.warning(f"Could not clean up orphaned browser processes: {exc}")
@@ -361,11 +404,11 @@ async def main() -> None:
             logger.info("Worker shutdown complete. All sessions cleaned up.")
 
     # 3. Start heartbeat system
-    import redis.asyncio as redis
+    import redis.asyncio as redis_asyncio
 
     from bot.distributed.monitoring.heartbeat import WorkerHeartbeat
 
-    redis_client = redis.from_url(args.redis_url)  # type: ignore[no-untyped-call]
+    redis_client = redis_asyncio.from_url(args.redis_url)  # type: ignore[no-untyped-call]
     heartbeat = WorkerHeartbeat(
         redis_client=redis_client,
         worker_id=args.worker_id,

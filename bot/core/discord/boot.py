@@ -13,14 +13,20 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from bot.core.containers import Container
     from bot.core.lifecycle import BotLifecycle
+    from bot.core.settings import Settings
 
 
 class MyBot(commands.Bot):
     # Attrs added at runtime, but mypy needs to know for strict type checking.
     container: Container
     lifecycle: BotLifecycle
+    settings: Settings
 
     def __init__(self, *args: Any, **kwargs: Any):
+        # Extract our custom parameters before passing to parent
+        self.container = kwargs.pop("container", None)
+        self.settings = kwargs.pop("settings", None)
+
         super().__init__(*args, **kwargs)
         self.proxy_service = None
 

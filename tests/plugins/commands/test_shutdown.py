@@ -4,14 +4,32 @@ import discord
 import pytest
 from pytest_mock import MockerFixture
 
-from bot.plugins.commands.shutdown import Shutdown
+from bot.core.containers import Container
 
 
 @pytest.fixture
-def dummy_bot() -> MagicMock:
-    bot = MagicMock(spec=discord.ext.commands.Bot)
-    bot.container = MagicMock()
-    return bot
+def container_with_mocked_shutdown() -> tuple[
+    Container, MagicMock, MagicMock, MagicMock, AsyncMock
+]:
+    """Create real DI container with mocked shutdown dependencies."""
+    container = Container()
+
+    # Mock metrics
+    mock_metrics = MagicMock()
+    container.metrics_helper.override(mock_metrics)
+
+    # Mock lifecycle (lifecycle is providers.Dependency, so we don't override it)
+    mock_lifecycle = MagicMock()
+    mock_lifecycle.shutdown = AsyncMock()
+
+    # Mock get_owner function
+    mock_get_owner = AsyncMock(return_value=MagicMock(id=12345))
+
+    # Mock bot
+    mock_bot = MagicMock(spec=discord.ext.commands.Bot)
+    mock_bot.container = container
+
+    return container, mock_bot, mock_metrics, mock_lifecycle, mock_get_owner
 
 
 @pytest.fixture
@@ -25,26 +43,30 @@ def interaction() -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_shutdown_owner_success(
-    dummy_bot: MagicMock, interaction: MagicMock, mocker: MockerFixture
+    interaction: MagicMock,
+    container_with_mocked_shutdown: tuple[Container, MagicMock, MagicMock, MagicMock, AsyncMock],
 ) -> None:
-    mock_metrics = MagicMock()
+    """Test shutdown command success using real DI container."""
+    container, mock_bot, mock_metrics, mock_lifecycle, mock_get_owner = (
+        container_with_mocked_shutdown
+    )
+
     mock_metrics.get_stats.return_value = {
         "uptime_s": 3600,
         "discord_messages_processed": 10,
         "messages_sent": 20,
     }
     mock_metrics.format_hms.return_value = "1:00:00"
-    mock_get_owner = AsyncMock(return_value=MagicMock(id=12345))
     mock_safe_send = AsyncMock()
-    mock_lifecycle = MagicMock()
-    mock_lifecycle.shutdown = AsyncMock()
-    cog = Shutdown(
-        dummy_bot,
-        metrics_mod=mock_metrics,
+
+    # Create Shutdown cog using REAL DI container factory
+    cog = container.shutdown_cog(
+        bot=mock_bot,
+        lifecycle=mock_lifecycle,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
-        lifecycle=mock_lifecycle,
     )
+
     await cog._shutdown_impl(interaction)
     mock_safe_send.assert_any_call(interaction, "📴 Shutting down…")
     # Should send embed with stats
@@ -57,18 +79,23 @@ async def test_shutdown_owner_success(
 
 @pytest.mark.asyncio
 async def test_shutdown_not_owner(
-    dummy_bot: MagicMock, interaction: MagicMock, mocker: MockerFixture
+    interaction: MagicMock,
+    container_with_mocked_shutdown: tuple[Container, MagicMock, MagicMock, MagicMock, AsyncMock],
 ) -> None:
+    """Test shutdown command rejection for non-owner using real DI container."""
+    container, mock_bot, mock_metrics, mock_lifecycle, _ = container_with_mocked_shutdown
+
     mock_get_owner = AsyncMock(return_value=MagicMock(id=99999))
     mock_safe_send = AsyncMock()
-    mock_lifecycle = MagicMock()
-    mock_lifecycle.shutdown = AsyncMock()
-    cog = Shutdown(
-        dummy_bot,
+
+    # Create Shutdown cog using REAL DI container factory
+    cog = container.shutdown_cog(
+        bot=mock_bot,
+        lifecycle=mock_lifecycle,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
-        lifecycle=mock_lifecycle,
     )
+
     await cog._shutdown_impl(interaction)
     mock_safe_send.assert_awaited_with(interaction, "❌ Owner only.", ephemeral=True)
     # Lifecycle shutdown should not be called
@@ -79,18 +106,23 @@ async def test_shutdown_not_owner(
 
 @pytest.mark.asyncio
 async def test_shutdown_owner_lookup_failure(
-    dummy_bot: MagicMock, interaction: MagicMock, mocker: MockerFixture
+    interaction: MagicMock,
+    container_with_mocked_shutdown: tuple[Container, MagicMock, MagicMock, MagicMock, AsyncMock],
 ) -> None:
+    """Test shutdown command owner lookup failure using real DI container."""
+    container, mock_bot, mock_metrics, mock_lifecycle, _ = container_with_mocked_shutdown
+
     mock_get_owner = AsyncMock(side_effect=RuntimeError)
     mock_safe_send = AsyncMock()
-    mock_lifecycle = MagicMock()
-    mock_lifecycle.shutdown = AsyncMock()
-    cog = Shutdown(
-        dummy_bot,
+
+    # Create Shutdown cog using REAL DI container factory
+    cog = container.shutdown_cog(
+        bot=mock_bot,
+        lifecycle=mock_lifecycle,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
-        lifecycle=mock_lifecycle,
     )
+
     await cog._shutdown_impl(interaction)
     mock_safe_send.assert_awaited_with(
         interaction, "❌ Could not resolve bot owner.", ephemeral=True

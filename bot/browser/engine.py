@@ -101,8 +101,8 @@ class BrowserEngine(ServiceABC):
         if self._browser is not None:
             try:
                 await self._browser.close()
-            except Exception:
-                pass  # Ignore any errors when closing
+            except Exception as exc:
+                logger.warning(f"Error closing browser during restart: {exc}")
 
         try:
             import os
@@ -141,7 +141,8 @@ class BrowserEngine(ServiceABC):
                 # Using evaluate() to safely check page status without type errors
                 # If this fails, page is likely closed
                 await self._page.evaluate("1")
-            except Exception:
+            except Exception as exc:
+                logger.debug(f"Page evaluation failed, marking as closed: {exc}")
                 page_closed = True
 
         # At this point we know browser exists because we either had one or created one above
@@ -152,9 +153,9 @@ class BrowserEngine(ServiceABC):
             if self._context is not None:
                 try:
                     await self._context.close()
-                except Exception:
-                    # Ignore errors when closing, just ensure we don't leak
-                    pass
+                except Exception as exc:
+                    # Log but don't fail - this is cleanup
+                    logger.warning(f"Error closing browser context during cleanup: {exc}")
 
             # Create a new context
             ctx = await self._browser.new_context()
@@ -168,9 +169,11 @@ class BrowserEngine(ServiceABC):
                     await self._page.goto(
                         self._last_url, wait_until="load", timeout=self._timeout_ms
                     )
-                except Exception:
-                    # quietly ignore – the caller will surface an error if needed
-                    pass
+                except Exception as exc:
+                    # Log navigation failure - caller will handle if needed
+                    logger.debug(
+                        f"Failed to navigate to last URL {self._last_url} after page recreation: {exc}"
+                    )
 
     async def stop(self, *, graceful: bool = True) -> None:
         """Gracefully close all Playwright resources."""
