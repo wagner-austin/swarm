@@ -78,6 +78,33 @@ class FakeRedisClient:
 
         return result
 
+    async def scan(self, cursor: int, match: str = "*", count: int = 10) -> tuple[int, list[str]]:
+        """Simulate Redis SCAN command."""
+        self._record_call("scan", cursor, match=match, count=count)
+        if self.should_fail:
+            raise ConnectionError(self.fail_message)
+
+        await asyncio.sleep(0.001)
+
+        # Get all keys
+        all_keys: list[str] = []
+        for storage in [self.data, self.hashes, self.sets, self.streams]:
+            all_keys.extend(storage.keys())
+
+        # Apply pattern matching
+        if match != "*":
+            import fnmatch
+
+            matching_keys = [k for k in all_keys if fnmatch.fnmatch(k, match)]
+        else:
+            matching_keys = all_keys
+
+        # Filter out expired keys
+        valid_keys = [k for k in matching_keys if not self._check_expiry(k)]
+
+        # For simplicity, always return cursor 0 (no more keys)
+        return (0, valid_keys)
+
     async def hget(self, name: str, key: str) -> bytes | None:
         """Simulate Redis HGET command."""
         self._record_call("hget", name, key)
@@ -162,7 +189,9 @@ class FakeRedisClient:
         if stream not in self.streams:
             self.streams[stream] = []
 
-    async def xadd(self, stream: str, fields: dict[str, Any], id: str = "*") -> str:
+    async def xadd(
+        self, stream: str, fields: dict[str, Any], id: str = "*", maxlen: int | None = None
+    ) -> str:
         """Simulate Redis XADD command."""
         self._record_call("xadd", stream, fields, id=id)
         if self.should_fail:
@@ -175,6 +204,11 @@ class FakeRedisClient:
             id = f"{int(time.time() * 1000)}-0"
 
         self.streams[stream].append({"id": id, "fields": fields})
+
+        # Trim stream if maxlen is specified
+        if maxlen is not None and len(self.streams[stream]) > maxlen:
+            self.streams[stream] = self.streams[stream][-maxlen:]
+
         return id
 
     async def xread(
@@ -189,6 +223,38 @@ class FakeRedisClient:
 
         # Simple implementation - return empty for now
         return []
+
+    async def xlen(self, stream: str) -> int:
+        """Simulate Redis XLEN command."""
+        self._record_call("xlen", stream)
+        if self.should_fail:
+            raise ConnectionError(self.fail_message)
+
+        await asyncio.sleep(0.001)
+
+        if stream in self.streams:
+            return len(self.streams[stream])
+        return 0
+
+    async def xrange(
+        self, stream: str, start: str = "-", end: str = "+"
+    ) -> list[tuple[str, dict[str, str]]]:
+        """Simulate Redis XRANGE command."""
+        self._record_call("xrange", stream, start, end)
+        if self.should_fail:
+            raise ConnectionError(self.fail_message)
+
+        await asyncio.sleep(0.001)
+
+        if stream not in self.streams:
+            return []
+
+        # Return all entries as tuples of (id, fields)
+        result = []
+        for entry in self.streams[stream]:
+            fields_as_str = {k: str(v) for k, v in entry["fields"].items()}
+            result.append((entry["id"], fields_as_str))
+        return result
 
     async def ping(self) -> bool:
         """Simulate Redis PING command."""
