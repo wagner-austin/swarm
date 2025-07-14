@@ -114,11 +114,19 @@ class WorkerHeartbeat:
         try:
             heartbeat_data = await self._collect_heartbeat_data()
 
+            # Determine worker type from job_type_prefix
+            worker_type = "unknown"
+            if self.worker and hasattr(self.worker, "job_type_prefix"):
+                worker_type = self.worker.job_type_prefix or "general"
+
+            # Update heartbeat key to include worker type for orchestrator
+            typed_heartbeat_key = f"worker:heartbeat:{worker_type}:{self.worker_id}"
+
             # Store latest status in Redis hash (for quick lookups)
             await cast(
                 Awaitable[int],
                 self.redis_client.hset(
-                    self.heartbeat_key,
+                    typed_heartbeat_key,
                     mapping={
                         k: json.dumps(v) if isinstance(v, dict | list) else str(v)
                         for k, v in heartbeat_data.items()
@@ -129,7 +137,7 @@ class WorkerHeartbeat:
             # Set TTL so dead workers are automatically cleaned up
             await cast(
                 Awaitable[int],
-                self.redis_client.expire(self.heartbeat_key, int(self.interval_seconds * 3)),
+                self.redis_client.expire(typed_heartbeat_key, int(self.interval_seconds * 3)),
             )
 
             # Also add to status stream for time-series analysis

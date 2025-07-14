@@ -7,9 +7,12 @@ from dependency_injector import containers, providers
 from bot.ai import providers as _ai_providers
 from bot.core import metrics as default_metrics
 from bot.core.settings import Settings
+from bot.distributed.backends import DockerComposeBackend, FlyIOBackend, KubernetesBackend
 from bot.distributed.broker import Broker
+from bot.distributed.core.config import DistributedConfig
 from bot.distributed.remote_browser import RemoteBrowserRuntime
 from bot.distributed.runtime_wrappers import CircuitBreakerRuntime
+from bot.distributed.services.scaling_service import ScalingService
 from bot.frontends.discord.discord_interactions import safe_send
 from bot.history.backends import HistoryBackend
 from bot.history.factory import choose as history_backend_factory
@@ -124,6 +127,22 @@ class Container(containers.DeclarativeContainer):
         config().redis.url if callable(config) else Settings().redis.url,
     )
 
+    # Distributed configuration
+    distributed_config = providers.Singleton(DistributedConfig.load)
+
+    # Scaling backend selection based on environment
+    scaling_backend = providers.Singleton(
+        lambda: DockerComposeBackend()  # Default to Docker Compose for now
+    )
+
+    # Scaling service
+    scaling_service = providers.Singleton(
+        ScalingService,
+        redis_client=redis_client,
+        config=distributed_config,
+        backend=scaling_backend,
+    )
+
     _raw_remote_browser: providers.Factory[RemoteBrowserRuntime] = providers.Factory(
         RemoteBrowserRuntime,
         broker=broker,
@@ -147,6 +166,18 @@ class Container(containers.DeclarativeContainer):
         BrowserHealthMonitor,
         bot=providers.Dependency(),
         redis_client=redis_client,
+    )
+
+    # Orchestrator cog factory
+    from bot.plugins.commands.orchestrator import Orchestrator
+
+    orchestrator_cog = providers.Factory(
+        Orchestrator,
+        bot=providers.Dependency(),
+        broker=broker,
+        redis_client=redis_client,
+        scaling_service=scaling_service,
+        safe_send_func=safe_send,
     )
 
     # NOTE: BrowserRuntime (local) has been removed. All browser commands are routed via distributed workers.

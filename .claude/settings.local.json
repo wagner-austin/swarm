@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(poetry run mypy:*)",
+      "Bash(python -m ruff:*)"
+    ],
+    "deny": []
+  }
+}

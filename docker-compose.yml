@@ -233,3 +233,25 @@ services:
     #     retries: 3
     #     start_period: 60s
     # Place 'restart: unless-stopped' outside the template block when copying
+
+  autoscaler:
+    build: .
+    container_name: autoscaler
+    # Monitors queues and scales workers
+    command:
+      - python
+      - -m
+      - scripts.autoscaler
+      - --orchestrator
+      - docker-compose
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ORCHESTRATOR=docker-compose
+      - CHECK_INTERVAL=30
+      - PYTHONPATH=/app
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - .:/app
+    restart: unless-stopped

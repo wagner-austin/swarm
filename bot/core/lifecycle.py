@@ -169,8 +169,11 @@ class BotLifecycle:
         # BrowserHealthMonitor (DI-managed)
         browser_health_monitor_cog = self._container.browser_health_monitor_cog(bot=self._bot)
         await self._bot.add_cog(browser_health_monitor_cog)
+        # Orchestrator (DI-managed)
+        orchestrator_cog = self._container.orchestrator_cog(bot=self._bot)
+        await self._bot.add_cog(orchestrator_cog)
         logger.info(
-            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Web, Shutdown, BrowserHealthMonitor."
+            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Web, Shutdown, BrowserHealthMonitor, Orchestrator."
         )
 
         # --- Standard Cogs --- #
