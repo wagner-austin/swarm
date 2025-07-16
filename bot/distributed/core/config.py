@@ -27,7 +27,7 @@ class ScalingConfig:
         return cls(
             min_workers=int(os.getenv(f"{prefix}_MIN_WORKERS", "1")),
             max_workers=int(os.getenv(f"{prefix}_MAX_WORKERS", "10")),
-            scale_up_threshold=int(os.getenv(f"{prefix}_SCALE_UP_THRESHOLD", "5")),
+            scale_up_threshold=int(os.getenv(f"{prefix}_SCALE_UP_THRESHOLD", "1")),
             scale_down_threshold=int(os.getenv(f"{prefix}_SCALE_DOWN_THRESHOLD", "0")),
             cooldown_seconds=int(os.getenv(f"{prefix}_COOLDOWN", "60")),
         )
@@ -85,7 +85,7 @@ class DistributedConfig:
             scaling=ScalingConfig(
                 min_workers=int(os.getenv("BROWSER_MIN_WORKERS", "1")),
                 max_workers=int(os.getenv("BROWSER_MAX_WORKERS", "10")),
-                scale_up_threshold=int(os.getenv("BROWSER_SCALE_UP_THRESHOLD", "5")),
+                scale_up_threshold=int(os.getenv("BROWSER_SCALE_UP_THRESHOLD", "1")),
                 scale_down_threshold=int(os.getenv("BROWSER_SCALE_DOWN_THRESHOLD", "0")),
                 cooldown_seconds=int(os.getenv("BROWSER_COOLDOWN", "60")),
             ),
@@ -97,7 +97,7 @@ class DistributedConfig:
             scaling=ScalingConfig(
                 min_workers=int(os.getenv("TANKPIT_MIN_WORKERS", "0")),
                 max_workers=int(os.getenv("TANKPIT_MAX_WORKERS", "50")),
-                scale_up_threshold=int(os.getenv("TANKPIT_SCALE_UP_THRESHOLD", "10")),
+                scale_up_threshold=int(os.getenv("TANKPIT_SCALE_UP_THRESHOLD", "1")),
                 scale_down_threshold=int(os.getenv("TANKPIT_SCALE_DOWN_THRESHOLD", "2")),
                 cooldown_seconds=int(os.getenv("TANKPIT_COOLDOWN", "60")),
             ),

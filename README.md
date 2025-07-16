@@ -1,144 +1,178 @@
-# README.md - Discord Bot Setup & Usage
+# AI Task Execution System
 
-This file provides setup, configuration, and usage instructions for the Discord bot.
+A distributed, AI-powered task execution platform capable of decomposing complex requests into subtasks and orchestrating specialized workers to complete them.
 
-## Quickstart
+## 🎯 What This Is
 
-1. Install [Poetry](https://python-poetry.org/) and project dependencies:
+An intelligent task assistant that can handle high-level requests like:
+- "Research upcoming environmental bills and prepare talking points"
+- "Analyze and improve the logging system in my codebase"
+- "Do my latest homework assignment"
+- "Monitor this website daily and summarize changes"
+
+The system breaks down these complex tasks into subtasks, routes them to appropriate workers (web browsers, code analyzers, LLMs), and coordinates execution across a distributed infrastructure.
+
+## 🚀 Key Features
+
+- **Task Decomposition**: Automatically breaks complex tasks into manageable subtasks
+- **Distributed Workers**: Scale from 1 to 1000+ specialized workers
+- **Multiple Frontends**: Discord, Telegram, Web API, CLI (Discord is just ONE interface)
+- **Capability-Based Routing**: Workers advertise skills, tasks route to best match
+- **Local LLM Support**: Run private AI models on your GPU for sensitive tasks
+- **Platform Agnostic**: Deploy on local machines, Docker, Kubernetes, or cloud
+
+## 📋 Quick Start
+
+### Prerequisites
+- Python 3.11+
+- Poetry
+- Docker (optional, for containerized deployment)
+- NVIDIA GPU with 24GB+ VRAM (optional, for local LLMs)
+
+### Installation
 
 ```bash
-pipx install poetry
-poetry install --with dev            # runtime + dev dependencies
-poetry run playwright install chromium   # one-off: download Chromium
+# Clone the repository
+git clone <repository-url>
+cd DiscordBot  # TODO: Rename to TaskForce
+
+# Install dependencies
+poetry install --with dev
+
+# Install browser automation tools
+poetry run playwright install chromium
+
+# Copy environment template
+cp .env.example .env
 ```
 
-2. Copy `.env.example` (or create `.env`) and define at minimum your Discord token:
+### Configuration
+
+Edit `.env` with your settings:
 
 ```ini
-DISCORD_TOKEN=your-bot-token-here
+# Redis for task queue (required)
+REDIS_URL=redis://localhost:6379/0
+
+# Frontend configurations (use any or all)
+DISCORD_TOKEN=your-token-here      # For Discord frontend
+TELEGRAM_TOKEN=your-token-here     # For Telegram frontend
+API_KEY=your-api-key               # For REST API
+
+# Worker configuration
+BROWSER_HEADLESS=true              # Run browsers in background
+WORKER_CONCURRENCY=5               # Tasks per worker
+
+# Optional: AI Models
+OPENAI_API_KEY=your-key           # For GPT-4 tasks
+LOCAL_MODEL_PATH=/models/llama-2-70b.gguf  # For private LLM
 ```
 
-3. Launch the bot:
+### Running the System
 
+**Development (single machine):**
 ```bash
-make run                      # preferred (uses Poetry venv)
-# or
-poetry run python -m bot.core  # same entry-point without Makefile
+# Start all services
+docker-compose up -d
+
+# Or run components separately
+make run            # Start main service
+make worker         # Start a worker
+make autoscaler     # Start autoscaler
 ```
 
-The embedded Chromium window is **visible by default**. Set `BROWSER_HEADLESS=true` for headless/CI use.
+**Production (Kubernetes):**
+```bash
+# Deploy to Kubernetes cluster
+kubectl apply -f k8s/
 
-Run `make test` to execute the pytest suite and `make lint` for formatting, ruff, and mypy.
+# Scale workers
+kubectl scale deployment/worker --replicas=50
+```
+
+## 🏗️ Architecture
+
+```
+User Request → Frontend (Discord/Telegram/API)
+                ↓
+         Task Decomposer
+                ↓
+        [Task: Research bills]
+         /      |       \
+   [Browse]  [Analyze]  [Summarize]
+      ↓         ↓           ↓
+   Worker1   Worker2    Worker3 (LLM)
+      ↓         ↓           ↓
+         Result Aggregator
+                ↓
+         Response to User
+```
+
+## 🔧 Development
+
+### Running Tests
+```bash
+make test      # Run all tests
+make lint      # Lint and format code
+make check     # Type checking with mypy
+```
+
+### Project Structure
+```
+project/
+├── bot/                    # Core system (TODO: rename to 'core')
+│   ├── distributed/       # Task queue and worker management
+│   ├── browser/          # Browser automation workers
+│   ├── plugins/          # Frontend adapters
+│   └── tasks/            # Task decomposition logic
+├── frontends/            # Multi-platform interfaces
+├── workers/              # Specialized worker types
+└── k8s/                  # Kubernetes manifests
+```
+
+## 📚 Documentation
+
+- [PLAN.md](PLAN.md) - Detailed implementation roadmap
+- [CLAUDE.md](CLAUDE.md) - AI collaboration guidelines and architecture notes
+- [docs/SCALING_ARCHITECTURE.md](docs/SCALING_ARCHITECTURE.md) - Distributed system design
+
+## 🎯 Current Status & Roadmap
+
+**Phase 1 (Current)**: Fixing critical issues
+- Job acknowledgment bugs
+- Queue metrics integration
+- Removing Discord-centric assumptions
+
+**Phase 2**: Migrate to Celery
+- Replace custom job queue
+- Add task persistence
+- Implement retry logic
+
+**Phase 3**: Local LLM Integration
+- Add GPU-accelerated workers
+- Private model support
+- Capability-based routing
+
+**Phase 4**: Multi-Frontend Support
+- Abstract interface layer
+- Telegram bot
+- REST API
+- Web UI
+
+## 🤝 Contributing
+
+This project uses production-grade standards:
+- All code must have type annotations
+- Integration tests over mocks
+- Clear documentation for decisions
+- Consider existing tools before building custom solutions
+
+See [CLAUDE.md](CLAUDE.md) for detailed collaboration guidelines.
+
+## 📜 License
+
+[Your license here]
 
 ---
 
-Installation:
-1. Install Python:
-   Download Python (3.9 or later) from python.org.
-   Verify installation with: python --version
-
-2. Install discord.py:
-   Download the latest discord.py release (e.g., discord.py-2.0.1.tar.gz).
-   Extract the file to a directory (for example, C:\Users\YourName\Projects\discord.py).
-   Rename the extracted folder to "discord.py" for clarity.
-   Add the folder C:\Users\YourName\Projects\discord.py\bin to your system PATH.
-
-3. Verify discord.py installation:
-   Open PowerShell and run:
-   python -m discord --version
-
-Registration and Verification:
-1. Create a Discord bot account:
-   Go to the Discord Developer Portal and create a new bot.
-   Copy the bot token.
-
-2. Configure your bot:
-   Create a `.env` file in your project root with your bot token.
-
-3. Verify your bot:
-   Start the bot and test its functionality.
-
-4. Test sending a message:
-   Use the `!help` command to see available commands.
-
-Next Steps:
-1. Set your bot's profile name:
-   discord.py.bat -u YOUR_SIGNAL_NUMBER updateProfile --name "Your Bot Name"
-2. To read incoming messages, run:
-   discord.py.bat -u YOUR_SIGNAL_NUMBER receive
-
-Replace YOUR_SIGNAL_NUMBER with your actual Signal Bot number.
-
-
-#### Configuration
-
-### Browser Session Settings
-
-The following environment variables can be set to control the browser session:
-- `CHROME_PROFILE_DIR`: Path to the Chrome user data directory.
-- `CHROME_PROFILE_NAME`: Name of the Chrome profile to use (default: Profile 1).
-- `CHROMEDRIVER_PATH`: Path to the ChromeDriver executable.
-- `BROWSER_DOWNLOAD_DIR`: Directory for browser downloads and screenshots.
-- `BROWSER_HEADLESS`: Launch Chrome in headless mode (default: false). Set to `true` for CI or servers without a display.
-- `BROWSER_DISABLE_GPU`: Disable GPU hardware acceleration (default: true).
-- `BROWSER_WINDOW_SIZE`: Window size for the browser, e.g., `1920,1080` (default: `1920,1080`).
-- `BROWSER_NO_SANDBOX`: Disable Chrome's sandbox (default: true; required for some CI environments).
-
-Example usage:
-
-```
-@bot browser start [<url>]
-@bot browser open <url>
-@bot browser screenshot
-@bot browser stop
-@bot browser status
-```
-
-Create a `.env` file in your project root with the following contents:
-
-```ini
-# .env - Discord Bot configuration
-DISCORD_TOKEN=your-bot-token-here
-ROLE_NAME_MAP={"123456789012345678": "owner", "987654321098765432": "admin"}
-GEMINI_API_KEY=your-gemini-key-here
-OPENAI_API_KEY=your-openai-key-here
-```
-
-- **DISCORD_TOKEN** is required for the bot to run.
-- All other fields are optional and have sensible defaults.
-- The `ROLE_NAME_MAP` must be valid JSON.
-
-> **Note:** Pydantic automatically loads environment variables from the `.env` file. You do not need to export variables in your shell. Just create or edit the `.env` file and restart the bot.
-
-> **Note:** Run Alembic migrations to initialize the database schema and restart the bot.
-
-## Building multi-step wizards
-
-You can build interactive, multi-step workflows using the `WizardPlugin` mix-in. Wizards keep short-lived, per-user state (TTL: 1 hour) and can be extended for REST or chat use. Example:
-
-```python
-class MyWizard(WizardPlugin):
-    def __init__(self):
-        self.command_name = "mywiz"
-        self.steps = {"start": self.ask, "next": self.next_step}
-    async def ask(self, ctx, convo):
-        convo.data["step"] = "next"
-        return "What is your input?"
-    async def next_step(self, ctx, convo, answer):
-        return f"You said: {answer}"
-```
-See `plugins/wizard.py` for details. Wizards are channel-agnostic and can be used in REST APIs or chatbots alike.
-
-
-### Security toggles
-* `ALLOWED_HOSTS=github.com,internal-portal.local` → restricts navigation targets for `/browser open`.
-
-### Persona management (admin only)
-The bot ships with a YAML-backed persona registry.  Operators can:
-
-* `/persona list` – list built-in and custom personas
-* `/persona show <name>` – display the prompt for a persona (read-only)
-* `/persona reload` – re-parse all YAML files from disk
-* `/persona import` – (owner-only) upload secret personas
-
-The previous `/persona add`, `/persona delete` and `/persona edit` commands have been removed in favour of managing YAML files directly on disk.
+**Note**: This project is under active development. The vision is to create an AI-powered workforce that can tackle complex real-world problems at scale.

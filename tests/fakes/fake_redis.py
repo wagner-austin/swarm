@@ -27,6 +27,7 @@ class FakeRedisClient:
         self.hashes: dict[str, dict[bytes, bytes]] = defaultdict(dict)
         self.sets: dict[str, set[bytes]] = defaultdict(set)
         self.streams: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self.lists: dict[str, list[str]] = defaultdict(list)
         self.expiry: dict[str, float] = {}
         self.call_history: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
 
@@ -48,6 +49,7 @@ class FakeRedisClient:
         self.hashes.pop(key, None)
         self.sets.pop(key, None)
         self.streams.pop(key, None)
+        self.lists.pop(key, None)
         self.expiry.pop(key, None)
 
     async def keys(self, pattern: str = "*") -> list[bytes]:
@@ -255,6 +257,35 @@ class FakeRedisClient:
             fields_as_str = {k: str(v) for k, v in entry["fields"].items()}
             result.append((entry["id"], fields_as_str))
         return result
+
+    async def lpush(self, key: str, *values: str) -> int:
+        """Simulate Redis LPUSH command."""
+        self._record_call("lpush", key, *values)
+        if self.should_fail:
+            raise ConnectionError(self.fail_message)
+
+        for value in values:
+            self.lists[key].insert(0, value)
+        return len(self.lists[key])
+
+    async def blpop(self, *keys: str, timeout: int = 0) -> tuple[str, str] | None:
+        """Simulate Redis BLPOP command."""
+        self._record_call("blpop", *keys, timeout=timeout)
+        if self.should_fail:
+            raise ConnectionError(self.fail_message)
+
+        # Check each key for available items
+        for key in keys:
+            if key in self.lists and self.lists[key]:
+                value = self.lists[key].pop(0)
+                return (key, value)
+
+        # If timeout is 0, return None immediately (non-blocking)
+        # Otherwise simulate waiting
+        if timeout > 0:
+            await asyncio.sleep(0.1)  # Simulate brief wait
+
+        return None
 
     async def ping(self) -> bool:
         """Simulate Redis PING command."""

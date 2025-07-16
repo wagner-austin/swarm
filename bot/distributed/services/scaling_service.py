@@ -151,12 +151,12 @@ class ScalingService:
             return ScalingDecision.NO_CHANGE, current_workers
 
         # Make decision
-        if queue_depth > scaling.scale_up_threshold and current_workers < scaling.max_workers:
+        if queue_depth >= scaling.scale_up_threshold and current_workers < scaling.max_workers:
             # Scale up
             target = min(current_workers + 1, scaling.max_workers)
             return ScalingDecision.SCALE_UP, target
 
-        elif queue_depth < scaling.scale_down_threshold and current_workers > scaling.min_workers:
+        elif queue_depth <= scaling.scale_down_threshold and current_workers > scaling.min_workers:
             # Scale down
             target = max(current_workers - 1, scaling.min_workers)
             return ScalingDecision.SCALE_DOWN, target
@@ -244,8 +244,14 @@ class ScalingService:
             try:
                 # Get current state
                 queue_depth = await self.get_queue_depth(worker_type)
-                pool = self.pools.get(worker_type)
-                current_workers = len(pool) if pool else 0
+
+                # Get actual worker count from backend, not just from heartbeats
+                # This ensures we can scale from 0 workers
+                if self.backend:
+                    current_workers = await self.backend.get_current_count(worker_type)
+                else:
+                    pool = self.pools.get(worker_type)
+                    current_workers = len(pool) if pool else 0
 
                 # Make decision
                 decision, target = self.make_scaling_decision(
