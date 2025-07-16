@@ -62,7 +62,7 @@ class TestScalingConfig:
 
         assert config.min_workers == 1  # default
         assert config.max_workers == 10  # default
-        assert config.scale_up_threshold == 5  # default
+        assert config.scale_up_threshold == 1  # default
         assert config.scale_down_threshold == 0  # default
         assert config.cooldown_seconds == 60  # default
 

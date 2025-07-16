@@ -164,6 +164,10 @@ bot-health: ## Check health status of the bot container (requires HEALTHCHECK in
 # Misc helpers
 # ---------------------------------------------------------------------------
 run: install                ## launch the Discord bot (sync with pyproject script)
+	@echo "Starting autoscaler in background..."
+	@start /MIN cmd /C "$(PYTHON) -m scripts.autoscaler > autoscaler.log 2>&1"
+	@timeout /t 2 /nobreak > nul
+	@echo "Autoscaler started. Starting bot..."
 	$(PYTHON) -m bot.core
 
 build: install              ## build wheel / sdist

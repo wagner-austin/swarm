@@ -104,7 +104,7 @@ class WorkerAutoscaler:
     async def cleanup(self) -> None:
         """Clean up resources."""
         if self.redis:
-            await self.redis.close()
+            await self.redis.aclose()
 
 
 async def main() -> None:
