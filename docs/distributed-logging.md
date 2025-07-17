@@ -1,10 +1,10 @@
-# Distributed Bot Logging and Monitoring Architecture
+# Distributed Swarm Logging and Monitoring Architecture
 
-This document describes the comprehensive logging and monitoring system for the distributed multi-worker bot architecture.
+This document describes the comprehensive logging and monitoring system for the distributed multi-worker swarm architecture.
 
 ## Overview
 
-The bot system features a production-grade centralized logging and observability platform with:
+The swarm system features a production-grade centralized logging and observability platform with:
 
 - **Structured JSON logging** with rich metadata
 - **Distributed worker monitoring** with heartbeat system  
@@ -15,19 +15,19 @@ The bot system features a production-grade centralized logging and observability
 
 ## Architecture Components
 
-### 1. Enhanced Logging System (`bot/core/logger_setup.py`)
+### 1. Enhanced Logging System (`swarm/core/logger_setup.py`)
 
 #### Context Variables
 Every log record includes comprehensive metadata:
 
 ```python
 # Core service context
-service: str          # "bot", "worker", "browser", "tankpit" 
+service: str          # "swarm", "worker", "browser", "tankpit" 
 worker_id: str        # "worker-1", "worker-2", etc.
 job_id: str          # "browser.navigate.abc123"
 
 # Deployment/infrastructure context  
-hostname: str         # "bot-server-01"
+hostname: str         # "swarm-server-01"
 container_id: str     # Docker container ID
 deployment_env: str   # "local", "staging", "production"
 region: str          # "us-west-1", "eu-central-1"
@@ -35,7 +35,7 @@ region: str          # "us-west-1", "eu-central-1"
 
 #### Usage
 ```python
-from bot.core.logger_setup import (
+from swarm.core.logger_setup import (
     setup_logging,
     bind_log_context, 
     bind_deployment_context,
@@ -50,13 +50,13 @@ deployment_context = auto_detect_deployment_context()
 bind_deployment_context(**deployment_context)
 
 # Bind service context
-bind_log_context(service="bot", worker_id="worker-1")
+bind_log_context(service="swarm", worker_id="worker-1")
 
 # All subsequent logs will include this metadata
 logger.info("Processing user request")  # Includes all context automatically
 ```
 
-### 2. HTTP Monitoring Endpoints (`bot/distributed/monitoring/http.py`)
+### 2. HTTP Monitoring Endpoints (`swarm/distributed/monitoring/http.py`)
 
 Each worker exposes monitoring endpoints on port 9200 (configurable):
 
@@ -70,7 +70,7 @@ Returns detailed health information:
   "worker_id": "worker-1",
   "uptime_seconds": 3600.5,
   "system": {
-    "hostname": "bot-server-01",
+    "hostname": "swarm-server-01",
     "platform": "Linux-5.4.0",
     "python_version": "3.11.2"
   },
@@ -90,16 +90,16 @@ Prometheus-compatible metrics with rich labels:
 ```
 # HELP worker_state Current state of the worker
 # TYPE worker_state gauge
-worker_state{worker_id="worker-1",hostname="bot-server-01",container_id="a1b2c3",deployment_env="production",region="us-west-1"} 2
+worker_state{worker_id="worker-1",hostname="swarm-server-01",container_id="a1b2c3",deployment_env="production",region="us-west-1"} 2
 
 # HELP worker_memory_bytes Worker memory usage in bytes
 # TYPE worker_memory_bytes gauge  
-worker_memory_bytes{worker_id="worker-1",hostname="bot-server-01",container_id="a1b2c3",deployment_env="production",region="us-west-1"} 257654784
+worker_memory_bytes{worker_id="worker-1",hostname="swarm-server-01",container_id="a1b2c3",deployment_env="production",region="us-west-1"} 257654784
 
 # Additional metrics: CPU, uptime, jobs processed/failed, threads, file handles
 ```
 
-### 3. Heartbeat System (`bot/distributed/monitoring/heartbeat.py`)
+### 3. Heartbeat System (`swarm/distributed/monitoring/heartbeat.py`)
 
 #### Features
 - **Periodic status reporting** to Redis (default: 30s intervals)
@@ -109,7 +109,7 @@ worker_memory_bytes{worker_id="worker-1",hostname="bot-server-01",container_id="
 
 #### Usage
 ```python
-from bot.distributed.monitoring.heartbeat import WorkerHeartbeat
+from swarm.distributed.monitoring.heartbeat import WorkerHeartbeat
 import redis.asyncio as redis
 
 redis_client = redis.from_url("redis://localhost:6379")
@@ -147,15 +147,15 @@ worker:status -> [
 
 ```
 logs/
-├── bot/                    # Main bot service logs
-│   ├── bot.jsonl          # Production JSON logs
-│   └── bot-dev.log        # Development logs
+├── swarm/                  # Main swarm service logs
+│   ├── swarm.jsonl        # Production JSON logs
+│   └── swarm-dev.log      # Development logs
 ├── workers/               # Distributed worker logs  
 │   ├── worker-1.jsonl     # Worker-specific logs
 │   ├── worker-2.jsonl
 │   └── browser-session.log # Session-specific logs
 └── archive/               # Rotated/archived logs
-    ├── bot.jsonl.1.gz
+    ├── swarm.jsonl.1.gz
     └── worker-1.jsonl.1.gz
 ```
 
@@ -208,14 +208,14 @@ discovery.docker "containers" {
 loki.source.docker "containers" {
   host       = "unix:///var/run/docker.sock"
   targets    = discovery.docker.containers.targets
-  forward_to = [loki.process.bot_logs.receiver]
+  forward_to = [loki.process.swarm_logs.receiver]
 }
 
 // Process and enrich logs
-loki.process "bot_logs" {
+loki.process "swarm_logs" {
   // Extract container name
   stage.regex {
-    expression = "(?P<container_name>bot|worker)"
+    expression = "(?P<container_name>swarm|worker)"
     source     = "__meta_docker_container_name"
   }
 
@@ -252,15 +252,15 @@ loki.process "bot_logs" {
 
 ```yaml
 scrape_configs:
-  - job_name: 'bot-workers'
+  - job_name: 'swarm-workers'
     static_configs:
       - targets: ['worker-1:9200', 'worker-2:9200']
     scrape_interval: 15s
     metrics_path: /metrics
     
-  - job_name: 'bot-main'
+  - job_name: 'swarm-main'
     static_configs:
-      - targets: ['bot:9200']
+      - targets: ['swarm:9200']
     scrape_interval: 30s
 ```
 
@@ -299,13 +299,13 @@ The logging system is designed for multi-frontend architectures:
 
 ```python
 # Different service types get appropriate logging
-bind_log_context(service="discord_bot")
-bind_log_context(service="telegram_bot")  
+bind_log_context(service="swarm")
+bind_log_context(service="telegram_integration")  
 bind_log_context(service="web_frontend")
 bind_log_context(service="sms_gateway")
 
 # Logs include frontend type for filtering
-{service="telegram_bot"} |= "message_received"
+{service="telegram_integration"} |= "message_received"
 ```
 
 ## Testing and Development
@@ -318,13 +318,13 @@ export LOG_FORMAT=pretty LOG_LEVEL=DEBUG
 # Run with file logging
 export LOG_TO_FILE=1
 
-poetry run bot
+poetry run swarm
 ```
 
 ### Testing Log Structure
 ```python
 import json
-from bot.core.logger_setup import setup_logging, bind_log_context
+from swarm.core.logger_setup import setup_logging, bind_log_context
 
 def test_structured_logging(caplog):
     setup_logging({"root": {"level": "DEBUG"}})
@@ -376,7 +376,7 @@ redis-cli XREAD COUNT 10 STREAMS worker:status 0
 curl http://localhost:9200/metrics
 
 # Verify log structure
-docker logs bot-worker-1 | jq .
+docker logs swarm-worker-1 | jq .
 ```
 
 ## Performance Considerations
@@ -394,4 +394,4 @@ docker logs bot-worker-1 | jq .
 - **Access Control**: Secure Grafana/Prometheus endpoints in production
 - **Log Retention**: Configure appropriate retention policies for compliance
 
-This architecture provides production-grade observability for the distributed bot system while maintaining performance and scalability.
+This architecture provides production-grade observability for the distributed swarm system while maintaining performance and scalability.

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document analyzes how Redis streams are used for job queuing in the Discord bot's distributed architecture, with a focus on understanding pending messages and calculating true queue depth for scaling decisions.
+This document analyzes how Redis streams are used for job queuing in the swarm distributed architecture, with a focus on understanding pending messages and calculating true queue depth for scaling decisions.
 
 ## Current Implementation
 
