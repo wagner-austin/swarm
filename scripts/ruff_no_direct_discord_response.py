@@ -1,14 +1,14 @@
 # ruff_no_direct_discord_response.py
 """
 Custom Ruff plugin: Forbids direct use of interaction.response.send_message, interaction.response.defer, and interaction.followup.send.
-Allows these only inside bot/utils/discord_interactions.py.
+Allows these only inside swarm/utils/discord_interactions.py.
 
 Usage:
     ruff check --extend-select X999
 
 Add to pyproject.toml:
     [tool.ruff.lint.per-file-ignores]
-    "bot/utils/discord_interactions.py" = ["X999"]
+    "swarm/utils/discord_interactions.py" = ["X999"]
 """
 
 import ast
