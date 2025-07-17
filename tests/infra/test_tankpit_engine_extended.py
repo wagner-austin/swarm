@@ -8,7 +8,7 @@ from typing import Any, List
 
 import pytest
 
-from bot.infra.tankpit.engine import TankPitEngine
+from swarm.infra.tankpit.engine import TankPitEngine
 
 
 class Counter:
