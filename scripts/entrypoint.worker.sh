@@ -24,5 +24,19 @@ if [[ "${ENABLE_X11:-1}" == "1" ]]; then
   export DISPLAY=:99
 fi
 
-# Launch the worker entrypoint
-exec python -m bot.distributed.worker "$@"
+# Launch the Celery worker
+# Use prefork pool for browser automation (Playwright compatible)
+CELERY_ARGS="--queues=${CELERY_QUEUES:-browser} \
+  --concurrency=${CELERY_CONCURRENCY:-1} \
+  --pool=${CELERY_POOL:-prefork} \
+  --loglevel=${CELERY_LOGLEVEL:-info} \
+  --max-tasks-per-child=${CELERY_MAX_TASKS:-100} \
+  --without-gossip \
+  --without-mingle"
+
+# Add autoscale if configured
+if [[ -n "${CELERY_AUTOSCALE:-}" ]]; then
+  CELERY_ARGS="$CELERY_ARGS --autoscale=${CELERY_AUTOSCALE}"
+fi
+
+exec python -m swarm.celery_worker $CELERY_ARGS "$@"
