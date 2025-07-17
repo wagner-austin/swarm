@@ -22,9 +22,9 @@ async def test_ensure_stream_and_group_idempotent(monkeypatch: pytest.MonkeyPatc
         Exception("BUSYGROUP Consumer Group name already exists"),
     ]
 
-    # Act: Call twice with required group parameter (should not raise)
-    await broker.ensure_stream_and_group("all-workers")
-    await broker.ensure_stream_and_group("all-workers")
+    # Act: Call twice with required stream and group parameters (should not raise)
+    await broker.ensure_stream_and_group("jobs", "all-workers")
+    await broker.ensure_stream_and_group("jobs", "all-workers")
 
     # Assert: xgroup_create called twice, BUSYGROUP error handled
     assert mock_redis.xgroup_create.call_count == 2
@@ -40,5 +40,5 @@ async def test_ensure_stream_and_group_other_error(monkeypatch: pytest.MonkeyPat
     broker._r = mock_redis
 
     with pytest.raises(Exception) as excinfo:
-        await broker.ensure_stream_and_group("all-workers")
+        await broker.ensure_stream_and_group("jobs", "all-workers")
     assert "Some other error" in str(excinfo.value)

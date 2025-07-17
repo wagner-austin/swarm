@@ -77,8 +77,9 @@ async def test_browser_job_unknown_method() -> None:
             reply_to="reply-stream",
             created_ts=0.0,
         )
-        await handle_browser_job(job)
-        # Should not raise, should not call any method, should cleanup
+        with pytest.raises(AttributeError, match="No such browser method: unknown_method"):
+            await handle_browser_job(job)
+        # Should cleanup even on error
         mock_engine.start.assert_awaited_once()
         mock_engine.stop.assert_awaited_once_with(graceful=True)
         assert session_id not in _browser_engines
@@ -98,7 +99,9 @@ async def test_tankpit_job_unknown_method() -> None:
             reply_to="reply-stream",
             created_ts=0.0,
         )
-        await handle_tankpit_job(job)
+        with pytest.raises(AttributeError, match="No such tankpit method: unknown_method"):
+            await handle_tankpit_job(job)
+        # Should cleanup even on error
         mock_engine.start.assert_awaited_once()
         mock_engine.stop.assert_awaited_once_with(graceful=True)
         assert session_id not in _tankpit_engines
