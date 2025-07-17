@@ -90,12 +90,15 @@ class Orchestrator(BaseDIClientCog):
                     cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
 
                     for key in keys:
-                        worker_id = key.split(":")[-1]
-                        heartbeat_data = await self.redis.get(key)
+                        # Handle both bytes and str keys from Redis
+                        key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+                        worker_id = key_str.split(":")[-1]
+                        # Get state from Redis hash (not string)
+                        state = await self.redis.hget(key_str, "state")
 
-                        if heartbeat_data:
-                            data = json.loads(heartbeat_data)
-                            pool.register_worker(worker_id, data.get("capabilities", {}))
+                        if state:
+                            # Worker is healthy if it has a state
+                            pool.register_worker(worker_id, {})
                             pool.mark_healthy(worker_id)
 
                     if cursor == 0:
@@ -106,7 +109,7 @@ class Orchestrator(BaseDIClientCog):
 
     @tasks.loop(seconds=15)
     async def monitor_queues(self) -> None:
-        """Monitor job queues and trigger scaling."""
+        """Monitor job queues and store metrics."""
         try:
             for job_type in ["browser", "tankpit"]:
                 # Get queue depth
@@ -129,8 +132,8 @@ class Orchestrator(BaseDIClientCog):
                     healthy_workers,
                 )
 
-                # Check scaling needs
-                await self._check_scaling(job_type, queue_depth, healthy_workers)
+                # DO NOT trigger scaling - that's the autoscaler's job!
+                # The autoscaler service runs separately and monitors these metrics
 
         except Exception as e:
             logger.error(f"Error monitoring queues: {e}")
@@ -152,11 +155,6 @@ class Orchestrator(BaseDIClientCog):
 
         except Exception as e:
             logger.error(f"Error in cleanup: {e}")
-
-    async def _check_scaling(self, job_type: str, queue_depth: int, worker_count: int) -> None:
-        """Check if scaling is needed and trigger it."""
-        # Let the scaling service handle the decision making
-        await self.scaling_service.check_and_scale_all()
 
     async def _request_scale_up(self, job_type: str, target_count: int) -> None:
         """Request scale up using the scaling service."""

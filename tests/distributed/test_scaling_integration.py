@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import redis.asyncio as redis_asyncio
 
-from bot.distributed.backends.docker_compose import DockerComposeBackend
+from bot.distributed.backends.docker_api import DockerApiBackend
 from bot.distributed.broker import Broker
 from bot.distributed.core.config import (
     DistributedConfig,
@@ -277,7 +277,7 @@ class TestEndToEndScaling:
 
 
 class TestDockerComposeIntegration:
-    """Test DockerComposeBackend with better dependency injection."""
+    """Test Docker backends with better dependency injection."""
 
     @pytest.fixture
     def subprocess_executor(self) -> AsyncMock:
@@ -300,40 +300,24 @@ class TestDockerComposeIntegration:
         return executor
 
     @pytest.mark.asyncio
-    async def test_docker_compose_command_execution(self, subprocess_executor: AsyncMock) -> None:
-        """Test actual command construction without mocking internals."""
+    async def test_docker_api_backend_execution(self, subprocess_executor: AsyncMock) -> None:
+        """Test actual Docker API backend functionality."""
         # Create backend with dependency injection
-        backend = DockerComposeBackend(compose_file="test-compose.yml", project_name="test-project")
+        backend = DockerApiBackend(
+            image="test-image:latest", network="test_network", project_name="test-project"
+        )
 
-        # Monkey-patch the subprocess execution
-        import asyncio
+        # Mock Docker client methods
+        with patch.object(backend, "get_current_count", return_value=0):
+            with patch.object(
+                backend, "_create_worker_container", return_value=True
+            ) as mock_create:
+                # Execute scaling
+                result = await backend.scale_to("browser", 3)
 
-        original_create_subprocess_exec = asyncio.create_subprocess_exec
-        asyncio.create_subprocess_exec = subprocess_executor.create_subprocess_exec
-
-        try:
-            # Execute scaling
-            result = await backend.scale_to("browser", 3)
-
-            # Verify success
-            assert result is True
-
-            # Verify command was constructed correctly
-            assert len(subprocess_executor.executed_commands) == 1
-            cmd = subprocess_executor.executed_commands[0]
-
-            # Check command structure
-            assert cmd[0] == "docker-compose"
-            assert "-f" in cmd
-            assert "test-compose.yml" in cmd
-            assert "-p" in cmd
-            assert "test-project" in cmd
-            assert "--scale" in cmd
-            assert "worker=3" in cmd
-
-        finally:
-            # Restore original
-            asyncio.create_subprocess_exec = original_create_subprocess_exec
+                # Verify success
+                assert result is True
+                assert mock_create.call_count == 3
 
 
 class TestScalingServiceWithRealRedis:
@@ -371,7 +355,7 @@ class TestScalingServiceWithRealRedis:
 
         # Get actual queue depth
         queue_depth = await service.get_queue_depth("browser")
-        assert queue_depth == 16  # 15 + 1 init
+        assert queue_depth == 16  # 15 jobs added + 1 init message
 
         # Make scaling decision
         decision, target = service.make_scaling_decision(

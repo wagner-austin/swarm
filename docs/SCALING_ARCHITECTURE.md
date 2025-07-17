@@ -76,7 +76,7 @@ Each worker type has scaling thresholds in `DistributedConfig`:
 
 ### Scaling Backends
 
-- **DockerComposeBackend**: Uses `docker-compose up --scale`
+- **DockerApiBackend**: Uses Docker SDK for direct container management
 - **KubernetesBackend**: Uses `kubectl scale deployment`
 - **FlyIOBackend**: Uses `fly scale count`
 
