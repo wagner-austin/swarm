@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.distributed.backends import DockerComposeBackend
+from bot.distributed.backends import DockerApiBackend
 from bot.distributed.core.config import DistributedConfig
 from scripts.autoscaler import WorkerAutoscaler
 from tests.fakes.fake_redis import FakeRedisClient
@@ -36,7 +36,7 @@ class TestWorkerAutoscaler:
         """Test autoscaler initialization and setup."""
         autoscaler = WorkerAutoscaler(
             redis_url="redis://fake",
-            orchestrator="docker-compose",
+            orchestrator="docker",
             check_interval=1,
         )
 
@@ -49,7 +49,7 @@ class TestWorkerAutoscaler:
             # Verify setup completed
             assert autoscaler.redis is not None
             assert autoscaler.scaling_service is not None
-            assert isinstance(autoscaler.scaling_service.backend, DockerComposeBackend)
+            assert isinstance(autoscaler.scaling_service.backend, DockerApiBackend)
 
     @pytest.mark.asyncio
     async def test_autoscaler_continuous_monitoring(
@@ -59,7 +59,7 @@ class TestWorkerAutoscaler:
         # Create autoscaler with short interval
         autoscaler = WorkerAutoscaler(
             redis_url="redis://fake",
-            orchestrator="docker-compose",
+            orchestrator="docker",
             check_interval=1,  # 1 second for testing
         )
 
@@ -75,7 +75,7 @@ class TestWorkerAutoscaler:
             assert autoscaler.scaling_service is not None
             autoscaler.scaling_service.backend = fake_backend
 
-            # Add jobs to trigger scaling
+            # Add jobs to trigger scaling - use the correct queue for browser workers
             await fake_redis_client.xadd("browser:jobs", {"job": "test1"})
             await fake_redis_client.xadd("browser:jobs", {"job": "test2"})
 
@@ -101,8 +101,8 @@ class TestWorkerAutoscaler:
         """Test that autoscaler handles errors gracefully."""
         autoscaler = WorkerAutoscaler(
             redis_url="redis://fake",
-            orchestrator="docker-compose",
-            check_interval=1,
+            orchestrator="docker",
+            check_interval=1,  # Use 1 second interval for testing
         )
 
         with patch("redis.asyncio.from_url") as mock_from_url:
@@ -110,33 +110,39 @@ class TestWorkerAutoscaler:
 
             await autoscaler.setup()
 
-            # Make scaling service raise an error
+            # Replace backend with fake to avoid real cleanup
+            fake_backend = FakeScalingBackend()
             assert autoscaler.scaling_service is not None
+            autoscaler.scaling_service.backend = fake_backend
+
+            # Track calls
+            call_count = 0
+
+            async def error_after_calls() -> None:
+                nonlocal call_count
+                call_count += 1
+                if call_count >= 2:
+                    # Set shutdown after a couple calls
+                    autoscaler._shutdown_event.set()
+                raise Exception("Test error")
+
+            # Make scaling service raise an error
             autoscaler.scaling_service.check_and_scale_all = AsyncMock(  # type: ignore[method-assign]
-                side_effect=Exception("Test error")
+                side_effect=error_after_calls
             )
 
-            # Run autoscaler briefly
-            run_task = asyncio.create_task(autoscaler.run())
-            await asyncio.sleep(0.2)
-            run_task.cancel()
+            # Run autoscaler - it should exit after a few error cycles
+            await autoscaler.run()
 
-            try:
-                await run_task
-            except asyncio.CancelledError:
-                pass
-
-            # Should have called check_and_scale_all despite errors
-            assert autoscaler.scaling_service is not None
-            assert hasattr(autoscaler.scaling_service.check_and_scale_all, "call_count")
-            assert autoscaler.scaling_service.check_and_scale_all.call_count > 0
+            # Should have called check_and_scale_all at least once despite errors
+            assert call_count >= 2
 
     @pytest.mark.asyncio
     async def test_autoscaler_cleanup(self, fake_redis_client: FakeRedisClient) -> None:
         """Test that autoscaler cleans up resources."""
         autoscaler = WorkerAutoscaler(
             redis_url="redis://fake",
-            orchestrator="docker-compose",
+            orchestrator="docker",
         )
 
         with patch("redis.asyncio.from_url") as mock_from_url:
@@ -144,6 +150,12 @@ class TestWorkerAutoscaler:
             mock_from_url.return_value = mock_redis
 
             await autoscaler.setup()
+
+            # Replace backend with fake to avoid real Docker operations
+            fake_backend = FakeScalingBackend()
+            if autoscaler.scaling_service:
+                autoscaler.scaling_service.backend = fake_backend
+
             await autoscaler.cleanup()
 
             # Verify Redis connection was closed
@@ -152,7 +164,7 @@ class TestWorkerAutoscaler:
     @pytest.mark.parametrize(
         "orchestrator,expected_backend",
         [
-            ("docker-compose", "DockerComposeBackend"),
+            ("docker", "DockerApiBackend"),
             ("kubernetes", "KubernetesBackend"),
             ("fly", "FlyIOBackend"),
         ],
@@ -200,7 +212,7 @@ class TestAutoscalerMain:
             "--redis-url",
             "redis://localhost:6379",
             "--orchestrator",
-            "docker-compose",
+            "docker",
             "--check-interval",
             "1",
         ]
@@ -226,7 +238,7 @@ class TestAutoscalerMain:
                 # Verify autoscaler was created with correct params
                 mock_autoscaler_class.assert_called_once_with(
                     redis_url="redis://localhost:6379",
-                    orchestrator="docker-compose",
+                    orchestrator="docker",
                     check_interval=1,
                 )
 
