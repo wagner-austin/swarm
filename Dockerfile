@@ -58,7 +58,8 @@ COPY --from=builder /app /app
 # Copy all entrypoint scripts
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY entrypoint.manager.sh /usr/local/bin/entrypoint.manager.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint.manager.sh
+COPY entrypoint.worker.sh /usr/local/bin/entrypoint.worker.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint.manager.sh /usr/local/bin/entrypoint.worker.sh
 
 # Single source of truth – Settings.metrics_port defaults to 9200
 ARG METRICS_PORT=9200
@@ -82,9 +83,34 @@ ARG WORKER_PORT=9100
 EXPOSE $WORKER_PORT
 ENV WORKER_PORT=$WORKER_PORT
 
-# Copy the worker entrypoint script
-COPY entrypoint.worker.sh /usr/local/bin/entrypoint.worker.sh
-RUN chmod +x /usr/local/bin/entrypoint.worker.sh
-
+# Worker entrypoint script is already copied from runtime-bot stage
 # Document: to use worker image, override entrypoint or use this stage
 # ENTRYPOINT ["/usr/local/bin/entrypoint.worker.sh"]
+
+# ----------------------------------------------------------------------
+# Runtime stage – autoscaler (minimal, no GUI dependencies)
+# ----------------------------------------------------------------------
+FROM python:3.12-slim AS runtime-autoscaler
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Copy only Python dependencies from builder (no Playwright/browser stuff)
+COPY --from=builder /usr/local /usr/local
+
+# Copy application source
+COPY --from=builder /app /app
+
+# Install docker-compose for production autoscaling
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && curl -L "https://github.com/docker/compose/releases/download/v2.31.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose \
+    && chmod +x /usr/local/bin/docker-compose \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker-compose --version
+
+# The autoscaler is a standalone service - no special entrypoint
+# Run with: python -m scripts.autoscaler
