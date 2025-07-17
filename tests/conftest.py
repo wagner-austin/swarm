@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bot.core.logger_setup import setup_logging
-from bot.core.settings import Settings
+from swarm.core.logger_setup import setup_logging
+from swarm.core.settings import Settings
 
 # Silence noisy third-party deprecations we can’t fix locally.
 warnings.filterwarnings(
