@@ -9,7 +9,7 @@ primary_region = "lax"
   METRICS_PORT = 9200          # strings are fine inside [env]
 
 [processes]
-  bot = "python -m bot.core"
+  swarm = "python -m swarm.core"
 
 [metrics]
   port = 9200                  # ← NO quotes, must be an int
