@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.core.lifecycle import BotLifecycle, LifecycleState
-from bot.core.settings import Settings
+from swarm.core.lifecycle import LifecycleState, SwarmLifecycle
+from swarm.core.settings import Settings
 
 
 @pytest.fixture
@@ -26,20 +26,20 @@ async def test_full_bot_startup_wiring(
     test_settings: Settings, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Verify that the bot's DI container and lifecycle can be fully wired without errors."""
-    # Create an event to control when the mocked bot.start() should finish
+    # Create an event to control when the mocked swarm.start() should finish
     start_event = asyncio.Event()
 
     async def mock_start_blocking(token: str) -> None:
-        """Mock bot.start() that blocks until we signal it to finish."""
+        """Mock swarm.start() that blocks until we signal it to finish."""
         await start_event.wait()
 
     # Patch the actual Discord connection methods to avoid real network calls
     with (
-        patch("bot.core.discord.boot.MyBot.start", side_effect=mock_start_blocking),
-        patch("bot.core.discord.boot.MyBot.close", new_callable=AsyncMock),
-        patch("bot.core.discord.boot.MyBot.login", new_callable=AsyncMock),
+        patch("swarm.core.discord.boot.MyBot.start", side_effect=mock_start_blocking),
+        patch("swarm.core.discord.boot.MyBot.close", new_callable=AsyncMock),
+        patch("swarm.core.discord.boot.MyBot.login", new_callable=AsyncMock),
     ):
-        lifecycle = BotLifecycle(settings=test_settings)
+        lifecycle = SwarmLifecycle(settings=test_settings)
 
         # The `run` method normally blocks forever. We'll run it as a task and
         # cancel it once we've verified it has reached the connecting state.
@@ -73,16 +73,16 @@ async def test_full_bot_startup_wiring(
                 )
 
         # The lifecycle should proceed through states and stop at CONNECTING_TO_DISCORD
-        # right before it calls the patched `bot.start()`.
+        # right before it calls the patched `swarm.start()`.
         await wait_for_state(LifecycleState.CONNECTING_TO_DISCORD)
 
         # Success! The lifecycle reached CONNECTING_TO_DISCORD, meaning all DI container
         # wiring and initialization completed without errors
 
-        # Signal the mock bot.start() to complete so lifecycle can proceed to shutdown
+        # Signal the mock swarm.start() to complete so lifecycle can proceed to shutdown
         start_event.set()
 
-        # Wait a moment for the lifecycle to process the mock bot.start() completion
+        # Wait a moment for the lifecycle to process the mock swarm.start() completion
         await asyncio.sleep(0.1)
 
         # Cleanly shut down the lifecycle
