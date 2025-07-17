@@ -6,28 +6,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from discord import Attachment, Object
 
-from bot.core.containers import Container
+from swarm.core.containers import Container
 
 
 @pytest.fixture
 def container_with_bot() -> tuple[Container, MagicMock]:
-    """Create real DI container with mocked bot."""
+    """Create real DI container with mocked swarm."""
     container = Container()
 
-    # Mock bot
-    bot = MagicMock()
-    bot.owner_id = 12345
-    bot.is_owner = AsyncMock(return_value=True)
-    bot.application_info = AsyncMock()
-    bot.application_info.return_value.owner = Object(id=12345)
-    bot.container = container
+    # Mock Discord bot
+    discord_bot = MagicMock()
+    discord_bot.owner_id = 12345
+    discord_bot.is_owner = AsyncMock(return_value=True)
+    discord_bot.application_info = AsyncMock()
+    discord_bot.application_info.return_value.owner = Object(id=12345)
+    discord_bot.container = container
 
-    return container, bot
+    return container, discord_bot
 
 
 @pytest.mark.asyncio
-@patch("bot.plugins.commands.persona_admin.PERSONALITIES", {"test1": {}, "test2": {}})
-@patch("bot.plugins.commands.persona_admin._CUSTOM_DIR")
+@patch("swarm.plugins.commands.persona_admin.PERSONALITIES", {"test1": {}, "test2": {}})
+@patch("swarm.plugins.commands.persona_admin._CUSTOM_DIR")
 async def test_list_cmd(
     mock_custom_dir: MagicMock,
     container_with_bot: tuple[Container, MagicMock],
@@ -37,7 +37,7 @@ async def test_list_cmd(
 
     # Create PersonaAdmin cog using REAL DI container factory
     mock_safe_send = AsyncMock()
-    cog = container.persona_admin_cog(bot=mock_bot, safe_send_func=mock_safe_send)
+    cog = container.persona_admin_cog(discord_bot=mock_bot, safe_send_func=mock_safe_send)
     mock_interaction = AsyncMock()
 
     # Mock the path operations properly
@@ -58,7 +58,7 @@ async def test_list_cmd(
 
 @pytest.mark.asyncio
 @patch(
-    "bot.plugins.commands.persona_admin.PERSONALITIES",
+    "swarm.plugins.commands.persona_admin.PERSONALITIES",
     {"test1": {"prompt": "Hello", "allowed_users": [123]}},
 )
 async def test_show_cmd_found(container_with_bot: tuple[Container, MagicMock]) -> None:
@@ -67,7 +67,7 @@ async def test_show_cmd_found(container_with_bot: tuple[Container, MagicMock]) -
 
     # Create PersonaAdmin cog using REAL DI container factory
     mock_safe_send = AsyncMock()
-    cog = container.persona_admin_cog(bot=mock_bot, safe_send_func=mock_safe_send)
+    cog = container.persona_admin_cog(discord_bot=mock_bot, safe_send_func=mock_safe_send)
     mock_interaction = AsyncMock()
     await cast(Any, cog.show_cmd.callback)(cog, mock_interaction, name="test1")
     mock_safe_send.assert_awaited_once()
@@ -77,8 +77,8 @@ async def test_show_cmd_found(container_with_bot: tuple[Container, MagicMock]) -
 
 
 @pytest.mark.asyncio
-@patch("bot.ai.personas.refresh", new_callable=MagicMock)
-@patch("bot.ai.personas.PERSONALITIES", {"test1": {}}, create=True)
+@patch("swarm.ai.personas.refresh", new_callable=MagicMock)
+@patch("swarm.ai.personas.PERSONALITIES", {"test1": {}}, create=True)
 async def test_reload_cmd(
     mock_refresh: MagicMock, container_with_bot: tuple[Container, MagicMock]
 ) -> None:
@@ -87,7 +87,7 @@ async def test_reload_cmd(
 
     # Create PersonaAdmin cog using REAL DI container factory
     mock_safe_send = AsyncMock()
-    cog = container.persona_admin_cog(bot=mock_bot, safe_send_func=mock_safe_send)
+    cog = container.persona_admin_cog(discord_bot=mock_bot, safe_send_func=mock_safe_send)
     mock_interaction = AsyncMock()
 
     await cast(Any, cog.reload_cmd.callback)(cog, mock_interaction)

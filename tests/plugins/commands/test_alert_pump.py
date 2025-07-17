@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from discord import Object
 
-from bot.core.containers import Container
-from bot.frontends.discord.discord_owner import clear_owner_cache
+from swarm.core.containers import Container
+from swarm.frontends.discord.discord_owner import clear_owner_cache
 
 
 @pytest.fixture
@@ -19,23 +19,23 @@ def container_with_mocked_deps() -> tuple[Container, MagicMock, MagicMock]:
     mock_lifecycle = MagicMock()
     mock_lifecycle.alerts_q = MagicMock()
 
-    # Mock bot
-    bot = MagicMock()
-    bot.owner_id = 123
-    bot.get_user.return_value = MagicMock(id=123)
-    bot.is_ready.return_value = True
-    bot.is_closed.return_value = False
-    bot.lifecycle = mock_lifecycle
-    bot.container = container
+    # Mock Discord bot
+    discord_bot = MagicMock()
+    discord_bot.owner_id = 123
+    discord_bot.get_user.return_value = MagicMock(id=123)
+    discord_bot.is_ready.return_value = True
+    discord_bot.is_closed.return_value = False
+    discord_bot.lifecycle = mock_lifecycle
+    discord_bot.container = container
 
     # Mock the async methods that get_owner depends on
-    bot.fetch_user = AsyncMock()
-    bot.fetch_user.return_value = Object(id=123)
+    discord_bot.fetch_user = AsyncMock()
+    discord_bot.fetch_user.return_value = Object(id=123)
 
-    bot.application_info = AsyncMock()
-    bot.application_info.return_value.owner = Object(id=123)
+    discord_bot.application_info = AsyncMock()
+    discord_bot.application_info.return_value.owner = Object(id=123)
 
-    return container, bot, mock_lifecycle
+    return container, discord_bot, mock_lifecycle
 
 
 @pytest.mark.asyncio
@@ -46,7 +46,7 @@ async def test_cog_load_and_unload(
     container, mock_bot, mock_lifecycle = container_with_mocked_deps
 
     # Create AlertPump cog using REAL DI container factory
-    alert_pump_cog = container.alert_pump_cog(bot=mock_bot, lifecycle=mock_lifecycle)
+    alert_pump_cog = container.alert_pump_cog(discord_bot=mock_bot, lifecycle=mock_lifecycle)
 
     # Pre-condition: task should not be running
     assert alert_pump_cog._task is None
@@ -74,7 +74,7 @@ async def test_on_ready_sends_startup_dm(
     container, mock_bot, mock_lifecycle = container_with_mocked_deps
 
     # Create AlertPump cog using REAL DI container factory
-    alert_pump_cog = container.alert_pump_cog(bot=mock_bot, lifecycle=mock_lifecycle)
+    alert_pump_cog = container.alert_pump_cog(discord_bot=mock_bot, lifecycle=mock_lifecycle)
 
     clear_owner_cache()
     # Patch the helper used by the listener
@@ -106,7 +106,7 @@ async def test_send_dm_with_retry_success(
     container, mock_bot, mock_lifecycle = container_with_mocked_deps
 
     # Create AlertPump cog using REAL DI container factory
-    alert_pump_cog = container.alert_pump_cog(bot=mock_bot, lifecycle=mock_lifecycle)
+    alert_pump_cog = container.alert_pump_cog(discord_bot=mock_bot, lifecycle=mock_lifecycle)
 
     owner = MagicMock()
     owner.send = AsyncMock()
@@ -122,7 +122,7 @@ async def test_send_dm_with_retry_embed(
     container, mock_bot, mock_lifecycle = container_with_mocked_deps
 
     # Create AlertPump cog using REAL DI container factory
-    alert_pump_cog = container.alert_pump_cog(bot=mock_bot, lifecycle=mock_lifecycle)
+    alert_pump_cog = container.alert_pump_cog(discord_bot=mock_bot, lifecycle=mock_lifecycle)
 
     owner = MagicMock()
     owner.send = AsyncMock()

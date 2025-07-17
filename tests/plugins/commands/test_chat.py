@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.core.containers import Container
+from swarm.core.containers import Container
 
 
 @pytest.fixture
@@ -20,21 +20,21 @@ def container_with_mocked_history() -> tuple[Container, MagicMock, MagicMock]:
     mock_history.recent = AsyncMock(return_value=[])
     container.history_backend.override(mock_history)
 
-    # Mock bot
-    mock_bot = MagicMock()
-    mock_bot.user = MagicMock()
-    mock_bot.user.id = 123
-    mock_bot.user.name = "TestBot"
-    mock_bot.owner_id = 123
-    mock_bot.is_ready.return_value = True
-    mock_bot.is_closed.return_value = False
-    mock_bot.container = container
+    # Mock Discord bot
+    mock_discord_bot = MagicMock()
+    mock_discord_bot.user = MagicMock()
+    mock_discord_bot.user.id = 123
+    mock_discord_bot.user.name = "TestBot"
+    mock_discord_bot.owner_id = 123
+    mock_discord_bot.is_ready.return_value = True
+    mock_discord_bot.is_closed.return_value = False
+    mock_discord_bot.container = container
 
-    return container, mock_bot, mock_history
+    return container, mock_discord_bot, mock_history
 
 
 @pytest.mark.asyncio
-@patch("bot.plugins.commands.chat.safe_send")
+@patch("swarm.plugins.commands.chat.safe_send")
 async def test_chat_clear_history(
     mock_safe_send: AsyncMock,
     container_with_mocked_history: tuple[Container, MagicMock, MagicMock],
@@ -43,7 +43,7 @@ async def test_chat_clear_history(
     container, mock_bot, mock_history = container_with_mocked_history
 
     # Create Chat cog using REAL DI container factory
-    chat_cog = container.chat_cog(bot=mock_bot)
+    chat_cog = container.chat_cog(discord_bot=mock_bot)
 
     mock_interaction: MagicMock = MagicMock()
     mock_interaction.channel_id = 1
@@ -59,9 +59,9 @@ async def test_chat_clear_history(
 
 
 @pytest.mark.asyncio
-@patch("bot.plugins.commands.chat.safe_send")
-@patch("bot.plugins.commands.chat._providers.get")
-@patch("bot.plugins.commands.chat.settings", autospec=True)
+@patch("swarm.plugins.commands.chat.safe_send")
+@patch("swarm.plugins.commands.chat._providers.get")
+@patch("swarm.plugins.commands.chat.settings", autospec=True)
 async def test_chat_simple_reply(
     mock_settings: MagicMock,
     mock_get: MagicMock,
@@ -72,7 +72,7 @@ async def test_chat_simple_reply(
     container, mock_bot, mock_history = container_with_mocked_history
 
     # Create Chat cog using REAL DI container factory
-    chat_cog = container.chat_cog(bot=mock_bot)
+    chat_cog = container.chat_cog(discord_bot=mock_bot)
     mock_interaction: MagicMock = MagicMock()
     mock_interaction.channel_id = 1
     mock_interaction.user.id = 123
