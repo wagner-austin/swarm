@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from bot.browser.ws_logger import InMemorySink, WSLogger
+from swarm.browser.ws_logger import InMemorySink, WSLogger
 
 
 @pytest.mark.asyncio

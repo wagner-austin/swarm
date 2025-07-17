@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 import pytest
 
-from bot.browser.engine import BrowserEngine
+from swarm.browser.engine import BrowserEngine
 
 
 class _DummyPage:  # noqa: D101 – internal test helper
@@ -78,7 +78,7 @@ async def test_browser_engine_concurrent_restart(monkeypatch: pytest.MonkeyPatch
 
     # Patch async_playwright used inside BrowserEngine
     monkeypatch.setattr(
-        "bot.browser.engine.async_playwright",
+        "swarm.browser.engine.async_playwright",
         lambda: _AsyncPlaywrightCtx(_inc),
     )
 
@@ -86,7 +86,7 @@ async def test_browser_engine_concurrent_restart(monkeypatch: pytest.MonkeyPatch
     async def dummy_attach(*args: Any, **kwargs: Any) -> None:  # noqa: ARG001
         pass
 
-    monkeypatch.setattr("bot.browser.ws_logger.WSLogger.attach", dummy_attach)
+    monkeypatch.setattr("swarm.browser.ws_logger.WSLogger.attach", dummy_attach)
 
     eng = BrowserEngine(headless=True, proxy=None, timeout_ms=100)
 
