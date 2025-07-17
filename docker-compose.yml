@@ -1,16 +1,6 @@
 ---
 services:
-  redis:
-    image: redis:7
-    container_name: redis
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
+  # Redis removed - using Upstash from .env instead
 
   prometheus:
     image: prom/prometheus:latest
@@ -94,18 +84,22 @@ services:
     restart: unless-stopped
 
   bot:
-    build: .
+    image: discord-bot:latest
+    build:
+      context: .
+      target: runtime-bot
     container_name: bot
+    env_file:
+      - .env
     # Discord frontend (no local workers)
     volumes:
       - .:/app
       - C:\Users\Test\.config\discord-bot\personas\personas.yaml:/root/.config/discord-bot/personas/personas.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # For DockerApiBackend
     depends_on:
-      - redis
       - manager
     environment:
       - METRICS_PORT=9200
-      - REDIS_URL=redis://redis:6379/0
       - USE_DISTRIBUTED_WORKERS=true
       # --- Logging Configuration ---
       - LOG_FORMAT=json
@@ -129,15 +123,16 @@ services:
     restart: unless-stopped
 
   manager:
-    build: .
+    build:
+      context: .
+      target: runtime-bot
     container_name: manager
+    env_file:
+      - .env
     # Job orchestrator and callback handler
     entrypoint: ["/usr/local/bin/entrypoint.manager.sh"]
-    depends_on:
-      - redis
     environment:
       - METRICS_PORT=9150
-      - REDIS_URL=redis://redis:6379/0
       # --- Logging Configuration ---
       - LOG_FORMAT=json
       - LOG_TO_FILE=0
@@ -159,99 +154,118 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  worker:
-    build: .
-    container_name: worker
-    # Generic workers (scalable)
-    entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
-    # Scale with: docker-compose up --scale worker=3
-    depends_on:
-      - redis
-      - manager
-    environment:
-      - METRICS_PORT=9100
-      - DISPLAY=:99
-      - REDIS_URL=redis://redis:6379/0
-      # --- Logging Configuration ---
-      - LOG_FORMAT=json
-      - LOG_TO_FILE=0
-    ports:
-      - "9100"            # Expose worker metrics for Prometheus discovery
-    volumes:
-      - .:/app
-      # - ./worker-config.yaml:/app/config.yaml:ro  # Mount config file
-      # - ./worker-logs:/app/logs                    # Uncomment to persist logs
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - >
-          import urllib.request,sys;
-          sys.exit(0 if urllib.request.urlopen(
-            'http://localhost:9100/metrics', timeout=5
-          ).getcode() == 200 else 1)
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
-    restart: unless-stopped
+  # Worker service commented out - workers created dynamically by autoscaler
+  # worker:
+  #   build:
+  #     context: .
+  #     target: runtime-worker
+  #   # Generic workers (scalable)
+  #   entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
+  #   # Scale with: docker-compose up --scale worker=3
+  #   deploy:
+  #     replicas: 1
+  #   depends_on:
+  #     - redis
+  #     - manager
+  #   environment:
+  #     - METRICS_PORT=9100
+  #     - DISPLAY=:99
+  #     - REDIS_URL=redis://redis:6379/0
+  #     # --- Logging Configuration ---
+  #     - LOG_FORMAT=json
+  #     - LOG_TO_FILE=0
+  #   ports:
+  #     - "9100"            # Expose worker metrics for Prometheus discovery
+  #   volumes:
+  #     - .:/app
+  #     # - ./worker-config.yaml:/app/config.yaml:ro  # Mount config file
+  #     # - ./worker-logs:/app/logs        # Uncomment to persist logs
+  #   healthcheck:
+  #     test:
+  #       - CMD
+  #       - python
+  #       - -c
+  #       - >
+  #         import urllib.request,sys;
+  #         sys.exit(0 if urllib.request.urlopen(
+  #           'http://localhost:9100/metrics', timeout=5
+  #         ).getcode() == 200 else 1)
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 60s
+  #   restart: unless-stopped
 
-    # Example: A special worker with custom config/logs and job type
-    # TEMPLATE: To add a special worker, copy this block and adjust as needed
-    # worker-special:
-    #   build: .
-    #   container_name: discord-worker-special
-    #   entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
-    #   depends_on:
-    #     - redis
-    #   environment:
-    #     - WORKER_PORT=9110
-    #     - DISPLAY=:99
-    #     - REDIS_URL=redis://redis:6379/0
-    #     - WORKER_ID=worker-special
-    #     - JOB_TYPE_PREFIX=tankpit
-    #     - LOG_LEVEL=debug
-    #   ports:
-    #     - "9110:9110"
-    #   volumes:
-    #     - .:/app
-    #     - ./worker-special-config.yaml:/app/config.yaml:ro
-    #     - ./worker-special-logs:/app/logs
-    #   healthcheck:
-    #     test:
-    #       - CMD
-    #       - python
-    #       - -c
-    #       - >
-    #         import urllib.request,sys;
-    #         sys.exit(0 if urllib.request.urlopen(
-    #           'http://localhost:9110/metrics', timeout=5
-    #         ).getcode() == 200 else 1)
-    #     interval: 30s
-    #     timeout: 5s
-    #     retries: 3
-    #     start_period: 60s
-    # Place 'restart: unless-stopped' outside the template block when copying
+  # Example: A special worker with custom config/logs and job type
+  # TEMPLATE: To add a special worker, copy this block and adjust as needed
+  # worker-special:
+  #   build: .
+  #   container_name: discord-worker-special
+  #   entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
+  #   depends_on:
+  #     - redis
+  #   environment:
+  #     - WORKER_PORT=9110
+  #     - DISPLAY=:99
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - WORKER_ID=worker-special
+  #     - JOB_TYPE_PREFIX=tankpit
+  #     - LOG_LEVEL=debug
+  #   ports:
+  #     - "9110:9110"
+  #   volumes:
+  #     - .:/app
+  #     - ./worker-special-config.yaml:/app/config.yaml:ro
+  #     - ./worker-special-logs:/app/logs
+  #   healthcheck:
+  #     test:
+  #       - CMD
+  #       - python
+  #       - -c
+  #       - >
+  #         import urllib.request,sys;
+  #         sys.exit(0 if urllib.request.urlopen(
+  #           'http://localhost:9110/metrics', timeout=5
+  #         ).getcode() == 200 else 1)
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 60s
+  # Place 'restart: unless-stopped' outside the template block when copying
 
   autoscaler:
-    build: .
+    build:
+      context: .
+      target: runtime-autoscaler
     container_name: autoscaler
+    env_file:
+      - .env
     # Monitors queues and scales workers
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
     command:
       - python
       - -m
       - scripts.autoscaler
       - --orchestrator
-      - docker-compose
-    depends_on:
-      - redis
+      - docker-api
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - ORCHESTRATOR=docker-compose
+      - ORCHESTRATOR=docker-api
       - CHECK_INTERVAL=30
       - PYTHONPATH=/app
+      - COMPOSE_PROJECT_NAME=discordbot
+      - WORKER_METRICS_PORT=9100
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - .:/app
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys; sys.exit(0)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
