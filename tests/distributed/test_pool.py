@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import pytest
 
-from bot.distributed.core.pool import WorkerInfo, WorkerPool
+from swarm.distributed.core.pool import WorkerInfo, WorkerPool
 
 
 class TestWorkerInfo:

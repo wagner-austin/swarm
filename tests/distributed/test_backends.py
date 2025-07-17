@@ -12,10 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.distributed.backends.docker_api import DockerApiBackend
-from bot.distributed.backends.fly_io import FlyIOBackend
-from bot.distributed.backends.kubernetes import KubernetesBackend
-from bot.distributed.services.scaling_service import ScalingBackend
+from swarm.distributed.backends.docker_api import DockerApiBackend
+from swarm.distributed.backends.fly_io import FlyIOBackend
+from swarm.distributed.backends.kubernetes import KubernetesBackend
+from swarm.distributed.services.scaling_service import ScalingBackend
 
 
 class TestScalingBackendProtocol:
@@ -176,7 +176,7 @@ class TestKubernetesBackend:
     def backend(self) -> KubernetesBackend:
         """Create backend instance."""
         return KubernetesBackend(
-            namespace="prod", deployment_prefix="discord-bot", kubeconfig="/path/to/kubeconfig"
+            namespace="prod", deployment_prefix="swarm", kubeconfig="/path/to/kubeconfig"
         )
 
     @pytest.mark.asyncio
@@ -187,7 +187,7 @@ class TestKubernetesBackend:
             mock_proc = AsyncMock()
             mock_proc.returncode = 0
             mock_proc.communicate = AsyncMock(
-                return_value=(b"deployment.apps/discord-bot-browser scaled", b"")
+                return_value=(b"deployment.apps/swarm-browser scaled", b"")
             )
             mock_exec.return_value = mock_proc
 
@@ -200,7 +200,7 @@ class TestKubernetesBackend:
 
             assert "kubectl" in cmd
             assert "scale" in cmd
-            assert "deployment/discord-bot-browser" in cmd
+            assert "deployment/swarm-browser" in cmd
             assert "--replicas=6" in cmd
             assert "--namespace=prod" in cmd
             assert "--kubeconfig" in cmd
@@ -254,6 +254,6 @@ class TestKubernetesBackend:
 
     def test_deployment_name_mapping(self, backend: KubernetesBackend) -> None:
         """Test worker type to deployment name mapping."""
-        assert backend._get_deployment_name("generic") == "discord-bot"
-        assert backend._get_deployment_name("browser") == "discord-bot-browser"
-        assert backend._get_deployment_name("gpu") == "discord-bot-gpu"
+        assert backend._get_deployment_name("generic") == "swarm"
+        assert backend._get_deployment_name("browser") == "swarm-browser"
+        assert backend._get_deployment_name("gpu") == "swarm-gpu"

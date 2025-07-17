@@ -12,15 +12,16 @@ from typing import Any, cast
 import pytest
 import redis.asyncio as redis_asyncio
 
-from bot.distributed.core.config import (
+from swarm.distributed.core.config import (
     DistributedConfig,
     ScalingConfig,
     WorkerTypeConfig,
 )
-from bot.distributed.services.scaling_service import (
+from swarm.distributed.services.scaling_service import (
     ScalingDecision,
     ScalingService,
 )
+from swarm.types import RedisBytes
 from tests.fakes.fake_redis import FakeRedisClient
 from tests.fakes.fake_scaling_backend import FakeScalingBackend
 
@@ -67,7 +68,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test creating a scaling service."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         assert service.config == test_config
         assert service.backend is None
@@ -77,7 +78,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test getting queue depth from Redis."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         # Add some jobs to the queue
         await fake_redis.xadd("test:jobs", {"job": "1"})
@@ -91,7 +92,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test getting queue depth for missing worker type."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         depth = await service.get_queue_depth("nonexistent")
         assert depth == 0
@@ -100,7 +101,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test updating worker health from Redis."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         # Simulate worker heartbeats
         await fake_redis.hset(
@@ -127,7 +128,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test making a scale up decision."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         # High queue depth, few workers
         decision, target = service.make_scaling_decision(
@@ -143,7 +144,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test making a scale down decision."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         # Low queue depth, many workers
         decision, target = service.make_scaling_decision(
@@ -159,7 +160,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test making a no change decision."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         # Queue depth between thresholds
         decision, target = service.make_scaling_decision(
@@ -175,7 +176,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test that scaling respects min/max limits."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         # Try to scale above max
         decision, target = service.make_scaling_decision(
@@ -201,7 +202,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test that scale-up ignores cooldown, but scale-down respects it."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         # Record a recent scaling operation
         service.last_scale_time["test"] = time.time() - 0.5  # 0.5 seconds ago
@@ -233,7 +234,7 @@ class TestScalingService:
         fake_backend: FakeScalingBackend,
     ) -> None:
         """Test executing a no-change decision."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config, fake_backend)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config, fake_backend)
 
         success = await service.execute_scaling("test", ScalingDecision.NO_CHANGE, 2)
 
@@ -247,7 +248,7 @@ class TestScalingService:
         fake_backend: FakeScalingBackend,
     ) -> None:
         """Test executing a scale up."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config, fake_backend)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config, fake_backend)
 
         success = await service.execute_scaling("test", ScalingDecision.SCALE_UP, 3)
 
@@ -268,7 +269,7 @@ class TestScalingService:
         fake_backend: FakeScalingBackend,
     ) -> None:
         """Test handling scaling failure."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config, fake_backend)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config, fake_backend)
 
         # Make backend fail
         fake_backend.should_fail = True
@@ -285,7 +286,7 @@ class TestScalingService:
         fake_backend: FakeScalingBackend,
     ) -> None:
         """Test checking and scaling all worker types."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config, fake_backend)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config, fake_backend)
 
         # Set up conditions for scaling
         # Add jobs to trigger scale up
@@ -318,7 +319,7 @@ class TestScalingService:
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
         """Test getting service metrics."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config)
 
         # Add some history
         service.scaling_history.append(
@@ -347,7 +348,7 @@ class TestScalingService:
         fake_backend: FakeScalingBackend,
     ) -> None:
         """Test that scaling events are recorded in Redis."""
-        service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config, fake_backend)
+        service = ScalingService(cast(RedisBytes, fake_redis), test_config, fake_backend)
 
         # Execute a scaling operation
         await service.execute_scaling("test", ScalingDecision.SCALE_UP, 3)

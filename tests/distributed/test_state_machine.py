@@ -9,7 +9,7 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from bot.distributed.monitoring.state import BaseStateMachine, WorkerState
+from swarm.distributed.monitoring.state import BaseStateMachine, WorkerState
 
 
 class TestWorkerState:
