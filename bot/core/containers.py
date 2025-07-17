@@ -7,7 +7,7 @@ from dependency_injector import containers, providers
 from bot.ai import providers as _ai_providers
 from bot.core import metrics as default_metrics
 from bot.core.settings import Settings
-from bot.distributed.backends import DockerComposeBackend, FlyIOBackend, KubernetesBackend
+from bot.distributed.backends import DockerApiBackend, FlyIOBackend, KubernetesBackend
 from bot.distributed.broker import Broker
 from bot.distributed.core.config import DistributedConfig
 from bot.distributed.remote_browser import RemoteBrowserRuntime
@@ -132,7 +132,7 @@ class Container(containers.DeclarativeContainer):
 
     # Scaling backend selection based on environment
     scaling_backend = providers.Singleton(
-        lambda: DockerComposeBackend()  # Default to Docker Compose for now
+        lambda: DockerApiBackend()  # Default to Docker API backend
     )
 
     # Scaling service

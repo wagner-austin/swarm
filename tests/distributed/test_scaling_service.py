@@ -105,13 +105,13 @@ class TestScalingService:
         # Simulate worker heartbeats
         await fake_redis.hset(
             "worker:heartbeat:test:worker-1",
-            "capabilities",
-            '{"max_sessions": 5}',
+            "state",
+            "IDLE",
         )
         await fake_redis.hset(
             "worker:heartbeat:test:worker-2",
-            "capabilities",
-            '{"max_sessions": 3}',
+            "state",
+            "BUSY",
         )
 
         # Update health
@@ -200,21 +200,31 @@ class TestScalingService:
     async def test_make_scaling_decision_cooldown(
         self, fake_redis: FakeRedisClient, test_config: DistributedConfig
     ) -> None:
-        """Test that scaling respects cooldown period."""
+        """Test that scale-up ignores cooldown, but scale-down respects it."""
         service = ScalingService(cast(redis_asyncio.Redis, fake_redis), test_config)
 
         # Record a recent scaling operation
         service.last_scale_time["test"] = time.time() - 0.5  # 0.5 seconds ago
 
-        # Try to scale again (cooldown is 1 second in test config)
+        # Scale-up should ignore cooldown (queue_depth=5 > scale_up_threshold=3)
         decision, target = service.make_scaling_decision(
             worker_type="test",
             queue_depth=5,
             current_workers=2,
         )
 
-        assert decision == ScalingDecision.NO_CHANGE
-        assert target == 2
+        assert decision == ScalingDecision.SCALE_UP
+        assert target == 3
+
+        # Scale-down should respect cooldown
+        decision, target = service.make_scaling_decision(
+            worker_type="test",
+            queue_depth=0,  # Below scale_down_threshold=1
+            current_workers=3,
+        )
+
+        assert decision == ScalingDecision.NO_CHANGE  # Blocked by cooldown
+        assert target == 3
 
     async def test_execute_scaling_no_change(
         self,

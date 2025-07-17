@@ -77,14 +77,20 @@ class BrowserHealthMonitor(BaseDIClientCog):
                     key = key.decode()
 
                 # Get timestamp from heartbeat
-                timestamp_bytes = await self.redis.hget(key, "timestamp")  # type: ignore[misc]
-                if timestamp_bytes:
-                    try:
-                        timestamp = float(timestamp_bytes.decode())
-                        if current_time - timestamp <= self.max_heartbeat_age:
-                            healthy_workers += 1
-                    except (ValueError, AttributeError):
-                        continue
+                raw_ts = await self.redis.hget(key, "timestamp")  # type: ignore[misc]
+                if raw_ts is None:
+                    continue
+                try:
+                    if isinstance(raw_ts, bytes):
+                        timestamp_val = float(raw_ts.decode())
+                    else:
+                        # Already a str (decode_responses=True)
+                        timestamp_val = float(raw_ts)
+                    if current_time - timestamp_val <= self.max_heartbeat_age:
+                        healthy_workers += 1
+                except (ValueError, AttributeError):
+                    # Malformed timestamp – skip
+                    continue
 
             # Update health status
             is_degraded = healthy_workers < self.min_healthy_workers
