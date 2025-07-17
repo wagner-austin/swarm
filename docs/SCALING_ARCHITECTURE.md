@@ -1,8 +1,8 @@
-# Discord Bot Scaling Architecture
+# Swarm Scaling Architecture
 
 ## Overview
 
-The Discord bot uses a distributed architecture where Discord commands trigger jobs that are processed by dynamically scaled workers. **Important: Worker scaling is NOT automatic when commands are issued - it requires the autoscaler service to be running.**
+The Discord integration uses a distributed architecture where Discord commands trigger jobs that are processed by dynamically scaled workers. **Important: Worker scaling is NOT automatic when commands are issued - it requires the autoscaler service to be running.**
 
 ## How It Works
 
@@ -11,7 +11,7 @@ The Discord bot uses a distributed architecture where Discord commands trigger j
 When a user runs a command like `/web start`:
 
 ```
-User -> Discord -> Bot -> RemoteBrowserRuntime -> Broker -> Redis Stream
+User -> Discord -> Swarm -> RemoteBrowserRuntime -> Broker -> Redis Stream
 ```
 
 1. User executes `/web start` in Discord
