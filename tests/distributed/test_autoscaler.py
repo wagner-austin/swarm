@@ -11,9 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.distributed.backends import DockerApiBackend
-from bot.distributed.core.config import DistributedConfig
 from scripts.autoscaler import WorkerAutoscaler
+from swarm.distributed.backends import DockerApiBackend
+from swarm.distributed.core.config import DistributedConfig
 from tests.fakes.fake_redis import FakeRedisClient
 from tests.fakes.fake_scaling_backend import FakeScalingBackend
 

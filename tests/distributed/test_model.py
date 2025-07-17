@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from bot.distributed.model import Job, new_job
+from swarm.distributed.model import Job, new_job
 
 
 def test_job_serialization_roundtrip() -> None:

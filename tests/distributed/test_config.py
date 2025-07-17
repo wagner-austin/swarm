@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bot.distributed.core.config import (
+from swarm.distributed.core.config import (
     DistributedConfig,
     ScalingConfig,
     WorkerTypeConfig,
