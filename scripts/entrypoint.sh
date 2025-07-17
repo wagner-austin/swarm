@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Persistent Xvfb + bot launcher
+# Persistent Xvfb + swarm launcher
 set -euo pipefail
 
 # Set up X11 authentication
@@ -50,7 +50,7 @@ if ! xdpyinfo -display :99 >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[entrypoint] X11 setup complete, starting bot..."
+echo "[entrypoint] X11 setup complete, starting swarm..."
 
-# Execute the bot
-exec python -m bot.core
+# Execute the swarm
+exec python -m swarm.core
