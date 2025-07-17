@@ -3,9 +3,10 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import time
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Any, Dict, Literal
 
 from playwright.async_api import (
     Browser,
@@ -41,6 +42,8 @@ class BrowserEngine(ServiceABC):
         self._page: Page | None = None
         self._context: BrowserContext | None = None  # Track the browser context to avoid leaks
         self._last_url: str | None = None  # ← track last navigation
+        self._worker_id: str = str(uuid.uuid4())  # Unique identifier for this browser instance
+        self._started_at: float = time.time()  # Track when the browser was created
 
     # ------------------------------------------------------------------+
     # Lifecycle                                                        #
@@ -52,6 +55,7 @@ class BrowserEngine(ServiceABC):
                 self._page = await self._browser.new_page()
             return
 
+        self._started_at = time.time()
         self._playwright = await async_playwright().start()
         assert self._playwright is not None  # mypy: narrows to Playwright
         try:
@@ -245,3 +249,33 @@ class BrowserEngine(ServiceABC):
         await self._ensure_page()
         # If we got here without exception, browser is alive or was successfully restored
         return True
+
+    async def status(self) -> dict[str, Any]:
+        """Get the current status of the browser engine.
+
+        Returns a dictionary with browser state information.
+        This method is called by the /status Discord command.
+        """
+        try:
+            # Perform health check first
+            is_healthy = await self.health_check()
+
+            return {
+                "worker_id": self._worker_id,
+                "status": "healthy" if is_healthy else "unhealthy",
+                "browser_active": self._browser is not None,
+                "page_active": self._page is not None,
+                "url": self._page.url if self._page else None,
+                "sessions": 1 if self._page else 0,  # For compatibility with fake
+                "uptime": time.time() - self._started_at,
+            }
+        except Exception as e:
+            logger.error(f"Error getting browser status: {e}")
+            return {
+                "worker_id": self._worker_id,
+                "status": "error",
+                "error": str(e),
+                "browser_active": False,
+                "page_active": False,
+                "sessions": 0,
+            }

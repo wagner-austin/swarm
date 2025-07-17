@@ -16,6 +16,7 @@ import redis.asyncio as redis_asyncio
 
 from bot.distributed.core.config import DistributedConfig, WorkerTypeConfig
 from bot.distributed.core.pool import WorkerPool
+from bot.distributed.services.queue_metrics import QueueMetricsService
 
 logger = logging.getLogger(__name__)
 
@@ -71,17 +72,32 @@ class ScalingService:
             name: WorkerPool(name, config.worker_health_timeout) for name in config.worker_types
         }
 
+        # Initialize queue metrics service
+        self.queue_metrics = QueueMetricsService(redis_client)
+
     async def get_queue_depth(self, worker_type: str) -> int:
         """Get current queue depth for a worker type."""
         config = self.config.get_worker_type(worker_type)
         if not config:
             return 0
 
+        # Try to use the queue metrics service first for accurate queue depth
         try:
-            depth: int = await self.redis.xlen(config.job_queue)
-            return depth
+            # The group name is the worker type without dots
+            group = worker_type.rstrip(".")
+            return await self.queue_metrics.get_true_queue_depth(config.job_queue, group)
         except Exception as e:
             logger.error(f"Failed to get queue depth for {worker_type}: {e}")
+
+        # Fallback to simple xlen if metrics service fails
+        try:
+            queue_length = await self.redis.xlen(config.job_queue)
+            assert isinstance(queue_length, int), (
+                f"Expected int from xlen, got {type(queue_length)}"
+            )
+            return queue_length
+        except Exception as e:
+            logger.error(f"Failed to get queue length fallback for {worker_type}: {e}")
             return 0
 
     async def update_worker_health(self) -> None:
@@ -99,20 +115,18 @@ class ScalingService:
                     cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
 
                     for key in keys:
-                        worker_id = key.split(":")[-1]
+                        # Handle both bytes and str keys from Redis
+                        key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+                        worker_id = key_str.split(":")[-1]
                         # Redis hget returns bytes or str depending on decode_responses setting
-                        heartbeat_data_raw = await self.redis.hget(key, "capabilities")  # type: ignore[misc]
-                        heartbeat_data = (
-                            heartbeat_data_raw.decode("utf-8")
-                            if isinstance(heartbeat_data_raw, bytes)
-                            else heartbeat_data_raw
+                        state_raw = await self.redis.hget(key_str, "state")  # type: ignore[misc]
+                        state = (
+                            state_raw.decode("utf-8") if isinstance(state_raw, bytes) else state_raw
                         )
 
-                        if heartbeat_data:
-                            import json
-
-                            capabilities = json.loads(heartbeat_data)
-                            pool.register_worker(worker_id, capabilities)
+                        if state:
+                            # Worker is healthy if it has a state (any state means it's alive)
+                            pool.register_worker(worker_id, {})
                             pool.mark_healthy(worker_id)
 
                     if cursor == 0:
@@ -131,6 +145,7 @@ class ScalingService:
         worker_type: str,
         queue_depth: int,
         current_workers: int,
+        queue_metrics: dict[str, Any] | None = None,
     ) -> tuple[ScalingDecision, int]:
         """
         Make a scaling decision based on current state.
@@ -144,20 +159,24 @@ class ScalingService:
 
         scaling = config.scaling
 
-        # Check cooldown
+        # Ensure minimum workers are running (no cooldown - critical for system health)
+        if current_workers < scaling.min_workers:
+            target = scaling.min_workers
+            return ScalingDecision.SCALE_UP, target
+
+        # Scale up based on queue depth (no cooldown - responsiveness is key)
+        if queue_depth >= scaling.scale_up_threshold and current_workers < scaling.max_workers:
+            target = min(current_workers + 1, scaling.max_workers)
+            return ScalingDecision.SCALE_UP, target
+
+        # Check cooldown only for scale-down operations (prevent thrashing)
         now = time.time()
         last_scale = self.last_scale_time.get(worker_type, 0)
         if now - last_scale < scaling.cooldown_seconds:
             return ScalingDecision.NO_CHANGE, current_workers
 
-        # Make decision
-        if queue_depth >= scaling.scale_up_threshold and current_workers < scaling.max_workers:
-            # Scale up
-            target = min(current_workers + 1, scaling.max_workers)
-            return ScalingDecision.SCALE_UP, target
-
-        elif queue_depth <= scaling.scale_down_threshold and current_workers > scaling.min_workers:
-            # Scale down
+        # Scale down (with cooldown protection)
+        if queue_depth <= scaling.scale_down_threshold and current_workers > scaling.min_workers:
             target = max(current_workers - 1, scaling.min_workers)
             return ScalingDecision.SCALE_DOWN, target
 
