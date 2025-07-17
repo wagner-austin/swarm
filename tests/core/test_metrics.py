@@ -5,7 +5,7 @@ Ensures uptime and message counting functionality work as expected.
 
 import pytest
 
-import bot.core.metrics as metrics
+import swarm.core.metrics as metrics
 
 
 @pytest.mark.asyncio
