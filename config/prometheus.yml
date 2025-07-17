@@ -3,21 +3,21 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: 'discord_bot'
+  - job_name: 'swarm_main'
     static_configs:
-      # Bot main process with Discord metrics (Docker service name)
-      - targets: ['bot:9200']
+      # Swarm main process with Discord metrics (Docker service name)
+      - targets: ['swarm:9200']
     scrape_interval: 15s
     metrics_path: /metrics
 
-  - job_name: 'discord_manager'
+  - job_name: 'swarm_manager'
     static_configs:
       # Job manager with orchestration metrics
       - targets: ['manager:9150']
     scrape_interval: 15s
     metrics_path: /metrics
 
-  - job_name: 'discord_worker'
+  - job_name: 'swarm_worker'
     static_configs:
       # Worker process with system metrics and deployment context
       - targets: ['worker:9100']
