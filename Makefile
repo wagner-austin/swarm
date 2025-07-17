@@ -22,7 +22,7 @@ PYTHON  := $(RUN) python
 PIP     := $(RUN) pip
 RUFF    := $(RUN) ruff
 MYPY    := $(RUN) mypy
-PYTEST  := $(RUN) pytest
+PYTEST  := $(RUN) pytest -rsxvs
 
 # ---------------------------------------------------------------------------
 # Meta / docs
@@ -165,9 +165,9 @@ bot-health: ## Check health status of the bot container (requires HEALTHCHECK in
 # ---------------------------------------------------------------------------
 run: install                ## launch the Discord bot (sync with pyproject script)
 	@echo "Starting autoscaler in background..."
-	@start /MIN cmd /C "$(PYTHON) -m scripts.autoscaler > autoscaler.log 2>&1"
-	@timeout /t 2 /nobreak > nul
-	@echo "Autoscaler started. Starting bot..."
+	@$(PYTHON) scripts/start_autoscaler.py
+	@echo "Waiting for autoscaler to initialize..."
+	@$(PYTHON) -c "import time; time.sleep(2)"
 	$(PYTHON) -m bot.core
 
 build: install              ## build wheel / sdist

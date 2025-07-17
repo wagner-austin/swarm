@@ -17,9 +17,18 @@ async def redis_backend() -> AsyncGenerator[RedisBackend, None]:
     if not getattr(settings.redis, "enabled", False) or not isinstance(url, str) or not url:
         pytest.skip("Redis is not enabled or url is invalid in test settings")
     backend = RedisBackend(url, max_turns=5)
-    await backend.clear(999999, "test_persona")
+    try:
+        await backend.clear(999999, "test_persona")
+    except Exception as e:
+        if "max requests limit exceeded" in str(e):
+            pytest.skip(f"Redis rate limit exceeded: {e}")
+        raise
     yield backend
-    await backend.clear(999999, "test_persona")
+    try:
+        await backend.clear(999999, "test_persona")
+    except Exception:
+        # Best effort cleanup, ignore errors
+        pass
 
 
 @pytest.mark.asyncio
