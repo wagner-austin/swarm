@@ -1,4 +1,4 @@
-"""Tests for `bot.infra.tankpit.engine.TankPitEngine`."""
+"""Tests for `swarm.infra.tankpit.engine.TankPitEngine`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import Any, Dict
 
 import pytest
 
-from bot.infra.tankpit.engine import TankPitEngine
-from bot.utils import queue_helpers as qh
+from swarm.infra.tankpit.engine import TankPitEngine
+from swarm.utils import queue_helpers as qh
 
 
 @pytest.mark.asyncio
