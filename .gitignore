@@ -37,6 +37,3 @@ htmlcov/
 # Ignore logs folder for git and *.log files
 logs/
 *.log
-
-# Ignore Claude.md directions/update plan
-CLAUDE.md
