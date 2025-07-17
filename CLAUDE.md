@@ -1,7 +1,7 @@
 # Claude Context for AI Task Assistant Project
 
 ## True Project Vision
-This is NOT a Discord bot - it's an AI-powered task execution system that can handle complex, real-world tasks like:
+This is NOT just a Discord integration - it's an AI-powered task execution system that can handle complex, real-world tasks like:
 - "Do my latest homework assignment"
 - "Research upcoming bills and prepare comments on the environmental bill"  
 - "Improve the logging system in my codebase"
@@ -45,45 +45,52 @@ Discord is merely ONE frontend interface. The system is designed to be platform-
 
 ## Current Implementation Notes
 
-### Critical Issues Found (2025-07-16)
-1. **Missing Browser Methods**: The web commands call `browser.status`, `browser.close_channel`, and `browser.close_all` which don't exist in BrowserEngine, causing jobs to remain pending forever.
+### Major Migration Completed (2025-07-17)
+Successfully migrated from custom Redis streams broker to **Celery** distributed task queue:
 
-2. **Autoscaler Creating Excess Workers**: 
-   - ScalingService uses simple `xlen()` instead of QueueMetricsService
-   - Doesn't distinguish between pending (being processed) and new messages
-   - With `scale_up_threshold=1`, creates workers for already-processing jobs
-   - Failed jobs remain pending, triggering more useless workers
+1. **Celery Integration Complete**: 
+   - All browser tasks now use Celery with proper retry/timeout handling
+   - Flower monitoring UI integrated for task visibility (port 5555)
+   - Automatic failover between Upstash and local Redis
 
-3. **No Job Acknowledgment on Failure**: When jobs fail, they're never acknowledged in Redis, creating an infinite retry loop.
+2. **Autoscaler Rewritten**:
+   - Uses Celery's inspect API via Flower for queue monitoring
+   - Properly distinguishes between active and pending tasks
+   - Can bootstrap from zero workers (no chicken-and-egg problem)
 
-4. **Channel-Centric Design Mismatch**: The codebase assumes Discord channels map to browser sessions, but this doesn't align with the task-oriented vision.
+3. **Type Safety Maintained**:
+   - All code passes mypy strict mode
+   - Proper handling of Task generic types using TYPE_CHECKING pattern
+   - Async Redis operations using redis.asyncio
 
-### Existing Solutions Not Being Used
-- **QueueMetricsService** exists and properly handles pending vs new messages but isn't integrated
-- **Redis XPENDING** support is implemented but not used for scaling decisions
-- **Worker state machine** exists but job lifecycle visibility is poor
+4. **Channel-Centric Design Still Present**: 
+   - `/close_channel` commands still exist but less critical with Celery
+   - Session management needs refactoring for task-scoped design
 
-### Quick Wins vs Proper Fixes
-- Quick Fix: Add missing browser methods → ❌ Wrong (addresses symptom not cause)
-- Proper Fix: Rethink session management for task-based architecture → ✅ Right
-- Quick Fix: Increase scale thresholds → ❌ Wrong (band-aid)
-- Proper Fix: Integrate QueueMetricsService and handle failures properly → ✅ Right
+### Migration Benefits Realized
+- **Automatic retries**: Celery handles failed tasks with exponential backoff
+- **Task routing**: Different queues for browser, tankpit, llm workers  
+- **Better monitoring**: Flower provides real-time task status and history
+- **Connection pooling**: Redis connections managed efficiently by Celery
+- **No more zombie jobs**: Failed tasks properly handled, no infinite loops
 
 ## Key Commands
 - **Run tests**: `make test` or `poetry run pytest`
 - **Lint & format**: `make lint` (runs ruff fix, ruff format, mypy strict, yamllint)
-- **Run bot locally**: `make run` or `poetry run python -m bot.core`
+- **Run swarm locally**: `make run` or `poetry run python -m swarm.core`
+- **Run Celery worker**: `make celery-worker` (starts a browser worker)
+- **Run Flower monitoring**: `make flower` (starts on port 5555)
 - **Docker compose**: `make compose-up`, `make compose-down`
 - **Deploy to Fly.io**: `make deploy`
-- **Build bot**: `make bot-build`
-- **Update bot**: `make bot-update` (builds, restarts, and tails logs)
+- **Build swarm**: `make swarm-build`
+- **Update swarm**: `make swarm-update` (builds, restarts, and tails logs)
 
 ## Port Configuration
 
-The bot uses several ports for different services:
-- **9200**: Bot metrics (main Discord frontend)
-- **9150**: Manager metrics (job orchestrator)
+Swarm uses several ports for different services:
+- **9200**: Swarm metrics (main Discord frontend)
 - **9100**: Worker metrics (default, configurable via WORKER_METRICS_PORT)
+- **5555**: Flower (Celery monitoring UI)
 - **9090**: Prometheus
 - **3000**: Grafana
 - **3100**: Loki
@@ -98,10 +105,10 @@ To avoid port conflicts:
 ## Architecture Notes
 
 ### Core Components
-- **bot/core/**: Main bot functionality
+- **swarm/core/**: Main swarm functionality
   - `containers.py`: Dependency injection setup
-  - `lifecycle.py`: Bot lifecycle management
-- **bot/distributed/**: Distributed system components
+  - `lifecycle.py`: Swarm lifecycle management
+- **swarm/distributed/**: Distributed system components
   - `monitoring/heartbeat.py`: Health monitoring
   - `backends/`: Scaling backend implementations
   - `core/`: Core distributed functionality
@@ -167,19 +174,21 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 - MyPy for type checking
 
 ## Recent Changes (from git log)
-- Refactoring tests away from mocks to test actual features
-- Adding orchestrating cogs
-- Implementing distributed backends
-- All tests currently passing
+- Successfully migrated from custom broker.py to Celery (2025-07-17)
+- Integrated Flower for Celery monitoring
+- Fixed all mypy strict mode errors with TYPE_CHECKING pattern
+- Autoscaler now uses Celery's inspect API via Flower
+- All tests updated to work with Celery
 
-## Important: Current Worker Scaling Issues
+## Celery Migration Details
 
-**The autoscaler has critical bugs:**
+**Successfully replaced custom Redis streams with Celery (2025-07-17):**
 
-1. **Uses wrong queue depth calculation**: Just counts all messages with `xlen`, not distinguishing between pending and new
-2. **Creates excess workers**: With `scale_up_threshold=1`, it creates workers for already-processing jobs
-3. **Failed jobs stay pending forever**: Worker doesn't acknowledge failed messages, causing infinite retry loops
-4. **Solution exists but not wired**: QueueMetricsService properly handles pending vs new messages but isn't integrated
+1. **Queue Monitoring**: Celery autoscaler uses Flower API to get accurate queue depths
+2. **Worker Scaling**: Properly scales based on pending tasks, not active ones  
+3. **Task Lifecycle**: Celery handles retries, timeouts, and dead letter queues automatically
+4. **Zero-worker Bootstrap**: Autoscaler can start workers from zero (fixed chicken-and-egg problem)
+5. **SSL Support**: Added proper SSL configuration for Upstash Redis with rediss:// URLs
 
 ## Test Organization
 
@@ -195,62 +204,69 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 
 ## Completed Tasks
 1. ✅ Implemented ScalingBackend protocol with @runtime_checkable
-2. ✅ All backends (Docker Compose, Fly.io, Kubernetes) implement the protocol
+2. ✅ All backends (Docker API, Fly.io, Kubernetes) implement the protocol
 3. ✅ Fixed all mypy strict mode errors
 4. ✅ Added comprehensive test coverage
 5. ✅ Created integration tests with dependency injection
 6. ✅ Cleaned up test organization and naming
+7. ✅ Migrated from custom broker.py to Celery distributed task queue
+8. ✅ Integrated Flower monitoring UI for task visibility
+9. ✅ Fixed autoscaler to work with Celery and bootstrap from zero workers
+10. ✅ Updated all tests to work with CeleryBrowserRuntime
 
 ## Handoff Context for Next Conversation
 
-### Where We Left Off (2025-07-16)
-1. **Discovered the root cause** of why `/web` commands fail and autoscaler creates excess workers
-2. **Identified mismatch** between Discord-centric codebase and true vision of AI task assistant
-3. **Already integrated** QueueMetricsService into ScalingService (but not committed)
-4. **Updated documentation** to reflect true project vision
+### Where We Left Off (2025-07-17)
+1. **Completed Celery migration** - All browser tasks now use Celery instead of custom broker
+2. **Fixed autoscaler issues** - Now uses Flower API for accurate queue monitoring  
+3. **Maintained type safety** - All code passes mypy strict mode
+4. **Updated documentation** - README reflects new Celery architecture
 
-### Immediate Next Steps (Phase 1) - With Specific Implementation
+### Immediate Next Steps (Phase 1)
 
-1. **Fix job acknowledgment in worker.py**:
-   - In `dispatch()` method after line 199, add: `await broker.ack_job(job.id, job.stream)`
-   - Implement `ack_job()` in Broker class using `xack` command
-   - Even failed jobs must be ACK'd to prevent infinite retries
-
-2. **Complete QueueMetrics integration**:
-   - Test the modified `get_queue_depth()` in scaling_service.py
-   - Update autoscaler to pass queue metrics to `make_scaling_decision()`
-   - Set browser `scale_up_threshold=3` (not 1) in config.py line 88
-
-3. **Add dead letter queue**:
-   - After 3 failures, move job to "failed:jobs" stream
-   - Add `retry_count` to job metadata
-   - Create worker command to reprocess dead letter queue
-
-4. **Replace Discord-centric with task-centric design**:
-   - Delete `close_channel` from web.py (lines 306-348)
+1. **Remove Discord-centric design**:
+   - Delete `close_channel` from web.py (still exists)
    - Remove channel_id from browser session management
    - Create abstract `Context` class to replace Discord interactions
 
+2. **Add more worker types**:
+   - Implement tankpit worker queue and tasks
+   - Add LLM worker type for local model inference
+   - Create capability-based task routing
+
+3. **Improve task decomposition**:
+   - Add task planner that breaks complex requests into subtasks
+   - Implement dependency graph for subtask execution
+   - Add progress streaming via Redis pub/sub
+
+4. **Multi-frontend support**:
+   - Extract Discord-specific code to adapter
+   - Add Telegram frontend
+   - Add REST API frontend
+
 ### Key Insights Gained
-- The project is an AI task assistant, NOT a Discord bot
+- The project is an AI task assistant, NOT a Discord-only system
 - Discord is just one frontend among many planned
 - Need task decomposition and capability-based workers
 - Session management should be task-scoped, not channel-scoped
 - Existing QueueMetricsService solves the scaling problem but isn't used
 
-### Working Files Modified Today
-- `bot/distributed/services/scaling_service.py` - Started integrating QueueMetricsService
-- `bot/browser/engine.py` - Started adding missing methods (status, close_channel, close_all)
-- `CLAUDE.md` - Updated with true vision and collaboration guidelines
-- `PLAN.md` - Reframed as AI Task Assistant with phased approach
+### Key Files in Celery Migration
+- `swarm/celery_app.py` - Celery configuration with task routing
+- `swarm/tasks/browser.py` - Browser tasks using Celery
+- `swarm/distributed/celery_runtime.py` - CeleryBrowserRuntime adapter
+- `scripts/celery_autoscaler.py` - Autoscaler using Flower API
+- `scripts/entrypoint.worker.sh` - Worker entrypoint for Celery
+- `docker-compose.yml` - Added Flower service, updated for Celery
 
 ## Architecture Decisions Made
 
 ### Technology Stack (Decided)
-1. **Queue System**: Migrate from custom broker.py to **Celery** with Redis backend
-   - Reduces codebase by 30%
-   - Handles retries, routing, monitoring automatically
+1. **Queue System**: ✅ COMPLETED - Migrated to **Celery** with Redis backend
+   - Reduced codebase complexity significantly
+   - Handles retries, routing, monitoring automatically  
    - Scales from 1 to 10,000 workers without code changes
+   - Flower UI provides real-time task monitoring
 
 2. **Orchestration**: Keep both backends, use **Kubernetes** for production
    - Docker Compose for development and simple deployments
@@ -265,17 +281,17 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 
 ### Specific Implementation Path
 
-**Phase 1: Core Fixes (Next 2 weeks)**
-- Fix job acknowledgment (prevents infinite retries)
-- Complete QueueMetrics integration (fixes excess workers)
-- Remove Discord-channel assumptions
-- Add basic dead letter queue
+**Phase 1: Core Fixes** ✅ COMPLETED (2025-07-17)
+- ✅ Fixed job lifecycle with Celery (no more infinite retries)
+- ✅ Autoscaler uses Flower API (accurate worker scaling)
+- ✅ Celery handles dead letter queue automatically
+- ⏳ Still need to remove Discord-channel assumptions
 
-**Phase 2: Celery Migration (Following month)**
-- Replace broker.py with Celery
-- Migrate job types to Celery tasks
-- Set up Celery routing for different worker types
-- Add Flower for monitoring
+**Phase 2: Celery Migration** ✅ COMPLETED (2025-07-17)
+- ✅ Replaced broker.py with Celery
+- ✅ Migrated browser jobs to Celery tasks
+- ✅ Set up Celery routing for different queues
+- ✅ Added Flower for monitoring
 
 **Phase 3: Task Intelligence (Month 2-3)**
 - Add LLM workers for local processing

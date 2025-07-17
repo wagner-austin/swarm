@@ -34,7 +34,7 @@ The system breaks down these complex tasks into subtasks, routes them to appropr
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd DiscordBot  # TODO: Rename to TaskForce
+cd swarm
 
 # Install dependencies
 poetry install --with dev
@@ -72,13 +72,17 @@ LOCAL_MODEL_PATH=/models/llama-2-70b.gguf  # For private LLM
 
 **Development (single machine):**
 ```bash
-# Start all services
+# Start all services (Redis, Flower, autoscaler, and swarm)
 docker-compose up -d
 
 # Or run components separately
-make run            # Start main service
-make worker         # Start a worker
-make autoscaler     # Start autoscaler
+make run            # Start main swarm service
+make celery-worker  # Start a Celery worker
+make flower         # Start Flower monitoring UI
+
+# View logs
+docker-compose logs -f swarm
+docker-compose logs -f autoscaler
 ```
 
 **Production (Kubernetes):**
@@ -95,18 +99,31 @@ kubectl scale deployment/worker --replicas=50
 ```
 User Request → Frontend (Discord/Telegram/API)
                 ↓
-         Task Decomposer
+           Swarm Core → Celery Task Queue (Redis)
                 ↓
-        [Task: Research bills]
+         [Browser Tasks]
          /      |       \
-   [Browse]  [Analyze]  [Summarize]
-      ↓         ↓           ↓
-   Worker1   Worker2    Worker3 (LLM)
-      ↓         ↓           ↓
-         Result Aggregator
+   [Navigate] [Click] [Extract]
+      ↓         ↓         ↓
+   Celery    Celery    Celery
+   Worker1   Worker2   Worker3
+      ↓         ↓         ↓
+         Result Backend
                 ↓
          Response to User
+
+Monitoring: Flower UI (port 5555)
+Autoscaling: Celery Autoscaler
 ```
+
+### Port Configuration
+
+- **9200**: Swarm metrics (Discord frontend)
+- **5555**: Flower (Celery monitoring UI)
+- **9090**: Prometheus
+- **3000**: Grafana
+- **3100**: Loki
+- **6379**: Redis
 
 ## 🔧 Development
 
@@ -120,7 +137,7 @@ make check     # Type checking with mypy
 ### Project Structure
 ```
 project/
-├── bot/                    # Core system (TODO: rename to 'core')
+├── swarm/                  # Core system
 │   ├── distributed/       # Task queue and worker management
 │   ├── browser/          # Browser automation workers
 │   ├── plugins/          # Frontend adapters
@@ -155,7 +172,7 @@ project/
 
 **Phase 4**: Multi-Frontend Support
 - Abstract interface layer
-- Telegram bot
+- Telegram frontend
 - REST API
 - Web UI
 
