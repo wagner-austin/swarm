@@ -8,11 +8,11 @@ properly implement the ScalingBackend protocol.
 
 import asyncio
 from typing import Any, Dict, List, Type
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.distributed.backends.docker_compose import DockerComposeBackend
+from bot.distributed.backends.docker_api import DockerApiBackend
 from bot.distributed.backends.fly_io import FlyIOBackend
 from bot.distributed.backends.kubernetes import KubernetesBackend
 from bot.distributed.services.scaling_service import ScalingBackend
@@ -24,7 +24,7 @@ class TestScalingBackendProtocol:
     @pytest.mark.parametrize(
         "backend_class,kwargs",
         [
-            (DockerComposeBackend, {}),
+            (DockerApiBackend, {}),
             (FlyIOBackend, {"app_name": "test-app"}),
             (KubernetesBackend, {}),
         ],
@@ -45,84 +45,57 @@ class TestScalingBackendProtocol:
         assert asyncio.iscoroutinefunction(backend.get_current_count)
 
 
-class TestDockerComposeBackend:
-    """Test DockerComposeBackend command construction."""
+class TestDockerApiBackend:
+    """Test DockerApiBackend functionality."""
 
     @pytest.fixture
-    def backend(self) -> DockerComposeBackend:
+    def backend(self) -> DockerApiBackend:
         """Create backend instance."""
-        return DockerComposeBackend(compose_file="test-compose.yml", project_name="test-project")
+        return DockerApiBackend(
+            image="test-image:latest", network="test_network", project_name="test-project"
+        )
 
     @pytest.mark.asyncio
-    async def test_scale_to_command_construction(self, backend: DockerComposeBackend) -> None:
-        """Test that scale_to constructs correct docker-compose command."""
-        with patch("asyncio.create_subprocess_exec") as mock_exec:
-            # Mock successful execution
-            mock_proc = AsyncMock()
-            mock_proc.returncode = 0
-            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-            mock_exec.return_value = mock_proc
+    async def test_scale_to_creates_containers(self, backend: DockerApiBackend) -> None:
+        """Test that scale_to creates correct number of containers."""
+        with patch.object(backend, "get_current_count", return_value=1) as mock_count:
+            with patch.object(
+                backend, "_create_worker_container", return_value=True
+            ) as mock_create:
+                result = await backend.scale_to("browser", 3)
 
-            result = await backend.scale_to("browser", 3)
-
-            # Verify command construction
-            assert result is True
-            mock_exec.assert_called_once()
-            cmd = mock_exec.call_args[0]
-
-            # Check command components
-            assert "docker-compose" in cmd
-            assert "-f" in cmd
-            assert "test-compose.yml" in cmd
-            assert "-p" in cmd
-            assert "test-project" in cmd
-            assert "up" in cmd
-            assert "-d" in cmd
-            assert "--scale" in cmd
-            assert "worker=3" in cmd
-            assert "--no-recreate" in cmd
+                assert result is True
+                mock_count.assert_called_once_with("browser")
+                # Should create 2 more containers (3 - 1 = 2)
+                assert mock_create.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_get_current_count_command_construction(
-        self, backend: DockerComposeBackend
-    ) -> None:
-        """Test that get_current_count constructs correct ps command."""
-        with patch("asyncio.create_subprocess_exec") as mock_exec:
-            # Mock ps command output
-            mock_proc = AsyncMock()
-            mock_proc.returncode = 0
-            mock_proc.communicate = AsyncMock(return_value=(b"container1\ncontainer2\n", b""))
-            mock_exec.return_value = mock_proc
+    async def test_scale_to_removes_containers(self, backend: DockerApiBackend) -> None:
+        """Test that scale_to removes excess containers."""
+        # Mock existing containers with proper attributes
+        mock_container1 = MagicMock()
+        mock_container1.name = "test_worker_3"
+        mock_container2 = MagicMock()
+        mock_container2.name = "test_worker_2"
+        mock_containers = [mock_container1, mock_container2]
 
-            count = await backend.get_current_count("browser")
+        with patch.object(backend, "get_current_count", return_value=3):
+            with patch.object(backend, "_get_worker_containers", return_value=mock_containers):
+                with patch.object(backend, "_remove_container") as mock_remove:
+                    result = await backend.scale_to("browser", 1)
 
-            # Verify result and command
-            assert count == 2
-            mock_exec.assert_called_once()
-            cmd = mock_exec.call_args[0]
-
-            assert "docker-compose" in cmd
-            assert "-f" in cmd
-            assert "test-compose.yml" in cmd
-            assert "-p" in cmd
-            assert "test-project" in cmd
-            assert "ps" in cmd
-            assert "-q" in cmd
-            assert "worker" in cmd
+                    assert result is True
+                    # Should remove 2 containers (3 - 1 = 2)
+                    assert mock_remove.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_handles_scaling_failure(self, backend: DockerComposeBackend) -> None:
-        """Test handling of scaling command failure."""
-        with patch("asyncio.create_subprocess_exec") as mock_exec:
-            # Mock failed execution
-            mock_proc = AsyncMock()
-            mock_proc.returncode = 1
-            mock_proc.communicate = AsyncMock(return_value=(b"", b"Error: service not found"))
-            mock_exec.return_value = mock_proc
+    async def test_handles_scaling_failure(self, backend: DockerApiBackend) -> None:
+        """Test handling of container creation failure."""
+        with patch.object(backend, "get_current_count", return_value=0):
+            with patch.object(backend, "_create_worker_container", return_value=False):
+                result = await backend.scale_to("browser", 2)
 
-            result = await backend.scale_to("browser", 5)
-
-            assert result is False
+                assert result is False
 
 
 class TestFlyIOBackend:

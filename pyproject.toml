@@ -34,6 +34,8 @@ PyYAML = ">=6.0"
 # --- redis backend (use redis-py with asyncio, not legacy aioredis) ---
 redis = {extras = ["asyncio"], version = ">=5"}
 python-json-logger = "^3.3.0"
+# --- docker api for scaling ---
+docker = ">=7.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"
