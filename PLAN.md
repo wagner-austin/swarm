@@ -1,7 +1,7 @@
 # AI Task Assistant - Distributed Architecture Plan
 
 ## Project Vision
-Building an AI-powered task execution system capable of handling complex, real-world tasks through intelligent decomposition and distributed worker execution. NOT a Discord bot - Discord is just one of many possible frontends.
+Building an AI-powered task execution system capable of handling complex, real-world tasks through intelligent decomposition and distributed worker execution. NOT just a Discord integration - Discord is just one of many possible frontends.
 
 ### Example Tasks the System Should Handle:
 - "Do my latest homework assignment"
@@ -18,15 +18,15 @@ Building an AI-powered task execution system capable of handling complex, real-w
 5. **Massively Scalable**: Support hundreds of concurrent workers across multiple machines
 6. **Observable**: Full visibility into task progress, worker status, and system health
 
-## Current Implementation Gaps
-- System is Discord-channel-centric instead of task-centric
-- No task planning or decomposition logic
-- Workers are type-based (browser, tankpit) instead of capability-based
-- Poor job lifecycle visibility and error handling
-- Missing integration between existing components (QueueMetricsService unused)
-- Browser methods (status, close_channel, close_all) called but not implemented
-- Failed jobs remain pending forever (no acknowledgment on error)
-- Autoscaler uses wrong queue depth calculation (xlen instead of pending-aware)
+## Current Implementation Status (2025-07-17)
+- ✅ Migrated from custom broker to Celery distributed task queue
+- ✅ Fixed job lifecycle with proper retry/timeout handling via Celery
+- ✅ Autoscaler now uses Flower API for accurate queue monitoring
+- ✅ Workers can be scaled from zero (no chicken-and-egg problem)
+- ⏳ System is still Discord-channel-centric instead of task-centric
+- ⏳ No task planning or decomposition logic yet
+- ⏳ Workers are type-based (browser, tankpit) instead of capability-based
+- ⏳ Need to implement task-scoped sessions
 
 ## Implementation History & Lessons Learned
 ### Key Architectural Patterns Established
@@ -38,31 +38,24 @@ Building an AI-powered task execution system capable of handling complex, real-w
 
 ## Priority Task List
 
-### Phase 1: Fix Critical Issues (1-2 weeks)
-- [ ] **Fix job acknowledgment** (Day 1-2)
-  - Add `ack_job()` method to Broker using Redis `xack`
-  - Call in worker.dispatch() even on failure
-  - Test with intentionally failing jobs
-- [ ] **Complete QueueMetrics integration** (Day 3-4)
-  - Finish testing scaling_service.py changes
-  - Update config.py: set `BROWSER_SCALE_UP_THRESHOLD=3`
-  - Deploy and verify autoscaler stops creating excess workers
-- [ ] **Implement dead letter queue** (Day 5-7)
-  - Add retry_count to Job model
-  - After 3 retries, move to "failed:jobs" stream
-  - Create admin command to reprocess failed jobs
-- [ ] **Remove Discord-channel code** (Week 2)
+### Phase 1: Fix Critical Issues ✅ MOSTLY COMPLETE
+- [x] **Fix job acknowledgment** - Celery handles this automatically
+- [x] **Complete QueueMetrics integration** - Autoscaler uses Flower API
+- [x] **Implement dead letter queue** - Celery handles with max_retries
+- [ ] **Remove Discord-channel code** (Still needed)
   - Delete close_channel, closeall commands
   - Remove channel_id from session management
   - Create abstract Context interface
 
-### Phase 2: Celery Migration & Task Architecture (Month 2)
-- [ ] **Migrate to Celery** (Week 1-2)
-  - Install celery[redis]==5.3.0
-  - Create celery_app.py with Redis broker config
-  - Convert browser jobs to @celery.task functions
-  - Replace Broker class with Celery's app.send_task()
-  - Set up Celery routing: `{'browser.*': {'queue': 'browser'}}`
+### Phase 2: Celery Migration & Task Architecture ✅ MIGRATION COMPLETE
+- [x] **Migrate to Celery** 
+  - Installed celery[redis]
+  - Created celery_app.py with Redis broker config
+  - Converted browser jobs to Celery tasks
+  - Replaced Broker class with Celery
+  - Set up Celery routing for different queues
+- [x] **Add Flower monitoring** - Running on port 5555
+- [x] **Update autoscaler** - Uses Flower API for queue stats
 - [ ] **Implement Task Model** (Week 3)
   - Create Task, Subtask, Job hierarchy in models/
   - Task has: id, description, status, subtasks[]
@@ -93,7 +86,7 @@ Building an AI-powered task execution system capable of handling complex, real-w
   - Create IFrontend interface with send_message(), get_input()
   - Move Discord code to DiscordFrontend adapter
   - Add WebAPIFrontend with REST endpoints
-  - Add TelegramFrontend with python-telegram-bot
+  - Add TelegramFrontend with python-telegram integration
 - [ ] **Kubernetes Deployment** (Week 3-4)
   - Create k8s manifests for all services
   - Set up ingress for web frontend
@@ -101,36 +94,36 @@ Building an AI-powered task execution system capable of handling complex, real-w
   - Add persistent volumes for models
 
 ### Completed Technical Foundation
-- [x] Distributed worker/manager architecture with Redis
-- [x] Scaling backends for Docker, Kubernetes, Fly.io
-- [x] Job queue system with Redis streams
-- [x] Worker state machine implementation
-- [x] Basic monitoring and metrics
-- [x] Autoscaler service (needs QueueMetrics integration)
+- [x] Distributed worker architecture with Celery
+- [x] Scaling backends for Docker API, Kubernetes, Fly.io
+- [x] Celery task queue with Redis backend
+- [x] Flower monitoring UI integration
+- [x] Worker autoscaling via Flower API
+- [x] SSL support for Upstash Redis
+- [x] Zero-worker bootstrap capability
 
 ## Master Checklist
 
-### Distributed Bot/Worker System
-- [x] Implement job model and broker abstraction (`bot.distributed.model`, `bot.distributed.broker`)
-- [x] Add remote execution adapters for browser and Tankpit
-- [x] Refactor DI/container to support local vs remote runtimes
-- [x] Build worker entrypoint (standalone worker)
-    - [x] Design generic worker with dynamic dispatch for browser/tankpit jobs
-    - [x] Implement CLI/env configuration for job type, worker ID, broker config
-    - [x] Implement main loop: consume job, dispatch, reply
-    - [x] Refactor worker to support multi-engine-per-worker (concurrent browser/TankPit sessions)
-    - [x] Implement session cleanup logic for browser and TankPit engines (per-job and shutdown)
-    - [x] Add unit tests for dispatch logic
-    - [x] Dockerfile/CLI example for worker
-- [x] Add orchestrator/scheduler cog for job dispatch from Discord
+### Distributed Swarm/Worker System
+- [x] Migrate to Celery distributed task queue
+- [x] Implement Celery tasks for browser operations
+- [x] Add CeleryBrowserRuntime adapter
+- [x] Build Celery worker entrypoint
+    - [x] Updated entrypoint.worker.sh for Celery
+    - [x] Support for different queue types (browser, tankpit, llm)
+    - [x] Proper SSL configuration for Upstash Redis
+- [x] Add Flower monitoring integration
+- [x] Implement Celery autoscaler using Flower API
+- [x] Update all tests to work with Celery
 - [ ] Add multi-frontend support (Discord, Telegram, web, SMS, etc.)
-    - [ ] Separate out logic from frontend specific code in bot/plugins/commands/
+    - [ ] Separate out logic from frontend specific code in swarm/plugins/commands/
 - [ ] Add worker capability advertisement/heartbeat
 - [x] Refactor queue naming in ProxyService/engines for generic MITM support
-- [x] Add docker-compose example for bot and workers
+- [x] Add docker-compose example for swarm and workers
 
 ### Observability
 - [x] Add HTTP server for /health and /metrics endpoints
+- [x] Flower UI for real-time Celery task monitoring (port 5555)
 - [ ] Integrate Prometheus metrics for orchestrator and workers
 - [ ] Centralize logs with Loki (and label by worker, job, etc.)
 - [ ] Add Grafana dashboards for job queue, worker health, and resource usage
@@ -144,7 +137,8 @@ Building an AI-powered task execution system capable of handling complex, real-w
 ### Advanced Features
 - [ ] Streaming results/logs via Redis Pub/Sub
 - [ ] Smart job routing based on worker capabilities
-- [x] Autoscaling workers based on queue depth or resource usage
+- [x] Autoscaling workers based on queue depth via Flower API
+- [x] Task retries and dead letter queue via Celery
 
 ## Key Architectural Decisions
 
@@ -207,25 +201,27 @@ Benefits:
 - **Job Dispatch**: Filtered kwargs pattern prevents test failures
 - **Health/Metrics**: HTTP endpoints for monitoring
 
-### Critical Worker Scaling Issues (2025-07-16)
-1. **Wrong Queue Calculation**: Autoscaler uses `xlen` counting ALL messages, not just unprocessed ones
-2. **Failed Jobs Loop Forever**: Worker doesn't ACK failed messages, they get redelivered infinitely
-3. **Excess Worker Creation**: Each pending message triggers new worker with current thresholds
-4. **Solution Already Exists**: QueueMetricsService handles pending vs new but isn't integrated
+### Celery Migration Success (2025-07-17)
+1. **Accurate Queue Monitoring**: Autoscaler uses Flower API for real queue depths
+2. **Proper Task Lifecycle**: Celery handles retries, timeouts, and failures automatically
+3. **Smart Worker Scaling**: Only creates workers for truly pending tasks
+4. **Zero-Worker Bootstrap**: Can start from no workers without deadlock
 
 ## Handoff Notes for Next Session
-### Uncommitted Changes
-- `bot/distributed/services/scaling_service.py` - Started QueueMetrics integration
-- `bot/browser/engine.py` - Started adding missing methods (incomplete)
+### Celery Migration Complete
+- All browser tasks now use Celery instead of custom broker
+- Autoscaler uses Flower API for accurate monitoring
+- Workers can scale from zero
+- Type safety maintained throughout
 
-### Immediate Fixes Needed
-1. **Worker must ACK failed jobs** - Add error handling in dispatch
-2. **Complete QueueMetrics integration** - Finish and test the changes
-3. **Implement dead letter queue** - For permanently failed jobs
-4. **Remove channel-centric design** - These don't fit task architecture
+### Next Priorities
+1. **Remove channel-centric design** - Delete close_channel commands
+2. **Add task decomposition** - Break complex requests into subtasks
+3. **Multi-frontend support** - Extract Discord-specific code
+4. **Add more worker types** - Tankpit, LLM, etc.
 
 ### Remember the Vision
-This is an AI task execution system, not a Discord bot. Focus on:
+This is an AI task execution system, not a Discord-only system. Focus on:
 - Task decomposition and planning
 - Capability-based worker routing  
 - Platform-agnostic frontends
