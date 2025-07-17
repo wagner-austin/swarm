@@ -2,22 +2,22 @@
 Fake Browser Runtime for Testing
 =================================
 
-Provides a fake implementation of RemoteBrowserRuntime that doesn't require
-actual worker infrastructure, enabling fast and reliable unit tests.
+Provides a fake implementation of CeleryBrowserRuntime that doesn't require
+actual Celery workers, enabling fast and reliable unit tests.
 """
 
 import asyncio
 from typing import Any, Awaitable, Callable, TypeVar
 
-from bot.distributed.remote_browser import RemoteBrowserRuntime
+from swarm.distributed.celery_browser import CeleryBrowserRuntime
 
 T = TypeVar("T")
 
 
 class FakeBrowserRuntime:
     """
-    Fake browser runtime that simulates RemoteBrowserRuntime behavior
-    without requiring actual workers or Redis infrastructure.
+    Fake browser runtime that simulates CeleryBrowserRuntime behavior
+    without requiring actual Celery workers or Redis infrastructure.
     """
 
     def __init__(self, should_fail: bool = False, fail_message: str = "Simulated failure") -> None:
@@ -112,7 +112,7 @@ class FakeCircuitBreakerRuntime(FakeBrowserRuntime):
     ) -> T:
         """Execute method with circuit breaker simulation."""
         if self.circuit_open:
-            from bot.core.exceptions import WorkerUnavailableError
+            from swarm.core.exceptions import WorkerUnavailableError
 
             raise WorkerUnavailableError("Circuit breaker is open")
 
