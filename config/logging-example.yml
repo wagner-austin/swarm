@@ -1,5 +1,5 @@
 ---
-# Logging Configuration Examples for Distributed Bot System
+# Logging Configuration Examples for Distributed Swarm System
 # =========================================================
 # This file shows various logging configurations for different deployment
 # scenarios. Copy and modify as needed for your environment.
@@ -21,7 +21,7 @@ production:
 
   # Structured log output for each service type
   log_files:
-    bot: "logs/bot/bot.jsonl"
+    swarm: "logs/swarm/swarm.jsonl"
     worker: "logs/workers/worker-{worker_id}.jsonl"
     browser: "logs/workers/browser-{worker_id}.jsonl"
     tankpit: "logs/workers/tankpit-{worker_id}.jsonl"
@@ -43,7 +43,7 @@ development:
 
   # File logging for debugging
   log_files:
-    bot: "logs/bot/bot-dev.log"
+    swarm: "logs/swarm/swarm-dev.log"
     worker: "logs/workers/worker-dev.log"
 
   max_file_size: "10MB"
@@ -67,7 +67,7 @@ docker:
 
   # Container-aware logging
   log_files:
-    bot: "/app/logs/bot/bot.jsonl"
+    swarm: "/app/logs/swarm/swarm.jsonl"
     worker: "/app/logs/workers/worker-{worker_id}.jsonl"
 
   # Shorter retention for containers (external log aggregation)
@@ -99,14 +99,14 @@ docker:
 sample_log_structure:
   timestamp: "2025-07-08T22:29:00.123Z"
   level: "INFO"
-  service: "bot"  # bot|worker|browser|tankpit
+  service: "swarm"  # swarm|worker|browser|tankpit
   worker_id: "worker-1"  # for distributed workers
   job_id: "browser.navigate.abc123"  # current job being processed
-  hostname: "bot-server-01"
+  hostname: "swarm-server-01"
   container_id: "a1b2c3d4e5f6"
   deployment_env: "production"
   region: "us-west-1"
-  logger: "bot.plugins.web_search"
+  logger: "swarm.plugins.web_search"
   message: "Processing search request"
 
   # Additional context fields (job-specific)

@@ -70,7 +70,7 @@
       }
     ]
   },
-  "description": "Discord Bot Distributed Monitoring with Worker Metrics and Logs",
+  "description": "Swarm Distributed Monitoring with Worker Metrics and Logs",
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
@@ -469,7 +469,7 @@
       },
       "targets": [
         {
-          "expr": "rate(discord_messages_processed_total{job=\"discord_bot\"}[5m]) * 60",
+          "expr": "rate(discord_messages_processed_total{job=\"swarm_main\"}[5m]) * 60",
           "format": "time_series",
           "interval": "",
           "legendFormat": "Messages Processed",
@@ -551,14 +551,14 @@
       },
       "targets": [
         {
-          "expr": "rate(bot_messages_sent_total{job=\"discord_bot\"}[5m]) * 60",
+          "expr": "rate(swarm_messages_sent_total{job=\"swarm\"}[5m]) * 60",
           "format": "time_series",
           "interval": "",
           "legendFormat": "Messages Sent",
           "refId": "A"
         }
       ],
-      "title": "Bot Messages Sent (per minute)",
+      "title": "Swarm Messages Sent (per minute)",
       "type": "timeseries"
     },
     {
@@ -597,11 +597,11 @@
       },
       "targets": [
         {
-          "expr": "{job=~\".*docker.*\"} |= \"discord\" or \"worker\" or \"bot\"",
+          "expr": "{job=~\".*docker.*\"} |= \"discord\" or \"worker\" or \"swarm\"",
           "refId": "A"
         }
       ],
-      "title": "Bot & Worker Logs",
+      "title": "Swarm & Worker Logs",
       "type": "logs"
     },
     {
@@ -653,7 +653,7 @@
   "style": "dark",
   "tags": [
     "discord",
-    "bot",
+    "swarm",
     "monitoring",
     "distributed",
     "logs"
@@ -667,7 +667,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Discord Bot Monitoring - WITH LOGS",
-  "uid": "discord_bot_with_logs",
+  "title": "Swarm Monitoring - WITH LOGS",
+  "uid": "swarm_with_logs",
   "version": 2
 }
