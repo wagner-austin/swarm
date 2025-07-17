@@ -46,7 +46,7 @@ def lint_file(path: Path) -> int:
 
 
 def main() -> None:
-    root = Path(__file__).parent.parent / "bot"
+    root = Path(__file__).parent.parent / "swarm"
     total = 0
     for pyfile in root.rglob("*.py"):
         total += lint_file(pyfile)

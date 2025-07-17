@@ -23,9 +23,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import redis.asyncio as redis_asyncio
 
-from bot.distributed.backends import DockerApiBackend, FlyIOBackend, KubernetesBackend
-from bot.distributed.core.config import DistributedConfig
-from bot.distributed.services.scaling_service import ScalingBackend, ScalingService
+from swarm.core.settings import Settings
+from swarm.distributed.backends import DockerApiBackend, FlyIOBackend, KubernetesBackend
+from swarm.distributed.core.config import DistributedConfig
+from swarm.distributed.services.scaling_service import ScalingBackend, ScalingService
+from swarm.infra.redis_factory import create_redis_client
+from swarm.types import RedisBytes
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -51,16 +54,16 @@ class WorkerAutoscaler:
         self.orchestrator = orchestrator
         self.check_interval = check_interval
         self.scaling_service: ScalingService | None = None
-        self.redis: redis_asyncio.Redis | None = None
+        self.redis: RedisBytes | None = None
         # Shutdown coordination
         self._shutdown_event: asyncio.Event = asyncio.Event()
         self._signal_handlers_installed = False
 
     async def setup(self) -> None:
         """Set up the autoscaler with appropriate backend."""
-        # Connect to Redis
-        self.redis = redis_asyncio.from_url(self.redis_url, decode_responses=True)  # type: ignore[no-untyped-call]
-        logger.info(f"Connected to Redis at {self.redis_url}")
+        # Connect to Redis with automatic fallback
+        self.redis = await create_redis_client()
+        logger.info("Connected to Redis with automatic fallback support")
 
         # Load distributed configuration
         config = DistributedConfig.load()
@@ -70,10 +73,10 @@ class WorkerAutoscaler:
         if self.orchestrator == "docker" or self.orchestrator == "docker-api":
             # Use docker API backend for proper container management
             # Docker compose builds images with specific names
-            project_name = os.environ.get("COMPOSE_PROJECT_NAME", "discordbot")
+            project_name = os.environ.get("COMPOSE_PROJECT_NAME", "swarm")
             worker_metrics_port = int(os.environ.get("WORKER_METRICS_PORT", "9100"))
             backend = DockerApiBackend(
-                image="discord-bot:latest",  # The actual built image name
+                image="swarm:latest",  # The actual built image name
                 network=None,  # Auto-detect the network
                 project_name=project_name,
                 app_mount_path=None,  # Auto-detect the app path
