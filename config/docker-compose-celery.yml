@@ -1,0 +1,198 @@
+---
+# Celery-based Docker Compose configuration
+# This replaces the old Redis streams-based workers with Celery workers
+#
+# IMPORTANT: This configuration uses Upstash Redis as primary broker
+# Local Redis is only used as fallback when Upstash is unavailable
+
+services:
+  # Local Redis - ONLY used as fallback when Upstash is unavailable
+  redis-fallback:
+    image: redis:7-alpine
+    container_name: redis-fallback
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Flower for Celery monitoring
+  flower:
+    image: mher/flower:2.0
+    container_name: flower
+    command:
+      # Uses Celery app configuration which includes Upstash + fallback
+      - celery
+      - --app=swarm.celery_app:app
+      - flower
+      - --port=5555
+      - --url_prefix=
+    ports:
+      - "5555:5555"
+    env_file:
+      - ../.env
+    environment:
+      # These will use Upstash from .env with local fallback
+      - REDIS_FALLBACK_URL=redis://redis-fallback:6379/0
+      - REDIS_FALLBACK_ENABLED=true
+    depends_on:
+      - redis-fallback
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5555/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Discord frontend
+  swarm:
+    image: swarm:latest
+    build:
+      context: ..
+      target: runtime-swarm
+    container_name: swarm
+    env_file:
+      - ../.env
+    volumes:
+      - ..:/app
+      - C:\\Users\\Test\\.config\\swarm\\personas\\personas.yaml:/root/.config/swarm/personas/personas.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - METRICS_PORT=9200
+      - USE_DISTRIBUTED_WORKERS=true
+      - LOG_FORMAT=json
+      - LOG_TO_FILE=0
+      # Uses Upstash from .env with local fallback
+      - REDIS_FALLBACK_URL=redis://redis-fallback:6379/0
+      - REDIS_FALLBACK_ENABLED=true
+    ports:
+      - "9200:9200"
+    depends_on:
+      - redis-fallback
+      - flower
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(
+            'http://localhost:9200/metrics', timeout=5
+          ).getcode() == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+
+  # Celery worker for browser tasks
+  celery-worker-browser:
+    build:
+      context: ..
+      target: runtime-worker
+    container_name: celery-worker-browser
+    entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
+    env_file:
+      - ../.env
+    environment:
+      - METRICS_PORT=9100
+      - DISPLAY=:99
+      # Celery will use the same Redis configuration
+      - REDIS_FALLBACK_URL=redis://redis-fallback:6379/0
+      - REDIS_FALLBACK_ENABLED=true
+      # Celery worker settings
+      - CELERY_QUEUES=browser
+      - CELERY_CONCURRENCY=2
+      - CELERY_POOL=prefork
+      - CELERY_LOGLEVEL=info
+      - CELERY_MAX_TASKS=100
+      # Process-level autoscaling within container
+      - CELERY_AUTOSCALE=4,1  # Scale between 1-4 processes
+      - LOG_FORMAT=json
+      - LOG_TO_FILE=0
+    volumes:
+      - ..:/app
+    depends_on:
+      - redis-fallback
+    ports:
+      - "9101:9100"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(
+            'http://localhost:9100/metrics', timeout=5
+          ).getcode() == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Celery-aware autoscaler for container-level scaling
+  autoscaler:
+    build:
+      context: ..
+      target: runtime-autoscaler
+    container_name: autoscaler
+    env_file:
+      - ../.env
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    command:
+      - python
+      - -m
+      - scripts.celery_autoscaler
+      - --flower-url=http://flower:5555
+      - --orchestrator=docker-api
+    environment:
+      - FLOWER_URL=http://flower:5555
+      - ORCHESTRATOR=docker-api
+      - CHECK_INTERVAL=30
+      - PYTHONPATH=/app
+      - COMPOSE_PROJECT_NAME=swarm
+      - WORKER_METRICS_PORT=9100
+      # Uses Upstash from .env with local fallback
+      - REDIS_FALLBACK_URL=redis://redis-fallback:6379/0
+      - REDIS_FALLBACK_ENABLED=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ..:/app
+    depends_on:
+      - flower
+      - redis-fallback
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys; sys.exit(0)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+    # Note: The old manager service is no longer needed with Celery
+    # Celery handles job distribution and callbacks internally
+
+volumes:
+  redis-data:
+
+# To use this configuration:
+# docker-compose -f config/docker-compose-celery.yml up
+#
+# The system will:
+# 1. Try to use Upstash Redis (from .env REDIS_URL)
+# 2. Automatically fallback to local Redis if Upstash is unavailable
+# 3. Log when fallback occurs
+# 4. Retry Upstash periodically to switch back when available
