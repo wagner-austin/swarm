@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
-from bot.core.containers import Container
+from swarm.core.containers import Container
 
 
 @pytest.fixture
@@ -27,17 +27,17 @@ def container_with_mocked_metrics() -> tuple[Container, MagicMock]:
 
 
 @pytest.fixture
-def dummy_bot(container_with_mocked_metrics: tuple[Container, MagicMock]) -> MagicMock:
-    """Create a mocked bot with real DI container."""
+def dummy_discord_bot(container_with_mocked_metrics: tuple[Container, MagicMock]) -> MagicMock:
+    """Create a mocked Discord bot with real DI container."""
     container, _ = container_with_mocked_metrics
 
-    bot = MagicMock(spec=discord.ext.commands.Bot)
-    bot.container = container
-    bot.latency = 0.123
-    bot.guilds = [MagicMock(), MagicMock()]
-    bot.shard_id = 0
-    bot.shard_count = 2
-    return bot
+    discord_bot = MagicMock(spec=discord.ext.commands.Bot)
+    discord_bot.container = container
+    discord_bot.latency = 0.123
+    discord_bot.guilds = [MagicMock(), MagicMock()]
+    discord_bot.shard_id = 0
+    discord_bot.shard_count = 2
+    return discord_bot
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def interaction() -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_status_embed_fields(
-    dummy_bot: MagicMock,
+    dummy_discord_bot: MagicMock,
     interaction: MagicMock,
     container_with_mocked_metrics: tuple[Container, MagicMock],
 ) -> None:
@@ -62,7 +62,7 @@ async def test_status_embed_fields(
 
     # Create Status cog using REAL DI container factory
     cog = container.status_cog(
-        bot=dummy_bot,
+        discord_bot=dummy_discord_bot,
         safe_send_func=mock_safe_send,  # Override safe_send for testing
     )
 
@@ -75,7 +75,7 @@ async def test_status_embed_fields(
 
     # Should send an embed with correct title and fields
     assert len(mock_safe_send.await_args_list) > 0, "safe_send was never called"
-    assert mock_safe_send.await_args_list[0].kwargs["embed"].title == "Bot status"
+    assert mock_safe_send.await_args_list[0].kwargs["embed"].title == "Swarm Status"
     fields = mock_safe_send.await_args_list[0].kwargs["embed"].fields
     field_names = [f.name for f in fields]
     assert "Traffic" in field_names
@@ -87,7 +87,7 @@ async def test_status_embed_fields(
 
 @pytest.mark.asyncio
 async def test_status_shard_info(
-    dummy_bot: MagicMock,
+    dummy_discord_bot: MagicMock,
     interaction: MagicMock,
     container_with_mocked_metrics: tuple[Container, MagicMock],
 ) -> None:
@@ -101,12 +101,12 @@ async def test_status_shard_info(
     mock_metrics.format_hms.return_value = "1:00:00"
     mock_metrics.get_cpu_mem.return_value = ("10%", "512MB")
     mock_safe_send = AsyncMock()
-    dummy_bot.shard_id = 1
-    dummy_bot.shard_count = 3
+    dummy_discord_bot.shard_id = 1
+    dummy_discord_bot.shard_count = 3
 
     # Create Status cog using REAL DI container factory
     cog = container.status_cog(
-        bot=dummy_bot,
+        discord_bot=dummy_discord_bot,
         safe_send_func=mock_safe_send,
     )
 
@@ -114,12 +114,15 @@ async def test_status_shard_info(
     assert len(mock_safe_send.await_args_list) > 0, "safe_send was never called"
     embed = mock_safe_send.await_args_list[0].kwargs["embed"]
     # Shard info should be present and correct
-    assert f"Shard {dummy_bot.shard_id + 1}/{dummy_bot.shard_count}" in embed.fields[-1].value
+    assert (
+        f"Shard {dummy_discord_bot.shard_id + 1}/{dummy_discord_bot.shard_count}"
+        in embed.fields[-1].value
+    )
 
 
 @pytest.mark.asyncio
 async def test_status_no_shard(
-    dummy_bot: MagicMock,
+    dummy_discord_bot: MagicMock,
     interaction: MagicMock,
     container_with_mocked_metrics: tuple[Container, MagicMock],
 ) -> None:
@@ -133,12 +136,12 @@ async def test_status_no_shard(
     mock_metrics.format_hms.return_value = "0:01:40"
     mock_metrics.get_cpu_mem.return_value = ("1%", "12MB")
     mock_safe_send = AsyncMock()
-    dummy_bot.shard_id = None
-    dummy_bot.shard_count = None
+    dummy_discord_bot.shard_id = None
+    dummy_discord_bot.shard_count = None
 
     # Create Status cog using REAL DI container factory
     cog = container.status_cog(
-        bot=dummy_bot,
+        discord_bot=dummy_discord_bot,
         safe_send_func=mock_safe_send,
     )
     await cast(Any, cog.status.callback)(cog, interaction)

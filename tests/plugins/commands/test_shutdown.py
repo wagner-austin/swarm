@@ -4,7 +4,7 @@ import discord
 import pytest
 from pytest_mock import MockerFixture
 
-from bot.core.containers import Container
+from swarm.core.containers import Container
 
 
 @pytest.fixture
@@ -25,11 +25,11 @@ def container_with_mocked_shutdown() -> tuple[
     # Mock get_owner function
     mock_get_owner = AsyncMock(return_value=MagicMock(id=12345))
 
-    # Mock bot
-    mock_bot = MagicMock(spec=discord.ext.commands.Bot)
-    mock_bot.container = container
+    # Mock Discord bot
+    mock_discord_bot = MagicMock(spec=discord.ext.commands.Bot)
+    mock_discord_bot.container = container
 
-    return container, mock_bot, mock_metrics, mock_lifecycle, mock_get_owner
+    return container, mock_discord_bot, mock_metrics, mock_lifecycle, mock_get_owner
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ async def test_shutdown_owner_success(
 
     # Create Shutdown cog using REAL DI container factory
     cog = container.shutdown_cog(
-        bot=mock_bot,
+        discord_bot=mock_bot,
         lifecycle=mock_lifecycle,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
@@ -90,7 +90,7 @@ async def test_shutdown_not_owner(
 
     # Create Shutdown cog using REAL DI container factory
     cog = container.shutdown_cog(
-        bot=mock_bot,
+        discord_bot=mock_bot,
         lifecycle=mock_lifecycle,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
@@ -117,7 +117,7 @@ async def test_shutdown_owner_lookup_failure(
 
     # Create Shutdown cog using REAL DI container factory
     cog = container.shutdown_cog(
-        bot=mock_bot,
+        discord_bot=mock_bot,
         lifecycle=mock_lifecycle,
         get_owner_func=mock_get_owner,
         safe_send_func=mock_safe_send,
@@ -125,7 +125,7 @@ async def test_shutdown_owner_lookup_failure(
 
     await cog._shutdown_impl(interaction)
     mock_safe_send.assert_awaited_with(
-        interaction, "❌ Could not resolve bot owner.", ephemeral=True
+        interaction, "❌ Could not resolve swarm owner.", ephemeral=True
     )
     mock_lifecycle.shutdown.assert_not_awaited()
     assert not interaction.client.close.await_count

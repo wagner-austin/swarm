@@ -5,7 +5,7 @@ import discord
 import pytest
 from pytest_mock import MockerFixture
 
-from bot.plugins.commands import decorators
+from swarm.plugins.commands import decorators
 
 # A helper type for the patched asyncio.create_task
 PatchedCreateTask = Callable[[Coroutine[Any, Any, Any]], Awaitable[Any]]
@@ -67,7 +67,7 @@ async def test_background_app_command_handles_exception(
     """Test that exceptions in the command are caught and a message is sent."""
     interaction = make_interaction_mock()
     mock_safe_send = mocker.patch(
-        "bot.plugins.commands.decorators.safe_send", new_callable=AsyncMock
+        "swarm.plugins.commands.decorators.safe_send", new_callable=AsyncMock
     )
 
     @decorators.background_app_command()
