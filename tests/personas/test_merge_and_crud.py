@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 # Target module under test
-from bot.ai import personas as p
+from swarm.ai import personas as p
 
 # ---------------------------------------------------------------------------
 # Helper to reload the personas module with a temporary custom directory
@@ -17,12 +17,12 @@ from bot.ai import personas as p
 
 
 def _reload_with_dir(tmp_dir: Path) -> Any:  # noqa: ANN401 – dynamic import
-    """Reload ``bot.ai.personas`` with ``BOT_PERSONA_DIR`` set to *tmp_dir*."""
+    """Reload ``swarm.ai.personas`` with ``SWARM_PERSONA_DIR`` set to *tmp_dir*."""
 
     import os
     from importlib import reload
 
-    os.environ["BOT_PERSONA_DIR"] = str(tmp_dir)
+    os.environ["SWARM_PERSONA_DIR"] = str(tmp_dir)
     return reload(p)
 
 
@@ -42,7 +42,7 @@ def test_merge_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (custom_dir / "aaa.yaml").write_text("pirate:\n  prompt: NEW2\n", "utf-8")
 
     # Ensure module reads from our temp dir
-    monkeypatch.setenv("BOT_PERSONA_DIR", str(custom_dir))
+    monkeypatch.setenv("SWARM_PERSONA_DIR", str(custom_dir))
     importlib.reload(p)
 
     # Lexicographically later (zzz) should win
@@ -52,11 +52,11 @@ def test_merge_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_crud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """PersonaAdmin helpers should update both disk and in-memory registry."""
 
-    monkeypatch.setenv("BOT_PERSONA_DIR", str(tmp_path))
+    monkeypatch.setenv("SWARM_PERSONA_DIR", str(tmp_path))
     importlib.reload(p)
 
     # Import persona_admin after reload so it picks up patched _CUSTOM_DIR
-    from bot.plugins.commands import persona_admin as adm
+    from swarm.plugins.commands import persona_admin as adm
 
     importlib.reload(adm)
 

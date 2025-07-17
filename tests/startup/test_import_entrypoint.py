@@ -1,4 +1,4 @@
-"""Ensures that `python -m bot.core` can be imported in a fresh interpreter.
+"""Ensures that `python -m swarm.core` can be imported in a fresh interpreter.
 
 We *spawn* a subprocess so the module graph starts from a clean slate –-
 identical to production.  Any circular-import or side-effect crash will
@@ -13,7 +13,7 @@ import sys
 
 def test_module_entrypoint_imports_cleanly() -> None:
     proc = subprocess.run(
-        [sys.executable, "-m", "bot.core", "--help"],  # --help exits immediately
+        [sys.executable, "-m", "swarm.core", "--help"],  # --help exits immediately
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

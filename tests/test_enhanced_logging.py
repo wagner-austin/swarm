@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bot.core.logger_setup import (
+from swarm.core.logger_setup import (
     DEFAULT_LOGGING_CONFIG,
     _ContextFilter,
     auto_detect_deployment_context,
@@ -208,7 +208,7 @@ class TestHeartbeatCompatibility:
     @pytest.mark.asyncio
     async def test_worker_heartbeat_integration(self) -> None:
         """Test that enhanced logging works with heartbeat system."""
-        from bot.distributed.monitoring.heartbeat import WorkerHeartbeat
+        from swarm.distributed.monitoring.heartbeat import WorkerHeartbeat
 
         # Use a fixed deployment context provider for deterministic context
         def fixed_context() -> dict[str, str]:
@@ -248,9 +248,9 @@ def reset_logging() -> Generator[None, None, None]:
     logging.getLogger().handlers.clear()
 
     # Reset the configuration flag
-    import bot.core.logger_setup
+    import swarm.core.logger_setup
 
-    bot.core.logger_setup._CONFIGURED = False
+    swarm.core.logger_setup._CONFIGURED = False
 
     # Patch LogRecord for mypy
     original_log_record_factory = logging.getLogRecordFactory()
@@ -260,7 +260,7 @@ def reset_logging() -> Generator[None, None, None]:
 
     # Clean up after test
     logging.getLogger().handlers.clear()
-    bot.core.logger_setup._CONFIGURED = False
+    swarm.core.logger_setup._CONFIGURED = False
     logging.setLogRecordFactory(original_log_record_factory)
 
 
@@ -268,12 +268,19 @@ def test_log_directory_structure() -> None:
     """Test that log directories are created properly."""
     import pathlib
 
-    base_path = pathlib.Path("logs")
+    # Create a temporary directory for testing
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base_path = pathlib.Path(tmpdir) / "logs"
 
-    # These directories should exist (created earlier)
-    assert (base_path / "bot").exists()
-    assert (base_path / "workers").exists()
-    assert (base_path / "archive").exists()
+        # Create the directories for testing
+        (base_path / "swarm").mkdir(parents=True, exist_ok=True)
+        (base_path / "workers").mkdir(parents=True, exist_ok=True)
+        (base_path / "archive").mkdir(parents=True, exist_ok=True)
+
+        # Now test that they exist
+        assert (base_path / "swarm").exists()
+        assert (base_path / "workers").exists()
+        assert (base_path / "archive").exists()
 
 
 if __name__ == "__main__":

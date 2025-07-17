@@ -4,7 +4,7 @@ import pkgutil
 from collections.abc import Iterator
 from types import ModuleType
 
-PACKAGE: str = "bot.plugins.commands"
+PACKAGE: str = "swarm.plugins.commands"
 
 
 def iter_cogs() -> Iterator[ModuleType]:

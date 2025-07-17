@@ -11,9 +11,9 @@ from unittest.mock import AsyncMock
 import pytest
 from discord.ext import commands
 
-from bot.core.containers import Container
-from bot.plugins.commands.about import About
-from bot.plugins.commands.chat import Chat
+from swarm.core.containers import Container
+from swarm.plugins.commands.about import About
+from swarm.plugins.commands.chat import Chat
 from tests._mocks.mocks import StubInteraction
 
 # ---------------------------------------------------------------------------+
@@ -24,11 +24,11 @@ from tests._mocks.mocks import StubInteraction
 @pytest.mark.asyncio
 async def test_about_command() -> None:
     """/about should send an embed without raising."""
-    bot = AsyncMock(spec=commands.Bot)
-    bot.container = Container()
-    cog = About(bot)
+    discord_bot = AsyncMock(spec=commands.Bot)
+    discord_bot.container = Container()
+    cog = About(discord_bot)
 
-    ix = StubInteraction(bot=bot)
+    ix = StubInteraction(discord_bot=discord_bot)
     # mypy: 'callback' is dynamically bound; treat as Any
     await cast(Any, cog.about.callback)(cog, ix)
 
@@ -68,12 +68,12 @@ async def test_chat_command(monkeypatch: Any) -> None:
     )
 
     # ----------------------------------------------------------------------
-    bot = AsyncMock(spec=commands.Bot)
-    bot.container = Container()
-    bot.is_owner = AsyncMock(return_value=True)
+    discord_bot = AsyncMock(spec=commands.Bot)
+    discord_bot.container = Container()
+    discord_bot.is_owner = AsyncMock(return_value=True)
 
-    cog = Chat(bot)
-    ix = StubInteraction(bot=bot)
+    cog = Chat(discord_bot)
+    ix = StubInteraction(discord_bot=discord_bot)
 
     await cast(Any, cog.chat.callback)(cog, ix, "hi", sync_in_test=True)
 

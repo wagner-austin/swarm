@@ -2,7 +2,7 @@
 import pytest
 from pytest import MonkeyPatch
 
-from bot.core.url_validation import validate_and_normalise_web_url
+from swarm.core.url_validation import validate_and_normalise_web_url
 
 
 @pytest.mark.parametrize(
@@ -19,7 +19,7 @@ def test_good_urls(raw: str, expect: str) -> None:
 
 # ensure allow‑list blocks disallowed hosts
 def test_disallowed_host(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr("bot.core.settings.settings.allowed_hosts", ["example.com"])
+    monkeypatch.setattr("swarm.core.settings.settings.allowed_hosts", ["example.com"])
     with pytest.raises(ValueError):
         validate_and_normalise_web_url("https://not‑allowed.org")
 
