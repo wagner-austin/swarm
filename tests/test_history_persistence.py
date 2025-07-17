@@ -5,9 +5,9 @@ from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio
 
-from bot.core.settings import Settings
-from bot.history.factory import choose as history_backend_factory
-from bot.history.redis_backend import RedisBackend
+from swarm.core.settings import Settings
+from swarm.history.factory import choose as history_backend_factory
+from swarm.history.redis_backend import RedisBackend
 
 
 @pytest_asyncio.fixture(scope="function")

@@ -2,7 +2,7 @@
 Test for filter_kwargs_for_method utility.
 """
 
-from bot.utils.dispatch import filter_kwargs_for_method
+from swarm.utils.dispatch import filter_kwargs_for_method
 
 
 def dummy(a: int, b: int, c: int = 1, *, d: int | None = None) -> tuple[int, int, int, int | None]:

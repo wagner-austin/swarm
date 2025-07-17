@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from bot.core.settings import Settings
+from swarm.core.settings import Settings
 
 
 def test_settings_reads_env(monkeypatch: Any) -> None:

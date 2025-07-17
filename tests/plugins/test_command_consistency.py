@@ -18,7 +18,7 @@ import discord
 import pytest
 from discord.ext import commands
 
-from bot.plugins.commands import web as web_mod
+from swarm.plugins.commands import web as web_mod
 
 
 class TestCommandConsistency(unittest.TestCase):
@@ -29,15 +29,15 @@ class TestCommandConsistency(unittest.TestCase):
         # Get the actual Web cog class
         web_cog_class = getattr(web_mod, "Web")
 
-        # Create a dummy bot to instantiate the cog and get its commands
+        # Create a dummy discord_bot to instantiate the cog and get its commands
         from unittest.mock import MagicMock
 
-        mock_bot = MagicMock(spec=commands.Bot)
-        mock_bot.container = MagicMock()  # Mock container for DI
+        mock_discord_discord_bot = MagicMock(spec=commands.Bot)
+        mock_discord_discord_bot.container = MagicMock()  # Mock container for DI
 
         # Create the cog instance to access its app_commands
         try:
-            web_cog = web_cog_class(mock_bot)
+            web_cog = web_cog_class(discord_bot=mock_discord_discord_bot)
         except Exception as e:
             self.fail(f"Failed to instantiate Web cog: {e}")
 

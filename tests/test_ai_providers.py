@@ -1,6 +1,6 @@
 """Tests for the dynamic LLM provider registry (PR-1).
 
-These tests guarantee that the public contract introduced in `bot.ai.*` keeps
+These tests guarantee that the public contract introduced in `swarm.ai.*` keeps
 working as other parts of the code-base evolve.
 """
 
@@ -13,8 +13,8 @@ from typing import Any, cast
 
 import pytest
 
-from bot.ai import providers as registry
-from bot.ai.contracts import LLMProvider
+from swarm.ai import providers as registry
+from swarm.ai.contracts import LLMProvider
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ async def test_stub_provider_runtime_check_and_helpers() -> None:
     """Register a stub provider on-the-fly and validate helper functions."""
 
     # Build a fake provider module dynamically so it resembles real adapters
-    mod = types.ModuleType("bot.ai.providers._stub")
+    mod = types.ModuleType("swarm.ai.providers._stub")
 
     class StubProvider:
         """Minimal stub implementing the LLMProvider contract."""  # noqa: D101  (docstring not needed in test code)
@@ -58,7 +58,7 @@ async def test_stub_provider_runtime_check_and_helpers() -> None:
     mod.provider = StubProvider()  # type: ignore[attr-defined]
     sys.modules[mod.__name__] = mod
 
-    # Manually register – simulates what bot.ai.providers.__init__ auto-import does
+    # Manually register – simulates what swarm.ai.providers.__init__ auto-import does
     registry._REGISTRY["stub"] = cast(LLMProvider, mod.provider)
 
     # 1. Structural runtime check

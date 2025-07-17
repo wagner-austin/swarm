@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import redis.asyncio as redis_asyncio
 
-from bot.core.containers import Container
-from bot.plugins.monitor.browser_health import BrowserHealthMonitor
+from swarm.core.containers import Container
+from swarm.plugins.monitor.browser_health import BrowserHealthMonitor
 
 
 @pytest.fixture
@@ -23,12 +23,12 @@ def container_with_mocked_redis() -> tuple[Container, MagicMock, MagicMock]:
     mock_redis.hgetall = AsyncMock(return_value={})
     container.redis_client.override(mock_redis)
 
-    # Mock bot
-    mock_bot = MagicMock()
-    mock_bot.user = MagicMock(id=1234)
-    mock_bot.container = container
+    # Mock Discord bot
+    mock_discord_bot = MagicMock()
+    mock_discord_bot.user = MagicMock(id=1234)
+    mock_discord_bot.container = container
 
-    return container, mock_bot, mock_redis
+    return container, mock_discord_bot, mock_redis
 
 
 @pytest.mark.asyncio
@@ -36,10 +36,10 @@ async def test_browser_health_monitor_creation(
     container_with_mocked_redis: tuple[Container, MagicMock, MagicMock],
 ) -> None:
     """Test BrowserHealthMonitor cog creation using real DI container."""
-    container, mock_bot, mock_redis = container_with_mocked_redis
+    container, mock_discord_bot, mock_redis = container_with_mocked_redis
 
     # Create BrowserHealthMonitor cog using REAL DI container factory
-    cog = container.browser_health_monitor_cog(bot=mock_bot)
+    cog = container.browser_health_monitor_cog(discord_bot=mock_discord_bot)
 
     assert isinstance(cog, BrowserHealthMonitor)
     assert cog.redis is mock_redis
@@ -53,10 +53,10 @@ async def test_browser_health_monitor_start_stop_monitoring(
     container_with_mocked_redis: tuple[Container, MagicMock, MagicMock],
 ) -> None:
     """Test BrowserHealthMonitor cog monitoring task lifecycle."""
-    container, mock_bot, mock_redis = container_with_mocked_redis
+    container, mock_discord_bot, mock_redis = container_with_mocked_redis
 
     # Create BrowserHealthMonitor cog using REAL DI container factory
-    cog = container.browser_health_monitor_cog(bot=mock_bot)
+    cog = container.browser_health_monitor_cog(discord_bot=mock_discord_bot)
 
     # Initially no monitoring task
     assert cog.monitoring_task is None
@@ -82,7 +82,7 @@ async def test_browser_health_check_with_healthy_workers(
     container_with_mocked_redis: tuple[Container, MagicMock, MagicMock],
 ) -> None:
     """Test health check with healthy workers."""
-    container, mock_bot, mock_redis = container_with_mocked_redis
+    container, mock_discord_bot, mock_redis = container_with_mocked_redis
 
     # Mock healthy worker heartbeats
     import time
@@ -103,7 +103,7 @@ async def test_browser_health_check_with_healthy_workers(
     }
 
     # Create BrowserHealthMonitor cog using REAL DI container factory
-    cog = container.browser_health_monitor_cog(bot=mock_bot)
+    cog = container.browser_health_monitor_cog(discord_bot=mock_discord_bot)
 
     # Check health
     await cog._check_worker_health()
@@ -122,7 +122,7 @@ async def test_browser_health_check_with_stale_workers(
     container_with_mocked_redis: tuple[Container, MagicMock, MagicMock],
 ) -> None:
     """Test health check with stale workers."""
-    container, mock_bot, mock_redis = container_with_mocked_redis
+    container, mock_discord_bot, mock_redis = container_with_mocked_redis
 
     # Mock stale worker heartbeats
     import time
@@ -143,7 +143,7 @@ async def test_browser_health_check_with_stale_workers(
     }
 
     # Create BrowserHealthMonitor cog using REAL DI container factory
-    cog = container.browser_health_monitor_cog(bot=mock_bot)
+    cog = container.browser_health_monitor_cog(discord_bot=mock_discord_bot)
 
     # Check health - should mark as degraded
     await cog._check_worker_health()
@@ -159,7 +159,7 @@ async def test_browser_health_check_no_workers(
     container_with_mocked_redis: tuple[Container, MagicMock, MagicMock],
 ) -> None:
     """Test health check with no workers."""
-    container, mock_bot, mock_redis = container_with_mocked_redis
+    container, mock_discord_bot, mock_redis = container_with_mocked_redis
 
     # Mock no worker heartbeats
     import time
@@ -176,7 +176,7 @@ async def test_browser_health_check_no_workers(
     }
 
     # Create BrowserHealthMonitor cog using REAL DI container factory
-    cog = container.browser_health_monitor_cog(bot=mock_bot)
+    cog = container.browser_health_monitor_cog(discord_bot=mock_discord_bot)
 
     # Check health - should mark as degraded
     await cog._check_worker_health()
