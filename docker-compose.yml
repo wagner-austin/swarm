@@ -1,12 +1,24 @@
 ---
 services:
-  # Redis removed - using Upstash from .env instead
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
     healthcheck:
@@ -23,7 +35,7 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin  # change after first login
-      # Keep Grafana output terse; WARN and above matches Loki & bot
+      # Keep Grafana output terse; WARN and above matches Loki & swarm
       - GF_LOG_LEVEL=warn  # Reduce from default 'info' to 'warn'
       - GF_LOG_FILTERS=tsdb.loki:warn  # Reduce Loki data source logging
     depends_on:
@@ -39,7 +51,7 @@ services:
     image: grafana/loki:3.2.0   # newer maintenance release
     container_name: loki
     volumes:
-      - ./loki-config.yml:/etc/loki/local-config.yaml:ro
+      - ./config/loki-config.yml:/etc/loki/local-config.yaml:ro
       - ./loki-data:/tmp/loki
     command: -config.file=/etc/loki/local-config.yaml
     ports:
@@ -56,7 +68,7 @@ services:
     image: grafana/alloy:v1.9.2
     container_name: alloy
     volumes:
-      - ./alloy-config.river:/etc/alloy/config.river:ro
+      - ./config/alloy-config.river:/etc/alloy/config.river:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
     # Allow Alloy's non-root user to access the Docker socket
@@ -83,21 +95,21 @@ services:
       start_period: 120s
     restart: unless-stopped
 
-  bot:
-    image: discord-bot:latest
+  swarm:
+    image: swarm:latest
     build:
       context: .
-      target: runtime-bot
-    container_name: bot
+      target: runtime-swarm
+    container_name: swarm
     env_file:
       - .env
     # Discord frontend (no local workers)
     volumes:
       - .:/app
-      - C:\Users\Test\.config\discord-bot\personas\personas.yaml:/root/.config/discord-bot/personas/personas.yaml:ro
+      - C:\Users\Test\.config\swarm\personas\personas.yaml:/root/.config/swarm/personas/personas.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro  # For DockerApiBackend
     depends_on:
-      - manager
+      - redis
     environment:
       - METRICS_PORT=9200
       - USE_DISTRIBUTED_WORKERS=true
@@ -122,36 +134,29 @@ services:
       start_period: 90s
     restart: unless-stopped
 
-  manager:
-    build:
-      context: .
-      target: runtime-bot
-    container_name: manager
-    env_file:
-      - .env
-    # Job orchestrator and callback handler
-    entrypoint: ["/usr/local/bin/entrypoint.manager.sh"]
-    environment:
-      - METRICS_PORT=9150
-      # --- Logging Configuration ---
-      - LOG_FORMAT=json
-      - LOG_TO_FILE=0
+  # Flower for Celery monitoring
+  flower:
+    image: mher/flower:2.0
+    container_name: flower
+    command:
+      - celery
+      - --broker=redis://redis:6379/0
+      - flower
+      - --port=5555
+      - --url_prefix=
     ports:
-      - "9150:9150"      # Manager metrics
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - FLOWER_UNAUTHENTICATED_API=true
+    depends_on:
+      - redis
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - >
-          import urllib.request,sys;
-          sys.exit(0 if urllib.request.urlopen(
-            'http://localhost:9150/metrics', timeout=5
-          ).getcode() == 200 else 1)
+      test: ["CMD", "wget", "-qO-", "http://localhost:5555/healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
     restart: unless-stopped
 
   # Worker service commented out - workers created dynamically by autoscaler
@@ -200,7 +205,7 @@ services:
   # TEMPLATE: To add a special worker, copy this block and adjust as needed
   # worker-special:
   #   build: .
-  #   container_name: discord-worker-special
+  #   container_name: swarm-worker-special
   #   entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
   #   depends_on:
   #     - redis
@@ -240,24 +245,28 @@ services:
     container_name: autoscaler
     env_file:
       - .env
-    # Monitors queues and scales workers
+    # Monitors Celery queues via Flower and scales workers
     stop_signal: SIGTERM
     stop_grace_period: 30s
     command:
       - python
       - -m
-      - scripts.autoscaler
-      - --orchestrator
-      - docker-api
+      - scripts.celery_autoscaler
+      - --flower-url=http://flower:5555
+      - --orchestrator=docker-api
     environment:
+      - FLOWER_URL=http://flower:5555
       - ORCHESTRATOR=docker-api
       - CHECK_INTERVAL=30
       - PYTHONPATH=/app
-      - COMPOSE_PROJECT_NAME=discordbot
+      - COMPOSE_PROJECT_NAME=swarm
       - WORKER_METRICS_PORT=9100
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - .:/app
+    depends_on:
+      - flower
+      - redis
     healthcheck:
       test:
         - CMD
@@ -269,3 +278,9 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+
+volumes:
+  redis-data:
+  grafana-data:
+  prometheus-data:
+  loki-data:
