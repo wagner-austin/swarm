@@ -77,15 +77,14 @@ class StubInteraction(AsyncMock):
     A *very* small substitute for `discord.Interaction` used by unit tests.
 
     Implements:
-      • .client       – the Bot instance
       • .user         – dummy user (allows owner checks)
       • .response.defer()
       • .followup.send()
     """
 
-    def __init__(self, *, bot: Bot):
+    def __init__(self, *, discord_bot: Bot | None = None):
         super().__init__(spec=discord.Interaction)
-        self.client = bot
+        self.client = discord_bot
         # minimal user stub: discord.py slash checks only need `.id`
         self.user = types.SimpleNamespace(id=42, mention="@tester")
 
