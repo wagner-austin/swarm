@@ -33,9 +33,9 @@ RUN python -m playwright install chromium --with-deps \
     && mv /root/.cache/ms-playwright /opt/venv/playwright-cache
 
 # ----------------------------------------------------------------------
-# Runtime stage – main bot (default)
+# Runtime stage – main swarm process (default)
 # ----------------------------------------------------------------------
-FROM python:3.12-slim AS runtime-bot
+FROM python:3.12-slim AS runtime-swarm
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
@@ -56,10 +56,9 @@ COPY --from=builder /opt/venv/playwright-cache /root/.cache/ms-playwright
 # Copy application source (but NOT entrypoint.sh)
 COPY --from=builder /app /app
 # Copy all entrypoint scripts
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY entrypoint.manager.sh /usr/local/bin/entrypoint.manager.sh
-COPY entrypoint.worker.sh /usr/local/bin/entrypoint.worker.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint.manager.sh /usr/local/bin/entrypoint.worker.sh
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY scripts/entrypoint.worker.sh /usr/local/bin/entrypoint.worker.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint.worker.sh
 
 # Single source of truth – Settings.metrics_port defaults to 9200
 ARG METRICS_PORT=9200
@@ -70,22 +69,22 @@ ENV METRICS_PORT=$METRICS_PORT
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:9200/metrics || exit 1
 
-# Default entrypoint: main Discord bot
+# Default entrypoint: main Discord frontend
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # ----------------------------------------------------------------------
 # Runtime stage – distributed worker
 # ----------------------------------------------------------------------
-FROM runtime-bot AS runtime-worker
+FROM runtime-swarm AS runtime-worker
 
 # Expose a different port for worker metrics by default
 ARG WORKER_PORT=9100
 EXPOSE $WORKER_PORT
 ENV WORKER_PORT=$WORKER_PORT
 
-# Worker entrypoint script is already copied from runtime-bot stage
+# Worker entrypoint script is already copied from runtime-swarm stage
 # Document: to use worker image, override entrypoint or use this stage
-# ENTRYPOINT ["/usr/local/bin/entrypoint.worker.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.worker.sh"]
 
 # ----------------------------------------------------------------------
 # Runtime stage – autoscaler (minimal, no GUI dependencies)
