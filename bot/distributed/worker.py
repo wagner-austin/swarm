@@ -91,8 +91,10 @@ class Worker(BaseStateMachine):
         while not self._shutdown.is_set():
             try:
                 self.set_state(WorkerState.WAITING)
+                # Use worker type as group name (strip trailing dot if present)
+                group = self.job_type_prefix.rstrip(".") if self.job_type_prefix else "all-workers"
                 job = await self.broker.consume(
-                    group=self.job_type_prefix or "all-workers",
+                    group=group,
                     consumer=self.worker_id,
                 )
                 self.set_state(WorkerState.BUSY)
@@ -236,11 +238,13 @@ async def close_all_sessions() -> None:
     logger.info("All browser and tankpit sessions closed.")
 
 
-async def handle_browser_job(job: Job) -> None:
+async def handle_browser_job(job: Job) -> dict[str, Any]:
     """
     Handle browser jobs using BrowserEngine.
     Each job is dispatched to a session-specific engine instance, keyed by session_id.
     If job.kwargs['close_session'] is True, the session is closed after the job.
+
+    Returns a dict with the result data expected by RemoteBrowserRuntime.
     """
     from bot.core.logger_setup import bind_log_context
 
@@ -257,23 +261,61 @@ async def handle_browser_job(job: Job) -> None:
         logger.error(f"No such browser method: {method_name}")
         if job.kwargs.get("close_session"):
             await cleanup_browser_session(session_id)
-        return
+        raise AttributeError(f"No such browser method: {method_name}")
+
     try:
-        filtered_kwargs = filter_kwargs_for_method(method, job.kwargs)
-        logger.info(f"[Browser:{session_id}] {method_name}(*{job.args}, **{filtered_kwargs})")
-        result = await method(*job.args, **filtered_kwargs)
-        logger.info(f"[Browser:{session_id}] Result: {result}")
+        # Special handling for screenshot method - parameter name mismatch
+        if method_name == "screenshot":
+            import base64
+            import os
+            import tempfile
+
+            # Map 'filename' from RemoteBrowserRuntime to 'path' for BrowserEngine
+            filename = job.kwargs.get("filename", "screenshot.png")
+            # Ensure filename is a string
+            if filename is None:
+                filename = "screenshot.png"
+            # Create a temporary path for the screenshot (cross-platform)
+            temp_dir = tempfile.gettempdir()
+            screenshot_path = os.path.join(temp_dir, f"{session_id}_{filename}")
+
+            logger.info(f"[Browser:{session_id}] screenshot(path={screenshot_path})")
+            await method(screenshot_path)
+
+            # Read the file and encode as base64
+            try:
+                with open(screenshot_path, "rb") as f:
+                    screenshot_bytes = f.read()
+                # Clean up the temporary file
+                os.remove(screenshot_path)
+                # Return in the format expected by RemoteBrowserRuntime
+                return {"data": base64.b64encode(screenshot_bytes).decode("utf-8")}
+            except Exception as exc:
+                logger.error(f"Failed to read screenshot file: {exc}")
+                raise
+        else:
+            # Normal method handling
+            filtered_kwargs = filter_kwargs_for_method(method, job.kwargs)
+            logger.info(f"[Browser:{session_id}] {method_name}(*{job.args}, **{filtered_kwargs})")
+            result = await method(*job.args, **filtered_kwargs)
+            logger.info(f"[Browser:{session_id}] Result: {result}")
+            # Return the raw result for other methods
+            return {"data": result} if result is not None else {}
     except Exception as exc:
         logger.exception(f"[Browser:{session_id}] Error executing {method_name}: {exc}")
-    if job.kwargs.get("close_session"):
-        await cleanup_browser_session(session_id)
+        raise
+    finally:
+        if job.kwargs.get("close_session"):
+            await cleanup_browser_session(session_id)
 
 
-async def handle_tankpit_job(job: Job) -> None:
+async def handle_tankpit_job(job: Job) -> dict[str, Any]:
     """
     Handle tankpit jobs using TankPitEngine.
     Each job is dispatched to a session-specific engine instance, keyed by session_id.
     If job.kwargs['close_session'] is True, the session is closed after the job.
+
+    Returns a dict with the result data.
     """
     from bot.core.logger_setup import bind_log_context
 
@@ -292,16 +334,21 @@ async def handle_tankpit_job(job: Job) -> None:
         logger.error(f"No such tankpit method: {method_name}")
         if job.kwargs.get("close_session"):
             await cleanup_tankpit_session(session_id)
-        return
+        raise AttributeError(f"No such tankpit method: {method_name}")
+
     try:
         filtered_kwargs = filter_kwargs_for_method(method, job.kwargs)
         logger.info(f"[Tankpit:{session_id}] {method_name}(*{job.args}, **{filtered_kwargs})")
         result = await method(*job.args, **filtered_kwargs)
         logger.info(f"[Tankpit:{session_id}] Result: {result}")
+        # Return the raw result
+        return {"data": result} if result is not None else {}
     except Exception as exc:
         logger.exception(f"[Tankpit:{session_id}] Error executing {method_name}: {exc}")
-    if job.kwargs.get("close_session"):
-        await cleanup_tankpit_session(session_id)
+        raise
+    finally:
+        if job.kwargs.get("close_session"):
+            await cleanup_tankpit_session(session_id)
 
 
 def parse_args() -> argparse.Namespace:
@@ -367,12 +414,20 @@ async def main() -> None:
     await _cleanup_orphaned_browsers()  # Clean up orphans before starting any engines
     broker = Broker(args.redis_url)
     # Ensure robust, idempotent creation of the stream and group before consuming jobs
-    group = args.job_type_prefix or "all-workers"
+    # Group name should be the worker type (e.g., "browser", "tankpit")
+    group = args.job_type_prefix.rstrip(".") if args.job_type_prefix else "all-workers"
+
+    # Determine the stream based on the worker type
+    if group in ["browser", "tankpit"]:
+        stream = f"{group}:jobs"
+    else:
+        stream = os.getenv("JOB_STREAM", "jobs")
+
     try:
-        await broker.ensure_stream_and_group(group)
+        await broker.ensure_stream_and_group(stream, group)
     except Exception as exc:
         logger.error(
-            f"Failed to create Redis consumer group '{group}' on stream. Worker will not start. Exception: {exc}"
+            f"Failed to create Redis consumer group '{group}' on stream '{stream}'. Worker will not start. Exception: {exc}"
         )
         return
     worker = Worker(broker, worker_id=args.worker_id, job_type_prefix=args.job_type_prefix)
