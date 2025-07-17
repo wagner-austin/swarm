@@ -27,6 +27,7 @@ class FakeRedisClient:
         self.hashes: dict[str, dict[bytes, bytes]] = defaultdict(dict)
         self.sets: dict[str, set[bytes]] = defaultdict(set)
         self.streams: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self.stream_groups: dict[str, set[str]] = defaultdict(set)
         self.lists: dict[str, list[str]] = defaultdict(list)
         self.expiry: dict[str, float] = {}
         self.call_history: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
@@ -182,6 +183,9 @@ class FakeRedisClient:
         if self.should_fail:
             raise ConnectionError(self.fail_message)
 
+        # Add the group to stream_groups
+        self.stream_groups[stream].add(group)
+
         await asyncio.sleep(0.001)
 
         # Simulate consumer group creation
@@ -268,14 +272,20 @@ class FakeRedisClient:
             self.lists[key].insert(0, value)
         return len(self.lists[key])
 
-    async def blpop(self, *keys: str, timeout: int = 0) -> tuple[str, str] | None:
+    async def blpop(self, keys: list[str] | str, timeout: int = 0) -> tuple[str, str] | None:
         """Simulate Redis BLPOP command."""
-        self._record_call("blpop", *keys, timeout=timeout)
+        # Handle both single key and list of keys
+        if isinstance(keys, str):
+            keys_list = [keys]
+        else:
+            keys_list = keys
+
+        self._record_call("blpop", keys_list, timeout=timeout)
         if self.should_fail:
             raise ConnectionError(self.fail_message)
 
         # Check each key for available items
-        for key in keys:
+        for key in keys_list:
             if key in self.lists and self.lists[key]:
                 value = self.lists[key].pop(0)
                 return (key, value)
@@ -313,5 +323,32 @@ class FakeRedisClient:
         self.hashes.clear()
         self.sets.clear()
         self.streams.clear()
+        self.stream_groups.clear()
         self.expiry.clear()
         self.call_history.clear()
+
+    async def aclose(self) -> None:
+        """Simulate closing the Redis connection."""
+        self._record_call("aclose")
+        # No actual cleanup needed for fake client
+
+    async def xpending(self, stream: str, group: str) -> list[Any]:
+        """Simulate Redis XPENDING command."""
+        self._record_call("xpending", stream, group)
+        if self.should_fail:
+            raise ConnectionError(self.fail_message)
+        # Return empty pending info for now
+        return [0, None, None, []]
+
+    async def xinfo_groups(self, stream: str) -> list[dict[str, Any]]:
+        """Simulate Redis XINFO GROUPS command."""
+        self._record_call("xinfo_groups", stream)
+        if self.should_fail:
+            raise ConnectionError(self.fail_message)
+        # Return basic group info
+        if stream in self.stream_groups:
+            return [
+                {"name": group, "consumers": 0, "pending": 0, "last-delivered-id": "0-0"}
+                for group in self.stream_groups[stream]
+            ]
+        return []

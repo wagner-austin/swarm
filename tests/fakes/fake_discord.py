@@ -250,7 +250,7 @@ class FakeBot:
         return self._closed
 
     async def close(self) -> None:
-        """Simulate closing the bot."""
+        """Simulate closing the swarm."""
         await asyncio.sleep(0.001)
         self._closed = True
 
@@ -259,7 +259,7 @@ class FakeBot:
         await asyncio.sleep(0.001)
 
     def add_guild(self, guild: FakeGuild) -> None:
-        """Add a guild to the bot."""
+        """Add a guild to the swarm."""
         self.guilds.append(guild)
 
     def get_guild(self, guild_id: int) -> FakeGuild | None:
