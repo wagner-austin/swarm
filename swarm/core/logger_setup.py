@@ -195,15 +195,6 @@ DEFAULT_LOGGING_CONFIG: dict[str, Any] = {
             "show_path": False,
             "rich_tracebacks": True,
         },
-        # optional rotating file – enable with LOG_TO_FILE=1 (local debug)
-        "file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "logs/swarm.log",
-            "maxBytes": 20_000_000,
-            "backupCount": 3,
-            "formatter": "json",
-            "filters": ["dedupe", "context"],
-        },
     },
     "root": {"handlers": ["stdout"], "level": "INFO"},
 }
@@ -259,7 +250,30 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
     if log_format == "pretty":
         config["root"]["handlers"] = ["rich"]
     if os.getenv("LOG_TO_FILE"):
-        config["root"]["handlers"].append("file")
+        # Dynamically create file handler when requested
+        log_file = os.getenv("LOG_FILE_PATH", "logs/swarm.log")
+        log_dir = os.path.dirname(log_file)
+        
+        # Create directory if needed
+        add_file_handler = True
+        if log_dir:
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+            except (OSError, PermissionError) as e:
+                warnings.warn(f"Cannot create log directory {log_dir}: {e}. File logging disabled.")
+                add_file_handler = False
+        
+        # Add file handler configuration dynamically
+        if add_file_handler:
+            config["handlers"]["file"] = {
+                "class": "logging.handlers.RotatingFileHandler",
+                "filename": log_file,
+                "maxBytes": 20_000_000,
+                "backupCount": 3,
+                "formatter": "json",
+                "filters": ["dedupe", "context"],
+            }
+            config["root"]["handlers"].append("file")
 
     # Check for empty or missing handlers in overall config or in the root logger.
     if (

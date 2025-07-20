@@ -19,7 +19,6 @@ pydantic-settings = "*"
 playwright = ">=1.44"   # single install; run `playwright install chromium` post-deploy
 "discord.py" = {version = ">=2.3", extras = ["voice"]}
 # --- proxy and websocket support ---
-mitmproxy = ">=10.0.0"         # MITM TLS proxy (modern API)
 aiohttp = ">=3.12.11"
 aiohappyeyeballs = ">=2.6.1"
 # --- compatibility pins ---

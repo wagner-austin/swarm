@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
-
 from celery.result import AsyncResult
+
 from swarm.core.containers import Container
 from swarm.distributed.celery_browser import CeleryBrowserRuntime
 from swarm.plugins.commands.web import Web

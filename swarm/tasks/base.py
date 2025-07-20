@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from celery import Task
+
 from swarm.celery_app import app
 
 if TYPE_CHECKING:

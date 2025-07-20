@@ -19,7 +19,6 @@ from datetime import datetime
 
 import aiohttp
 import redis.asyncio as redis_asyncio
-
 from celery import Celery
 from celery.result import AsyncResult
 
