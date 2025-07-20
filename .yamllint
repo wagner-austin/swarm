@@ -1,3 +1,4 @@
+# yamllint disable rule:new-lines rule:new-line-at-end-of-file
 ---
 extends: default
 
@@ -6,6 +7,7 @@ rules:
     max: 120
     level: warning
   new-lines:
-    type: unix  # Accept only unix line endings
+    type: platform  # Accept the platform's default line endings (unix on Linux/macOS, dos on Windows)
+
   truthy:
     allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']

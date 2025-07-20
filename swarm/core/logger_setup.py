@@ -253,7 +253,7 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
         # Dynamically create file handler when requested
         log_file = os.getenv("LOG_FILE_PATH", "logs/swarm.log")
         log_dir = os.path.dirname(log_file)
-        
+
         # Create directory if needed
         add_file_handler = True
         if log_dir:
@@ -262,7 +262,7 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
             except (OSError, PermissionError) as e:
                 warnings.warn(f"Cannot create log directory {log_dir}: {e}. File logging disabled.")
                 add_file_handler = False
-        
+
         # Add file handler configuration dynamically
         if add_file_handler:
             config["handlers"]["file"] = {
