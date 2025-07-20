@@ -14,9 +14,9 @@ import os
 import ssl
 from typing import Any
 
+from celery import Celery
 from kombu import Queue
 
-from celery import Celery
 from swarm.core.settings import Settings
 
 logger = logging.getLogger(__name__)

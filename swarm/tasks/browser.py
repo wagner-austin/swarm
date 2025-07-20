@@ -25,8 +25,8 @@ from typing import (
 )
 
 import redis.asyncio as redis_asyncio
-
 from celery import Celery, Task, group
+
 from swarm.browser.engine import BrowserEngine
 from swarm.celery_app import app
 from swarm.core.settings import Settings

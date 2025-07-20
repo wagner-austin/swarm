@@ -33,6 +33,7 @@ import sys
 from typing import List, Literal
 
 from celery import Celery
+
 from swarm.celery_app import app
 from swarm.core.logger_setup import setup_logging
 
