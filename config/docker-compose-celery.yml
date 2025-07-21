@@ -60,7 +60,8 @@ services:
       - ../.env
     volumes:
       - ..:/app
-      - C:\\Users\\Test\\.config\\swarm\\personas\\personas.yaml:/root/.config/swarm/personas/personas.yaml:ro
+      # Optional: Mount personas config for testing
+      # - ${PERSONAS_CONFIG_PATH:-../config/personas.yaml}:/root/.config/swarm/personas/personas.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - METRICS_PORT=9200

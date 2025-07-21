@@ -106,7 +106,9 @@ services:
     # Discord frontend (no local workers)
     volumes:
       - .:/app
-      - C:\Users\Test\.config\swarm\personas\personas.yaml:/root/.config/swarm/personas/personas.yaml:ro
+      # Optional: Mount personas config if you have one locally
+      # Uncomment and adjust the path below if you want to use a custom personas file:
+      # - ${PERSONAS_CONFIG_PATH:-./config/personas.yaml}:/root/.config/swarm/personas/personas.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro  # For DockerApiBackend
     depends_on:
       - redis
