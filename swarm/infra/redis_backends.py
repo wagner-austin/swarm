@@ -281,6 +281,10 @@ class FallbackRedisBackend:
             asyncio.create_task(self._try_primary())
 
         return self.fallback if self._using_fallback else self.primary
+    
+    def get_current_url(self) -> str:
+        """Get the URL of the currently active backend."""
+        return self._current_backend.url
 
     async def connect(self) -> None:
         """Connect to primary, fallback if it fails."""
