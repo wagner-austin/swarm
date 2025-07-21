@@ -6,11 +6,19 @@
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# Windows shell fix – use Git sh so recipes support $(...) and pipes
+# Windows shell fix – detect and use appropriate shell
 # ---------------------------------------------------------------------------
 ifeq ($(OS),Windows_NT)
-SHELL := sh
-.SHELLFLAGS := -c
+    # Try common Git Bash locations
+    POSSIBLE_SHELLS := \
+        "C:/Program Files/Git/bin/bash.exe" \
+        "C:/Program Files/Git/usr/bin/bash.exe" \
+        "C:/Program Files (x86)/Git/bin/bash.exe" \
+        "C:/Git/bin/bash.exe"
+    
+    # Find the first existing shell
+    SHELL := $(firstword $(foreach s,$(POSSIBLE_SHELLS),$(wildcard $(s))) sh)
+    .SHELLFLAGS := -c
 endif
 
 # ---------------------------------------------------------------------------
@@ -29,8 +37,12 @@ SWARM_TEST_MODE  := $(RUN) pytest -rsxv
 # Meta / docs
 # ---------------------------------------------------------------------------
 help:               ## show this help message
+ifeq ($(OS),Windows_NT)
+	@$(PYTHON) -c "import re; lines = open('$(MAKEFILE_LIST)', encoding='utf-8').readlines(); targets = [(m.group(1), m.group(2)) for line in lines for m in [re.match(r'^([a-zA-Z_-]+):.*?##\s*(.*)$$', line)] if m]; [print(f' {t[0]:12} {t[1]}') for t in targets]"
+else
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
 	 awk 'BEGIN {FS = ":.*?##"}; {printf " \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+endif
 
 # ---------------------------------------------------------------------------
 # Environment / dependencies
@@ -194,17 +206,7 @@ build: install              ## build wheel / sdist
 	$(POETRY) build
 
 clean: install              ## remove Python / tool caches
-	@$(RUN) python - <<-'PY'
-	import pathlib, shutil, sys
-	root = pathlib.Path('.')
-	patterns = ["__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", "*.egg-info"]
-	for pat in patterns:
-		for p in root.rglob(pat):
-			try:
-				shutil.rmtree(p) if p.is_dir() else p.unlink()
-			except Exception as e:
-				print("cannot delete", p, "->", e, file=sys.stderr)
-	PY
+	-@$(RUN) python -c "import pathlib, shutil; [(shutil.rmtree(p) if p.is_dir() else p.unlink()) if p.exists() else None for pattern in ['__pycache__', '.pytest_cache', '.ruff_cache', '.mypy_cache', '*.egg-info'] for p in pathlib.Path('.').rglob(pattern)]; print('Cleaned cache files')"
 
 # Use savecode to save files
 savecode:
