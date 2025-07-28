@@ -74,7 +74,13 @@ check: lint test docker-status
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-test: install                ## run pytest suite
+compose-test:                ## start test stack (local Redis only, no Upstash)
+	docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --force-recreate redis haproxy-redis flower autoscaler swarm
+	@echo "⏳ Waiting for services to be healthy..."
+	@$(PYTHON) -c "import time; time.sleep(5)"
+	docker compose ps
+
+test: install compose-test   ## run pytest suite with test stack
 	$(PYTEST)
 
 # ---------------------------------------------------------------------------
@@ -130,7 +136,13 @@ build-swarm:
 
 build: build-swarm  ## alias for build-swarm
 
-compose-up:            ## start local dev services via docker compose (Redis)
+docker-clean-build:  ## Clean Docker build cache and rebuild (fixes snapshot errors)
+	@echo "🧹 Cleaning Docker build cache to fix snapshot errors..."
+	docker builder prune -af
+	@echo "🔨 Rebuilding all services without cache..."
+	docker compose build --no-cache
+
+compose-up: haproxy-config  ## start local dev services via docker compose (Redis + HAProxy)
 	docker compose up -d
 
 compose-recreate:      ## recreate swarm container (after config change)
@@ -146,6 +158,20 @@ compose-down:          ## stop and remove docker compose services
 
 docker-status:         ## show status of docker compose services
 	docker compose ps
+
+# HAProxy Redis Failover
+haproxy-up:            ## start services with HAProxy Redis proxy
+	docker compose -f docker-compose.yml -f docker-compose.haproxy.yml up -d
+
+haproxy-config:        ## generate HAProxy config from Redis URLs
+	@poetry run python scripts/generate_haproxy_config.py
+
+haproxy-test:          ## test HAProxy Redis failover
+	@poetry run python scripts/test_haproxy_failover.py
+
+haproxy-stats:         ## open HAProxy stats dashboard
+	@echo "Opening HAProxy stats at http://localhost:8080/stats"
+	@python -m webbrowser http://localhost:8080/stats || true
 
 # ---------------------------------------------------------------------------
 # Bot container manual reload workflow
