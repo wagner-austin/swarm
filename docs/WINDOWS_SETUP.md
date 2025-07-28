@@ -42,6 +42,34 @@ This guide helps Windows developers set up the Swarm project without common issu
 - The file handler is now only created when LOG_TO_FILE environment variable is set
 - No action needed for normal development
 
+### 4. Pytest Permission Errors
+
+**Problem**: Windows pytest temp directories become corrupted with permission errors, preventing tests from running.
+
+**Root Cause**: 
+- Pytest temp directories at `C:\Users\<username>\AppData\Local\Temp\pytest-of-<username>` and `.pytest_cache` in the project directory can become locked
+- Usually caused by forcefully terminated pytest runs or antivirus scanning
+
+**Solution**: 
+- Delete both directories manually:
+  ```powershell
+  # Remove pytest temp directory
+  Remove-Item -Path "$env:TEMP\pytest-of-$env:USERNAME" -Recurse -Force -ErrorAction SilentlyContinue
+  
+  # Remove project pytest cache
+  Remove-Item -Path ".pytest_cache" -Recurse -Force -ErrorAction SilentlyContinue
+  ```
+- Run `make clean` or `poetry run python -c "import pathlib, shutil; [(shutil.rmtree(p) if p.is_dir() else p.unlink()) if p.exists() else None for pattern in ['__pycache__', '.pytest_cache', '.ruff_cache', '.mypy_cache', '*.egg-info'] for p in pathlib.Path('.').rglob(pattern)]"`
+
+### 5. Docker Compose Path Issues
+
+**Problem**: Docker Compose files may contain hardcoded paths that don't work across different systems.
+
+**Solution**: 
+- The project now uses environment variables for paths: `${PERSONAS_CONFIG_PATH:-./config/personas.yaml}`
+- Persona mounts are optional (commented out by default)
+- No action needed unless you want to use personas
+
 ## Quick Start
 
 ```powershell
@@ -67,6 +95,15 @@ make check  # or poetry run pytest
 
 ## Makefile on Windows
 
-The Makefile is configured to work with Git Bash. If you have issues:
+The Makefile has been updated for better Windows compatibility:
+- Automatically detects and uses Git Bash if available
+- Falls back to `sh` if Git Bash is not found
+- Fixed the `make clean` command to work on Windows
+- Removed Unix-specific commands like heredocs
+
+If you still have issues:
 - Use Poetry commands directly: `poetry run pytest` instead of `make test`
-- Or ensure Git Bash is in your PATH
+- Or ensure Git Bash is installed and in standard locations:
+  - `C:\Program Files\Git\bin\bash.exe`
+  - `C:\Program Files\Git\usr\bin\bash.exe`
+  - `C:\Program Files (x86)\Git\bin\bash.exe`

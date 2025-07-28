@@ -18,11 +18,14 @@ Building an AI-powered task execution system capable of handling complex, real-w
 5. **Massively Scalable**: Support hundreds of concurrent workers across multiple machines
 6. **Observable**: Full visibility into task progress, worker status, and system health
 
-## Current Implementation Status (2025-07-17)
+## Current Implementation Status (2025-07-28)
 - ✅ Migrated from custom broker to Celery distributed task queue
 - ✅ Fixed job lifecycle with proper retry/timeout handling via Celery
 - ✅ Autoscaler now uses Flower API for accurate queue monitoring
 - ✅ Workers can be scaled from zero (no chicken-and-egg problem)
+- ✅ Implemented HAProxy for automatic Redis failover (Upstash ↔ local Redis)
+- ✅ All services now use HAProxy endpoint (port 6380) for resilience
+- ✅ Created test-specific Docker profile to avoid Upstash rate limits
 - ⏳ System is still Discord-channel-centric instead of task-centric
 - ⏳ No task planning or decomposition logic yet
 - ⏳ Workers are type-based (browser, tankpit) instead of capability-based

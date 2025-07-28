@@ -11,14 +11,14 @@ The Discord integration uses a distributed architecture where Discord commands t
 When a user runs a command like `/web start`:
 
 ```
-User -> Discord -> Swarm -> RemoteBrowserRuntime -> Broker -> Redis Stream
+User -> Discord -> Swarm -> CeleryBrowserRuntime -> Celery -> Redis (via HAProxy)
 ```
 
 1. User executes `/web start` in Discord
 2. The Web cog receives the interaction
-3. `RemoteBrowserRuntime.start()` creates a job
-4. Broker publishes the job to Redis stream (`jobs` or `browser:jobs`)
-5. Job waits in the queue
+3. `CeleryBrowserRuntime.start()` creates a Celery task
+4. Celery publishes the task to Redis queue via HAProxy (port 6380)
+5. Task waits in the queue
 
 ### 2. Worker Scaling Flow
 
@@ -38,24 +38,24 @@ Autoscaler -> ScalingService -> Redis (check queues) -> ScalingBackend -> Docker
 Once workers exist:
 
 ```
-Worker -> Broker.consume() -> Process Job -> Redis (result) -> User gets response
+Worker -> Celery Worker -> Process Task -> Redis (result) -> User gets response
 ```
 
 ## Key Components
 
-### Autoscaler Service (`scripts/autoscaler.py`)
+### Autoscaler Service (`scripts/celery_autoscaler.py`)
 
 **This service MUST be running for automatic scaling to work!**
 
 ```bash
-# Run the autoscaler
-python -m scripts.autoscaler --orchestrator docker-compose
+# Run the Celery autoscaler
+python -m scripts.celery_autoscaler --flower-url http://localhost:5555
 
 # Or with environment variables
-REDIS_URL=redis://localhost:6379 \
-ORCHESTRATOR=kubernetes \
+FLOWER_URL=http://localhost:5555 \
+ORCHESTRATOR=docker-api \
 CHECK_INTERVAL=30 \
-python -m scripts.autoscaler
+python -m scripts.celery_autoscaler
 ```
 
 ### Scaling Configuration
@@ -82,6 +82,13 @@ Each worker type has scaling thresholds in `DistributedConfig`:
 
 ## Important Notes
 
+### Redis High Availability via HAProxy
+
+All services connect to Redis through HAProxy (port 6380) which provides:
+- Automatic failover between Upstash (primary) and local Redis (backup)
+- Health checks every 3 seconds
+- Transparent to all services - they just connect to `haproxy-redis:6380`
+
 ### Workers Are NOT Created Automatically!
 
 1. **Discord commands only create jobs** - they don't create workers
@@ -93,7 +100,7 @@ Each worker type has scaling thresholds in `DistributedConfig`:
 To test if scaling works:
 
 1. Start with no workers: `docker-compose down`
-2. Start the autoscaler: `python -m scripts.autoscaler`
+2. Start the autoscaler: `python -m scripts.celery_autoscaler`
 3. Run a Discord command: `/web start`
 4. Watch the autoscaler logs - it should detect the job and scale up
 5. Check workers: `docker-compose ps`

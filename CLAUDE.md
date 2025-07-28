@@ -143,7 +143,7 @@ Successfully implemented three scaling backends:
    - Added comprehensive type annotations to tests
    
 3. **Integration Updates**:
-   - `autoscaler.py`: Now properly uses the backends with type safety
+   - `celery_autoscaler.py`: Uses Flower API for queue monitoring
    - `orchestrator.py`: Updated to use `check_and_scale_all()` method
    - Both handle None backend cases gracefully
 
@@ -154,7 +154,7 @@ Successfully implemented three scaling backends:
   - `test_pool.py` - Tests worker pool management
   - `test_scaling_service.py` - Tests ScalingService with FakeScalingBackend
   - `test_backends.py` - Tests backend implementations (uses subprocess mocking)
-  - `test_autoscaler.py` - Tests the production autoscaler script
+  - `test_celery_autoscaler.py` - Tests the Celery autoscaler script
   - `test_scaling_integration.py` - Integration tests for complete scaling flow
 - Fake implementations in `tests/fakes/`:
   - `fake_redis.py` (FakeRedisClient)
@@ -198,7 +198,7 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 
 ### Integration Tests
 - **test_scaling_integration.py**: Complete scaling flow with dependency injection
-- **test_autoscaler.py**: Production autoscaler service testing
+- **test_celery_autoscaler.py**: Celery autoscaler service testing
 - Tests job timeout scenarios when no workers exist
 - Tests autoscaler creating workers on demand
 
