@@ -2,6 +2,12 @@
 ---
 extends: default
 
+ignore: |
+  .venv/
+  venv/
+  node_modules/
+  __pycache__/
+
 rules:
   line-length:
     max: 120

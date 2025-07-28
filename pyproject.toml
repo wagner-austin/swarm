@@ -84,8 +84,8 @@ disallow_untyped_defs = true
 # ------------------------------------------------------------------
 [tool.ruff]
 line-length = 100
-# Target the same runtime we deploy on
-target-version = "py312"
+# Target Python 3.11 for compatibility
+target-version = "py311"
 
 [tool.ruff.lint]
 # Pycodestyle, Pyflakes, isort, PyUpgrade
