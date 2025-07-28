@@ -17,7 +17,6 @@ async def redis_backend() -> AsyncGenerator[RedisBackend, None]:
 
     Uses the production Redis infrastructure with automatic failover.
     """
-    from swarm.infra.redis_factory import create_redis_backend
 
     settings = Settings()
 
@@ -25,16 +24,13 @@ async def redis_backend() -> AsyncGenerator[RedisBackend, None]:
     if not getattr(settings.redis, "enabled", False):
         pytest.skip("Redis is not enabled in test settings")
 
-    # Create backend using the production factory (with automatic failover)
+    # Create backend using test Redis URL when in test environment
     try:
-        infra_backend = create_redis_backend(settings)
-        await infra_backend.connect()
+        # Use test Redis URL from environment or default to local Redis
+        test_redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-        # Get the active URL from the infrastructure backend
-        active_url = infra_backend.url
-
-        # Create history backend with the active URL
-        backend = RedisBackend(active_url, max_turns=5)
+        # Create history backend with test URL
+        backend = RedisBackend(test_redis_url, max_turns=5)
 
         # Test connection
         await backend.clear(999999, "test_persona")
@@ -43,7 +39,6 @@ async def redis_backend() -> AsyncGenerator[RedisBackend, None]:
 
         # Cleanup
         await backend.clear(999999, "test_persona")
-        await infra_backend.disconnect()
 
     except Exception as e:
         pytest.skip(f"Redis not available: {e}")
@@ -51,26 +46,28 @@ async def redis_backend() -> AsyncGenerator[RedisBackend, None]:
 
 @pytest.mark.asyncio
 async def test_redis_backend_persists_across_instances(redis_backend: RedisBackend) -> None:
-    from swarm.infra.redis_factory import create_redis_backend
+    """Test that history persists across different backend instances.
+
+    This test verifies that Redis persistence works correctly by creating
+    two separate backend instances that connect to the same Redis server.
+    """
+    # Get the URL from the existing backend to ensure consistency
+    redis_url = redis_backend.url
 
     # Simulate writing history in one instance
     channel = 999999
     persona = "test_persona"
     turn1 = ("hello", "world")
     turn2 = ("foo", "bar")
+
     await redis_backend.record(channel, persona, turn1)
     await redis_backend.record(channel, persona, turn2)
 
-    # Simulate a new instance (new backend object, same Redis)
-    # Use the same production factory to get consistent failover behavior
-    infra_backend2 = create_redis_backend()
-    await infra_backend2.connect()
-    active_url2 = infra_backend2.url
-    new_backend = RedisBackend(active_url2, max_turns=5)
+    # Simulate a new instance using the same Redis URL
+    new_backend = RedisBackend(redis_url, max_turns=5)
 
     history = await new_backend.recent(channel, persona)
     assert history[-2:] == [turn1, turn2], f"Expected last two turns to persist, got: {history}"
 
     # Clean up
     await new_backend.clear(channel, persona)
-    await infra_backend2.disconnect()

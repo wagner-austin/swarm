@@ -23,6 +23,7 @@ class RedisBackend(HistoryBackend):
     """Redis-based implementation of :class:`HistoryBackend`."""
 
     def __init__(self, url: str, max_turns: int) -> None:
+        self.url: str = url  # Store URL for introspection
         self._max_turns = max_turns
         # Decode responses (str) so we get strings not bytes.  Cast keeps mypy strict happy.
         self._r: RedisT = cast(
