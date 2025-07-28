@@ -14,6 +14,26 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # HAProxy provides automatic Redis failover between Upstash and local Redis
+  haproxy-redis:
+    build:
+      context: .
+      dockerfile: Dockerfile.haproxy
+    container_name: haproxy-redis
+    environment:
+      # HAProxy reads the real Redis URLs from .env to know which backends to proxy
+      # This is the ONLY service that should see the real Redis URLs
+      - CELERY_BROKER_URLS=${CELERY_BROKER_URLS}
+      - HAPROXY_CONFIG_OUTPUT=/config/haproxy-redis-generated.cfg
+    volumes:
+      - ./config:/config
+    ports:
+      - "6380:6380"  # HAProxy Redis endpoint with automatic failover
+      - "8080:8080"  # HAProxy stats dashboard
+    depends_on:
+      - redis
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -112,12 +132,16 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro  # For DockerApiBackend
     depends_on:
       - redis
+      - haproxy-redis
     environment:
       - METRICS_PORT=9200
       - USE_DISTRIBUTED_WORKERS=true
       # --- Logging Configuration ---
       - LOG_FORMAT=json
       - LOG_TO_FILE=0
+      # Use HAProxy for Redis failover
+      - REDIS_URL=redis://haproxy-redis:6380/0
+      - CELERY_BROKER_URLS=redis://haproxy-redis:6380/0
     ports:
       - "9200:9200"      # Prometheus metrics
     healthcheck:
@@ -142,18 +166,21 @@ services:
     container_name: flower
     command:
       - celery
-      - --broker=redis://redis:6379/0
+      - --broker=redis://haproxy-redis:6380/0
       - flower
       - --port=5555
       - --url_prefix=
     ports:
       - "5555:5555"
     environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # Flower connects through HAProxy for automatic Redis failover
+      # NOTE: We don't use env_file here because it would override these HAProxy URLs
+      - CELERY_BROKER_URL=redis://haproxy-redis:6380/0
+      - CELERY_RESULT_BACKEND=redis://haproxy-redis:6380/0
       - FLOWER_UNAUTHENTICATED_API=true
     depends_on:
       - redis
+      - haproxy-redis
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:5555/healthcheck"]
       interval: 30s
@@ -177,7 +204,8 @@ services:
   #   environment:
   #     - METRICS_PORT=9100
   #     - DISPLAY=:99
-  #     - REDIS_URL=redis://redis:6379/0
+  #     - REDIS_URL=redis://haproxy-redis:6380/0
+  #     - CELERY_BROKER_URLS=redis://haproxy-redis:6380/0
   #     # --- Logging Configuration ---
   #     - LOG_FORMAT=json
   #     - LOG_TO_FILE=0
@@ -211,10 +239,12 @@ services:
   #   entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
   #   depends_on:
   #     - redis
+  #     - haproxy-redis
   #   environment:
   #     - WORKER_PORT=9110
   #     - DISPLAY=:99
-  #     - REDIS_URL=redis://redis:6379/0
+  #     - REDIS_URL=redis://haproxy-redis:6380/0
+  #     - CELERY_BROKER_URLS=redis://haproxy-redis:6380/0
   #     - WORKER_ID=worker-special
   #     - JOB_TYPE_PREFIX=tankpit
   #     - LOG_LEVEL=debug
@@ -263,12 +293,16 @@ services:
       - PYTHONPATH=/app
       - COMPOSE_PROJECT_NAME=swarm
       - WORKER_METRICS_PORT=9100
+      # Use HAProxy for Redis failover
+      - REDIS_URL=redis://haproxy-redis:6380/0
+      - CELERY_BROKER_URLS=redis://haproxy-redis:6380/0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - .:/app
     depends_on:
       - flower
       - redis
+      - haproxy-redis
     healthcheck:
       test:
         - CMD

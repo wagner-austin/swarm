@@ -1,0 +1,30 @@
+---
+# docker-compose.test.yml
+# Test-specific overrides that use only local Redis (no Upstash)
+# This prevents rate limit issues and authentication problems in tests
+
+services:
+  haproxy-redis:
+    environment:
+      # Override to use only local Redis - no Upstash
+      # Same URL repeated so HAProxy has primary/backup but both point to local
+      CELERY_BROKER_URLS: "redis://redis:6379/0;redis://redis:6379/0"
+      HAPROXY_CONFIG_OUTPUT: /config/haproxy-redis-generated.cfg
+
+  autoscaler:
+    environment:
+      # Point to local Redis only
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URLS: "redis://redis:6379/0;redis://redis:6379/0"
+
+  swarm:
+    environment:
+      # Override Redis URLs to use local Redis only
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URLS: "redis://redis:6379/0;redis://redis:6379/0"
+
+  flower:
+    environment:
+      # Flower also uses local Redis only
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
