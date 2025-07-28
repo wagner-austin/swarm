@@ -1,8 +1,9 @@
 """
-Typed wrappers for Redis stream commands.
+Typed wrappers for Redis stream commands and utilities.
 
 These provide proper type annotations for Redis stream operations
-that aren't fully typed in the redis-py library.
+that aren't fully typed in the redis-py library, as well as
+compatibility helpers for different redis-py versions.
 """
 
 from typing import Any
@@ -27,3 +28,20 @@ async def xinfo_groups(redis: RedisBytes, stream: str) -> list[dict[str, Any]]:
     """Get information about consumer groups for a stream."""
     groups = await redis.xinfo_groups(stream)
     return [dict(group) for group in groups] if groups else []
+
+
+async def async_close_redis(client: Any) -> None:
+    """
+    Close an async redis-py client in a mypy-safe way.
+
+    * redis-py 5.x: prefers `aclose()`
+    * Older versions / stale stubs: only `close()`
+
+    This helper exists because redis-py >= 5.0 offers aclose(), but the type stubs
+    (and therefore mypy) haven't caught up yet. This provides a single, clean
+    compatibility layer instead of scattering type: ignore comments everywhere.
+    """
+    if hasattr(client, "aclose"):  # new API
+        await client.aclose()
+    else:  # fallback / older stubs
+        await client.close()
