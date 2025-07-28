@@ -22,6 +22,8 @@ import redis.asyncio as redis_asyncio
 from celery import Celery
 from celery.result import AsyncResult
 
+from swarm.infra import async_close_redis
+
 # Add project root to path
 sys.path.insert(0, "/app")
 
@@ -43,7 +45,7 @@ async def test_redis_connection() -> bool:
         print(f"   Found {len(queues)} Celery queue bindings")
 
         # Close the connection properly
-        await r.close()
+        await async_close_redis(r)
         return True
     except Exception as e:
         print(f"❌ Redis connection failed: {e}")

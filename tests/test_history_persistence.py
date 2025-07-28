@@ -12,27 +12,47 @@ from swarm.history.redis_backend import RedisBackend
 
 @pytest_asyncio.fixture(scope="function")
 async def redis_backend() -> AsyncGenerator[RedisBackend, None]:
+    """
+    Fixture that provides a Redis backend for testing.
+
+    Uses the production Redis infrastructure with automatic failover.
+    """
+    from swarm.infra.redis_factory import create_redis_backend
+
     settings = Settings()
-    url = getattr(settings.redis, "url", None)
-    if not getattr(settings.redis, "enabled", False) or not isinstance(url, str) or not url:
-        pytest.skip("Redis is not enabled or url is invalid in test settings")
-    backend = RedisBackend(url, max_turns=5)
+
+    # Check if Redis is enabled in settings
+    if not getattr(settings.redis, "enabled", False):
+        pytest.skip("Redis is not enabled in test settings")
+
+    # Create backend using the production factory (with automatic failover)
     try:
+        infra_backend = create_redis_backend(settings)
+        await infra_backend.connect()
+
+        # Get the active URL from the infrastructure backend
+        active_url = infra_backend.url
+
+        # Create history backend with the active URL
+        backend = RedisBackend(active_url, max_turns=5)
+
+        # Test connection
         await backend.clear(999999, "test_persona")
+
+        yield backend
+
+        # Cleanup
+        await backend.clear(999999, "test_persona")
+        await infra_backend.disconnect()
+
     except Exception as e:
-        if "max requests limit exceeded" in str(e):
-            pytest.skip(f"Redis rate limit exceeded: {e}")
-        raise
-    yield backend
-    try:
-        await backend.clear(999999, "test_persona")
-    except Exception:
-        # Best effort cleanup, ignore errors
-        pass
+        pytest.skip(f"Redis not available: {e}")
 
 
 @pytest.mark.asyncio
 async def test_redis_backend_persists_across_instances(redis_backend: RedisBackend) -> None:
+    from swarm.infra.redis_factory import create_redis_backend
+
     # Simulate writing history in one instance
     channel = 999999
     persona = "test_persona"
@@ -42,12 +62,15 @@ async def test_redis_backend_persists_across_instances(redis_backend: RedisBacke
     await redis_backend.record(channel, persona, turn2)
 
     # Simulate a new instance (new backend object, same Redis)
-    settings = Settings()
-    url = getattr(settings.redis, "url", None)
-    assert isinstance(url, str) and url, "Test requires a valid Redis URL"
-    new_backend = RedisBackend(url, max_turns=5)
+    # Use the same production factory to get consistent failover behavior
+    infra_backend2 = create_redis_backend()
+    await infra_backend2.connect()
+    active_url2 = infra_backend2.url
+    new_backend = RedisBackend(active_url2, max_turns=5)
+
     history = await new_backend.recent(channel, persona)
     assert history[-2:] == [turn1, turn2], f"Expected last two turns to persist, got: {history}"
 
     # Clean up
     await new_backend.clear(channel, persona)
+    await infra_backend2.disconnect()

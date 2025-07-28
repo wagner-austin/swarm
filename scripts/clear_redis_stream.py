@@ -3,6 +3,8 @@ import asyncio
 
 import redis.asyncio as redis_asyncio
 
+from swarm.infra import async_close_redis
+
 
 async def clear_stream() -> None:
     r = redis_asyncio.from_url("redis://localhost:6379/0", decode_responses=True)
@@ -15,7 +17,7 @@ async def clear_stream() -> None:
     await r.xgroup_create("jobs", "all-workers", id="$", mkstream=True)
     print("Recreated empty stream and consumer group")
 
-    await r.close()
+    await async_close_redis(r)
 
 
 if __name__ == "__main__":

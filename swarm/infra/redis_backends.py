@@ -21,6 +21,7 @@ from redis.exceptions import ResponseError
 
 from swarm.core.exceptions import RedisConnectionError, RedisRateLimitError
 from swarm.core.telemetry import REGISTRY
+from swarm.infra.redis_stream_utils import async_close_redis
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,12 @@ class RedisBackend(Protocol):
 
     @property
     @abstractmethod
+    def url(self) -> str:
+        """Redis connection URL."""
+        ...
+
+    @property
+    @abstractmethod
     def is_healthy(self) -> bool:
         """Check if backend is currently healthy."""
         ...
@@ -86,7 +93,7 @@ class BaseRedisBackend(ABC):
     """Base implementation for Redis backends with common functionality."""
 
     def __init__(self, url: str, max_retries: int = 3, retry_delay: float = 1.0):
-        self.url = url
+        self._url = url
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self._client: Redis[Any] | None = None
@@ -97,6 +104,11 @@ class BaseRedisBackend(ABC):
         self._circuit_breaker_threshold = 5
         self._circuit_breaker_reset_time = 60.0
         self._circuit_open_until = 0.0
+
+    @property
+    def url(self) -> str:
+        """Redis connection URL."""
+        return self._url
 
     @property
     @abstractmethod
@@ -118,7 +130,7 @@ class BaseRedisBackend(ABC):
 
         try:
             self._client = redis.from_url(
-                self.url,
+                self._url,
                 decode_responses=True,
                 socket_keepalive=True,
                 socket_keepalive_options={
@@ -142,7 +154,7 @@ class BaseRedisBackend(ABC):
     async def disconnect(self) -> None:
         """Close Redis connection."""
         if self._client:
-            await self._client.close()
+            await async_close_redis(self._client)
             self._client = None
             logger.info(f"{self.name} backend disconnected")
 
@@ -281,8 +293,9 @@ class FallbackRedisBackend:
             asyncio.create_task(self._try_primary())
 
         return self.fallback if self._using_fallback else self.primary
-    
-    def get_current_url(self) -> str:
+
+    @property
+    def url(self) -> str:
         """Get the URL of the currently active backend."""
         return self._current_backend.url
 
