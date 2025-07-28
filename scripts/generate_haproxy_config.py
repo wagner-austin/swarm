@@ -127,18 +127,18 @@ backend redis_backend
     for server in servers:
         # Build server line with appropriate options
         server_line = f"server {server['name']} {server['host']}:{server['port']}"
-        
+
         # Add health check parameters
         check_inter = "2s" if server.get("is_backup") else "3s"
         check_fall = 2 if server.get("is_backup") else 3
         server_line += f" check inter {check_inter} fall {check_fall} rise 2"
-        
+
         # Add SSL options for SSL servers
         if server.get("is_ssl"):
             server_line += " ssl verify none"
             # Add check-ssl for SSL health checks
             server_line += " check-ssl"
-        
+
         # Mark backup servers
         if server.get("is_backup"):
             server_line += " backup"

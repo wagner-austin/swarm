@@ -18,8 +18,8 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 # Drop back to unprivileged user for runtime security
 USER haproxy
 
-# Health check using HAProxy stats endpoint (more reliable than port check)
-HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget -q -O /dev/null http://localhost:8080/stats || exit 1
+# Health check - verify HAProxy is proxying Redis (port 6380)
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
+    CMD nc -z 127.0.0.1 6380 || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
