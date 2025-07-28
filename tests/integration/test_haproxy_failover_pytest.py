@@ -11,7 +11,7 @@ Prerequisites:
 
 import asyncio
 import time
-from typing import Any, cast
+from typing import cast
 
 import aiohttp
 import pytest
@@ -37,18 +37,18 @@ async def test_haproxy_redis_connectivity() -> None:
     if not services_ok:
         pytest.skip(message)
 
-    # Test Redis operations through HAProxy
+    # Test Redis operations through HAProxy (no auth needed in test environment)
     client = redis.from_url("redis://localhost:6380/0", decode_responses=True)
 
     try:
         # Write test data
         test_key = "haproxy:test:key"
         test_value = f"test_value_{int(time.time())}"
-        await cast(Any, client).set(test_key, test_value)
+        await client.set(test_key, test_value)  # type: ignore[arg-type]
 
         # Read back
-        retrieved = await cast(Any, client).get(test_key)
-        assert retrieved == test_value, f"Expected {test_value}, got {retrieved}"
+        retrieved = await client.get(test_key)
+        assert retrieved == test_value, f"Expected {test_value}, got {retrieved}"  # type: ignore[comparison-overlap, str-bytes-safe]
 
     finally:
         await async_close_redis(client)
@@ -74,8 +74,10 @@ async def test_haproxy_backend_status() -> None:
     assert len(up_backends) > 0, f"No backends are UP. Stats: {stats}"
 
     # Verify backend naming convention (redis_0, redis_1, etc)
+    # Note: HAProxy stats includes "BACKEND" for aggregate stats
     backend_names = set(stats.keys())
-    for name in backend_names:
+    server_names = [name for name in backend_names if name != "BACKEND"]
+    for name in server_names:
         assert name.startswith("redis_"), f"Unexpected backend name format: {name}"
 
 
