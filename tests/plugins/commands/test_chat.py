@@ -61,7 +61,7 @@ async def test_chat_clear_history(
 @pytest.mark.asyncio
 @patch("swarm.plugins.commands.chat.safe_send")
 @patch("swarm.plugins.commands.chat._providers.get")
-@patch("swarm.plugins.commands.chat.settings", autospec=True)
+@patch("swarm.plugins.commands.chat.settings")
 async def test_chat_simple_reply(
     mock_settings: MagicMock,
     mock_get: MagicMock,

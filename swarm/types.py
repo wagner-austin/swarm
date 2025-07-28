@@ -2,7 +2,13 @@
 Common type aliases for the Swarm project.
 """
 
-from redis.asyncio import Redis as _Redis
+from typing import TYPE_CHECKING, TypeAlias
 
-# Redis type alias to avoid repeating generic parameters
-type RedisBytes = _Redis[bytes]
+from redis.asyncio import Redis
+
+if TYPE_CHECKING:
+    # For type checking, we can use the generic form
+    RedisBytes: TypeAlias = Redis[bytes]
+else:
+    # At runtime, Redis is not generic, so we use the plain class
+    RedisBytes = Redis

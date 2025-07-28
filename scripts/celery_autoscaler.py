@@ -288,6 +288,8 @@ class CeleryAutoscaler:
 
     async def cleanup(self) -> None:
         """Clean up resources."""
+        logger.info("Starting cleanup process...")
+
         if self._session:
             await self._session.close()
 
@@ -296,8 +298,13 @@ class CeleryAutoscaler:
             logger.info("Cleaning up worker containers...")
             try:
                 await self.backend.cleanup_all_workers()
+                logger.info("Worker cleanup completed successfully")
             except Exception as e:
                 logger.error(f"Error cleaning up workers: {e}")
+        else:
+            logger.warning(
+                f"Backend {type(self.backend).__name__} does not support cleanup_all_workers"
+            )
 
 
 async def main() -> None:

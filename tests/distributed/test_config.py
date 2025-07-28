@@ -110,7 +110,6 @@ class TestDistributedConfig:
         config = DistributedConfig()
 
         # Check defaults
-        assert config.redis_url == "redis://localhost:6379/0"
         assert config.metrics_port == 9000
         assert config.log_level == "INFO"
         assert config.manager_port == 9150
@@ -123,7 +122,6 @@ class TestDistributedConfig:
     def test_configuration_from_environment(self) -> None:
         """Test loading configuration from environment variables."""
         env_vars = {
-            "REDIS_URL": "redis://custom:6380/1",
             "METRICS_PORT": "8000",
             "LOG_LEVEL": "DEBUG",
             "MANAGER_PORT": "8150",
@@ -133,7 +131,6 @@ class TestDistributedConfig:
         with patch.dict(os.environ, env_vars):
             config = DistributedConfig()
 
-        assert config.redis_url == "redis://custom:6380/1"
         assert config.metrics_port == 8000
         assert config.log_level == "DEBUG"
         assert config.manager_port == 8150

@@ -56,7 +56,7 @@ class DistributedConfig:
     """
 
     def __init__(self) -> None:
-        self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        # Redis configuration removed - now handled by Settings and Celery
         self.metrics_port = int(os.getenv("METRICS_PORT", "9000"))
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
 
