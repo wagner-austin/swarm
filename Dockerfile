@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7@sha256:dbbd5e059e8a07ff7ea6233b213b36aa516b4c53c645f1817a4dd18b83cbea56
 
 # ----------------------------------------------------------------------
 # Builder stage
@@ -8,10 +8,19 @@
 FROM python:3.12-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    POETRY_INSTALLER_MAX_RETRIES=5 \
+    POETRY_HTTP_TIMEOUT=120 \
+    PIP_DEFAULT_TIMEOUT=120
 
-# Install Poetry to build the virtual-env layer
-RUN pip install --no-cache-dir poetry==2.1.3 \
+# Copy retry helper early so every stage can use it
+COPY scripts/retry.sh /usr/local/bin/retry
+# Normalize line endings and make executable (belt-and-braces for Windows)
+RUN sed -i 's/\r$//' /usr/local/bin/retry && chmod +x /usr/local/bin/retry
+
+# Install Poetry with retry
+RUN --mount=type=cache,target=/root/.cache/pip \
+    retry 3 pip install --no-cache-dir poetry==2.1.3 \
     && mkdir -p /opt/venv        # will later host Playwright cache
 
 WORKDIR /app
@@ -19,9 +28,11 @@ WORKDIR /app
 # Copy lock / project metadata first for better Docker layer caching
 COPY pyproject.toml poetry.lock* ./
 
-# install the deps that are *already* locked – but only the “main” ones, straight into the system site-packages
+# Install deps with BuildKit cache mounts and retry
 ENV POETRY_VIRTUALENVS_CREATE=false
-RUN poetry install --only main --no-root --no-ansi --no-interaction
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/pypoetry \
+    retry 3 poetry install --only main --no-root --no-ansi --no-interaction
 
 # Copy the source code in a late layer so it changes often without invalidating
 # the heavy dependency layers.
@@ -29,7 +40,7 @@ COPY . .
 
 # Install Chromium inside the virtual-env path so its cache can be copied to the
 # runtime image without dragging the whole Poetry installation with it.
-RUN python -m playwright install chromium --with-deps \
+RUN retry 3 python -m playwright install chromium --with-deps \
     && mv /root/.cache/ms-playwright /opt/venv/playwright-cache
 
 # ----------------------------------------------------------------------
@@ -42,12 +53,18 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Copy retry helper from builder
+COPY --from=builder /usr/local/bin/retry /usr/local/bin/retry
+
 # Minimum Debian packages Playwright needs at runtime
-RUN apt-get update -qq && apt-get install -y --no-install-recommends \
-    libnss3 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 libdrm2 \
-    libgbm1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
-    libxrender1 libfontconfig1 libasound2 libxtst6 curl xvfb x11vnc xauth x11-utils \
-    && rm -rf /var/lib/apt/lists/*
+# Single layer with update + install to avoid hash-sum mismatch
+RUN --mount=type=cache,target=/var/cache/apt \
+    retry 3 bash -c 'apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libnss3 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 libdrm2 \
+        libgbm1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
+        libxrender1 libfontconfig1 libasound2 libxtst6 curl xvfb x11vnc xauth x11-utils && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*'
 
 # Copy Python + wheels from the builder layer
 COPY --from=builder /usr/local /usr/local
@@ -96,20 +113,25 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Copy retry helper from builder
+COPY --from=builder /usr/local/bin/retry /usr/local/bin/retry
+
 # Copy only Python dependencies from builder (no Playwright/browser stuff)
 COPY --from=builder /usr/local /usr/local
 
 # Copy application source
 COPY --from=builder /app /app
 
-# Install docker-compose for production autoscaling
-RUN apt-get update -qq && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    && curl -L "https://github.com/docker/compose/releases/download/v2.31.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose \
-    && chmod +x /usr/local/bin/docker-compose \
-    && rm -rf /var/lib/apt/lists/* \
-    && docker-compose --version
+# Install docker-compose for production autoscaling with retry
+RUN --mount=type=cache,target=/var/cache/apt \
+    retry 3 bash -c 'apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*' && \
+    retry 3 curl -L "https://github.com/docker/compose/releases/download/v2.31.0/docker-compose-$(uname -s)-$(uname -m)" \
+        -o /usr/local/bin/docker-compose && \
+    chmod +x /usr/local/bin/docker-compose && \
+    docker-compose --version
 
 # The autoscaler is a standalone service - no special entrypoint
-# Run with: python -m scripts.autoscaler
+# Run with: python -m scripts.celery_autoscaler
