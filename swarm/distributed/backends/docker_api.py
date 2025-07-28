@@ -139,10 +139,12 @@ class DockerApiBackend(ScalingBackend):
             return False
 
         try:
+            # Get broker URLs from environment or use default
+            broker_urls = os.getenv("CELERY_BROKER_URLS", "redis://redis:6379/0")
+
             # Environment variables for Celery worker
             environment = {
-                "CELERY_BROKER_URL": "redis://redis:6379/0",
-                "CELERY_RESULT_BACKEND": "redis://redis:6379/0",
+                "CELERY_BROKER_URLS": broker_urls,  # Pass through the broker URLs
                 "DISPLAY": ":99",
                 "LOG_FORMAT": "json",
                 "LOG_TO_FILE": "0",
@@ -163,10 +165,12 @@ class DockerApiBackend(ScalingBackend):
                 "working_dir": "/app",
                 "network": self.network,
                 "detach": True,
-                "restart_policy": {"Name": "unless-stopped"},
+                "restart_policy": {"Name": "on-failure", "MaximumRetryCount": 5},
                 "labels": {
-                    "com.docker.compose.project": self.project_name,
-                    "com.docker.compose.service": worker_type,
+                    # Don't use docker.compose labels as these containers are not managed by compose
+                    "swarm.project": self.project_name,
+                    "swarm.service": worker_type,
+                    "swarm.managed": "true",
                     "discord.worker.type": worker_type,
                     "discord.worker.number": str(instance_num),
                 },
@@ -232,7 +236,7 @@ class DockerApiBackend(ScalingBackend):
 
             filters = {
                 "label": [
-                    f"com.docker.compose.project={self.project_name}",
+                    f"swarm.project={self.project_name}",
                     f"discord.worker.type={worker_type}",
                 ],
                 "status": "running",
@@ -268,7 +272,7 @@ class DockerApiBackend(ScalingBackend):
             loop = asyncio.get_event_loop()
 
             filters = {
-                "label": f"com.docker.compose.project={self.project_name}",
+                "label": f"swarm.project={self.project_name}",
             }
 
             # Get both running and stopped containers

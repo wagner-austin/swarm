@@ -67,7 +67,7 @@ def generate_haproxy_config(redis_urls: str) -> str:
         servers.append(server)
 
     config = """global
-    daemon
+    # No daemon mode - must run in foreground for Docker
     maxconn 256
     log stdout local0 warning
 
@@ -118,24 +118,32 @@ backend redis_backend
     else:
         # For SSL or no auth, simple health check
         config += """
-    # Simple health check
+    # Enable tcp-check for scriptable health checks
+    option tcp-check
     tcp-check connect
-    tcp-check send PING\\r\\n
-    tcp-check expect string +PONG
 """
 
-    # Add all servers dynamically
+    # Add all servers dynamically with per-server SSL settings
     for server in servers:
-        ssl_opts = "ssl verify none" if server.get("is_ssl") else ""
-        backup_flag = "backup" if server.get("is_backup") else ""
-
-        # Primary servers get faster health checks
+        # Build server line with appropriate options
+        server_line = f"server {server['name']} {server['host']}:{server['port']}"
+        
+        # Add health check parameters
         check_inter = "2s" if server.get("is_backup") else "3s"
         check_fall = 2 if server.get("is_backup") else 3
+        server_line += f" check inter {check_inter} fall {check_fall} rise 2"
+        
+        # Add SSL options for SSL servers
+        if server.get("is_ssl"):
+            server_line += " ssl verify none"
+            # Add check-ssl for SSL health checks
+            server_line += " check-ssl"
+        
+        # Mark backup servers
+        if server.get("is_backup"):
+            server_line += " backup"
 
-        config += f"""
-    server {server["name"]} {server["host"]}:{server["port"]} check inter {check_inter} fall {check_fall} rise 2 {ssl_opts} {backup_flag}
-"""
+        config += f"\n    {server_line}\n"
 
     return config
 

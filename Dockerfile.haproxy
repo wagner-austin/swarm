@@ -12,9 +12,14 @@ RUN mkdir -p /scripts /config
 # Copy scripts with proper ownership
 COPY --chown=haproxy:haproxy scripts/generate_haproxy_config.py /scripts/
 COPY --chown=haproxy:haproxy scripts/entrypoint.haproxy.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Strip CR and make executable
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Drop back to unprivileged user for runtime security
 USER haproxy
+
+# Health check using HAProxy stats endpoint (more reliable than port check)
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -q -O /dev/null http://localhost:8080/stats || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
