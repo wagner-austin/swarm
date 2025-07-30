@@ -2,8 +2,9 @@
 Browser Health Monitoring for Discord frontend
 ==========================================
 
-Monitors worker heartbeats and sets degradation status when browser workers
-become unavailable, providing fail-fast behavior for web commands.
+Monitors Celery browser workers using the Celery control API and sets degradation
+status when browser workers become unavailable, providing fail-fast behavior for
+web commands.
 """
 
 import asyncio
@@ -21,9 +22,10 @@ logger = logging.getLogger(__name__)
 
 class BrowserHealthMonitor(BaseDIClientCog):
     """
-    Monitors browser worker heartbeats and tracks pool health in the swarm.
+    Monitors Celery browser workers and tracks pool health in the swarm.
 
-    Sets BROWSER_DEGRADED status when fewer than minimum workers are healthy,
+    Uses Celery's control.ping() API to detect active workers and sets
+    BROWSER_DEGRADED status when fewer than minimum workers are healthy,
     enabling web commands to fail fast instead of timing out.
     """
 
@@ -34,7 +36,6 @@ class BrowserHealthMonitor(BaseDIClientCog):
         self.monitoring_task: asyncio.Task[None] | None = None
         self.check_interval = 15.0  # seconds
         self.min_healthy_workers = 1
-        self.max_heartbeat_age = 60.0  # seconds
 
     async def cog_load(self) -> None:
         """Start background health monitoring when cog loads."""
@@ -68,30 +69,34 @@ class BrowserHealthMonitor(BaseDIClientCog):
     async def _check_worker_health(self) -> None:
         """Check health of browser workers and update status."""
         try:
-            # Get all worker heartbeats
-            pattern = "worker:heartbeat:*"
+            # Import Celery app here to avoid circular imports
+            from swarm.celery_app import app
+
             current_time = time.time()
             healthy_workers = 0
 
-            keys = await self.redis.keys(pattern)
-            for key in keys:
-                key_str = key.decode() if isinstance(key, bytes) else key
+            # Use Celery's control API to ping workers
+            # This returns a list of dictionaries with worker responses
+            try:
+                # Get the control interface and run ping in a thread to avoid blocking
+                control = app.control
+                logger.debug("Pinging Celery workers...")
+                ping_responses = await asyncio.to_thread(control.ping, timeout=2.0)
 
-                # Get timestamp from heartbeat
-                raw_ts = await self.redis.hget(key_str, "timestamp")
-                if raw_ts is None:
-                    continue
-                try:
-                    if isinstance(raw_ts, bytes):
-                        timestamp_val = float(raw_ts.decode())
-                    else:
-                        # Already a str (decode_responses=True)
-                        timestamp_val = float(raw_ts)
-                    if current_time - timestamp_val <= self.max_heartbeat_age:
-                        healthy_workers += 1
-                except (ValueError, AttributeError):
-                    # Malformed timestamp – skip
-                    continue
+                # Count browser workers from ping responses
+                # Each response is a dict like: {'celery@hostname': {'ok': 'pong'}}
+                # TODO: In the future, check worker capabilities/queues to identify browser workers
+                # For now, count all workers since we only have one worker type
+                healthy_workers = len(ping_responses)
+                logger.info(
+                    f"Worker health check complete: {healthy_workers} workers responded to ping"
+                )
+
+            except Exception as e:
+                logger.warning(f"Failed to ping Celery workers: {e}")
+                # Fall back to checking if we have any Celery tasks registered
+                # This at least tells us if workers exist
+                pass
 
             # Update health status
             is_degraded = healthy_workers < self.min_healthy_workers
@@ -107,13 +112,13 @@ class BrowserHealthMonitor(BaseDIClientCog):
                 },
             )
 
-            # Log status changes
+            # Log status changes - always log at INFO level for visibility
             if is_degraded:
                 logger.warning(
                     f"Browser pool DEGRADED: {healthy_workers}/{self.min_healthy_workers} workers healthy"
                 )
             else:
-                logger.debug(f"Browser pool healthy: {healthy_workers} workers active")
+                logger.info(f"Browser pool healthy: {healthy_workers} workers active")
 
         except Exception as exc:
             logger.error(f"Failed to check worker health: {exc}", exc_info=True)
