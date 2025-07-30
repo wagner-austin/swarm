@@ -17,22 +17,36 @@ from typing import Any, Iterator
 from celery import Celery
 from kombu import Queue
 
+from swarm.core.logger_setup import setup_logging
 from swarm.core.settings import Settings
 
+# Initialize logging first
+setup_logging()
 logger = logging.getLogger(__name__)
 settings = Settings()
+
+# Log startup configuration
+logger.info("Initializing Celery configuration")
+logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
+logger.info(f"Redis enabled: {settings.redis.enabled}")
+logger.info(f"Redis URL from settings: {'SET' if settings.redis.url else 'NOT SET'}")
 
 # Get Celery broker URLs from environment
 # This can be a single URL or semicolon-separated list for failover
 celery_broker_urls = os.getenv("CELERY_BROKER_URLS")
+logger.info(f"CELERY_BROKER_URLS env var: {'SET' if celery_broker_urls else 'NOT SET'}")
 
 # Fallback to REDIS_URL if CELERY_BROKER_URLS not set
 if not celery_broker_urls:
     primary_url = settings.redis.url
     if not primary_url:
+        logger.error("FATAL: Neither CELERY_BROKER_URLS nor REDIS_URL configured")
+        logger.error(
+            f"Environment variables checked: CELERY_BROKER_URLS={celery_broker_urls}, REDIS__URL={os.getenv('REDIS__URL')}"
+        )
         raise ValueError("Neither CELERY_BROKER_URLS nor REDIS_URL configured")
     celery_broker_urls = primary_url
-    logger.warning("CELERY_BROKER_URLS not set, using REDIS_URL")
+    logger.warning("CELERY_BROKER_URLS not set, using REDIS_URL from settings")
 
 # Parse broker URLs - handle both single URL and semicolon-separated list
 broker_urls: str | list[str]
@@ -40,9 +54,14 @@ if ";" in celery_broker_urls:
     broker_urls_list = celery_broker_urls.split(";")
     broker_urls = [url.strip() for url in broker_urls_list if url.strip()]
     logger.info(f"Celery configured with {len(broker_urls)} broker URLs for failover")
+    # Log sanitized URLs (hide passwords)
+    for i, url in enumerate(broker_urls):
+        sanitized = url.split("@")[1] if "@" in url else url
+        logger.info(f"  Broker {i + 1}: ...@{sanitized}")
 else:
     broker_urls = celery_broker_urls
-    logger.info("Celery configured with single broker URL")
+    sanitized = broker_urls.split("@")[1] if "@" in broker_urls else broker_urls
+    logger.info(f"Celery configured with single broker URL: ...@{sanitized}")
 
 # Determine if we're in production
 is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
@@ -71,38 +90,25 @@ else:
 app = Celery("swarm")
 
 
-# Define a "prefer primary" failover strategy
-def prefer_primary_strategy(servers: list[str]) -> Iterator[str]:
-    """Try primary first, then cycle through others."""
-    if not servers:
-        return
-    # Always yield primary first
-    yield servers[0]
-    # Then round-robin through all servers (including primary)
-    index = 0
-    while True:
-        yield servers[index]
-        index = (index + 1) % len(servers)
-
-
 # Configure Celery
 app.conf.update(
     broker_url=broker_urls,  # List of URLs for automatic failover!
     # Result backend must be a single URL - use primary only
     result_backend=broker_urls[0] if isinstance(broker_urls, list) else broker_urls,
-    broker_failover_strategy=prefer_primary_strategy,  # Always try primary first
+    broker_failover_strategy="round-robin",  # Use built-in round-robin strategy
     broker_connection_retry_on_startup=True,  # Retry connection on startup
     broker_connection_retry=True,  # Retry broker connection on failure
     broker_connection_max_retries=10,  # Max retries before giving up
     broker_pool_limit=10,  # Connection pool size
     broker_transport_options={
         "priority_steps": list(range(10)),
-        "fanout_prefix": True,
-        "fanout_patterns": True,
         # Visibility timeout should be longer than the longest task
         "visibility_timeout": 43200,  # 12 hours for long-running tasks
         # Health check interval
         "health_check_interval": 30,  # Check broker health every 30 seconds
+        # Socket options for better reliability through HAProxy
+        "socket_keepalive": True,
+        "socket_timeout": 10,
     },
     # Task settings
     task_serializer="json",
@@ -119,6 +125,9 @@ app.conf.update(
     # Error handling
     task_default_retry_delay=30,  # 30 seconds
     task_max_retries=3,
+    # Event settings for monitoring
+    worker_send_task_events=True,  # Send task events for Flower
+    task_send_sent_event=True,  # Send event when task is sent
 )
 
 # Define task queues for different job types
@@ -143,7 +152,7 @@ app.autodiscover_tasks(["swarm.tasks"])
 # Log configuration on startup
 if isinstance(broker_urls, list):
     logger.info(f"Celery broker failover configured with {len(broker_urls)} URLs")
-    logger.info("Failover strategy: prefer_primary (always try primary first)")
+    logger.info("Failover strategy: round-robin")
 else:
     logger.info("Celery configured with single broker URL")
 
