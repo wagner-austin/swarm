@@ -125,6 +125,11 @@ def test_browser_goto_thread_pool() -> None:
     assert "task_id" in res
     assert res["task_id"] == result.id
 
+    # Cleanup
+    from swarm.tasks.browser import cleanup  # noqa: E402
+
+    cleanup.delay(task_id=res["task_id"]).get(timeout=10)
+
 
 @pytest.mark.integration
 @pytest.mark.docker
@@ -139,13 +144,19 @@ def test_browser_screenshot_thread_pool() -> None:
     task_id = goto_res["task_id"]
     print(f"Using task_id for screenshot: {task_id}")
 
-    # Then take a screenshot using the same browser session
-    screenshot_res = screenshot.delay(task_id=task_id).get(timeout=10)
-    assert screenshot_res["success"] is True
-    assert "data" in screenshot_res
-    # Should be base64 encoded
-    assert isinstance(screenshot_res["data"], str)
-    assert len(screenshot_res["data"]) > 100  # Should have actual image data
+    from swarm.tasks.browser import cleanup  # noqa: E402
+
+    try:
+        # Then take a screenshot using the same browser session
+        screenshot_res = screenshot.delay(task_id=task_id).get(timeout=30)
+        assert screenshot_res["success"] is True
+        assert "data" in screenshot_res
+        # Should be base64 encoded
+        assert isinstance(screenshot_res["data"], str)
+        assert len(screenshot_res["data"]) > 100  # Should have actual image data
+    finally:
+        # Cleanup the browser engine
+        cleanup.delay(task_id=task_id).get(timeout=10)
 
 
 @pytest.mark.integration
@@ -153,18 +164,25 @@ def test_browser_screenshot_thread_pool() -> None:
 def test_browser_click_thread_pool() -> None:
     """Test that browser.click task executes without errors."""
     _wait_for_browser_worker()
-    # Navigate first
-    goto.delay(url="https://example.com").get(timeout=10)
 
-    # Import click task
-    from swarm.tasks.browser import click  # noqa: E402
+    # Navigate first and get the task_id for session reuse
+    goto_result = goto.delay(url="https://example.com")
+    goto_res = goto_result.get(timeout=30)  # Increased timeout for first browser launch
+    assert goto_res["success"] is True
+    task_id = goto_res["task_id"]
 
-    # Try to click something (may fail if selector not found, but shouldn't have coroutine error)
+    # Import tasks
+    from swarm.tasks.browser import cleanup, click  # noqa: E402
+
     try:
-        res = click.delay(selector="a").get(timeout=10)
-        assert res["success"] is True
-        assert res["selector"] == "a"
-    except Exception as e:
-        # If it fails, it should be a real error, not coroutine serialization
-        assert "coroutine" not in str(e).lower()
-        assert "json" not in str(e).lower()
+        # Click on the "More information..." link that exists on example.com
+        # Using text selector for reliability
+        click_res = click.delay(task_id=task_id, selector='a:has-text("More information")').get(
+            timeout=30
+        )
+
+        assert click_res["success"] is True
+        assert click_res["selector"] == 'a:has-text("More information")'
+    finally:
+        # Always cleanup the browser engine to prevent resource leaks
+        cleanup.delay(task_id=task_id).get(timeout=10)
