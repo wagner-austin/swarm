@@ -10,6 +10,11 @@ import base64
 import logging
 import os
 import tempfile
+import threading
+import uuid
+import weakref
+from contextlib import suppress
+from functools import wraps
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -30,7 +35,7 @@ from celery import Celery, Task, group
 from swarm.browser.engine import BrowserEngine
 from swarm.celery_app import app
 from swarm.core.settings import Settings
-from swarm.tasks.base import SwarmTask
+from swarm.tasks._base import SwarmTask
 from swarm.types import RedisBytes
 
 if TYPE_CHECKING:
@@ -47,9 +52,31 @@ logger = logging.getLogger(__name__)
 
 
 def typed_task(*task_args: Any, **task_kwargs: Any) -> Callable[[Callable[..., Any]], Any]:
-    """Typed wrapper for Celery tasks that preserves type annotations."""
+    """
+    Register a function as a Celery task and transparently bridge async
+    coroutines to the (threads) worker pool using thread-safe execution.
+    """
 
     def decorator(fn: Callable[..., Any]) -> Any:
+        if asyncio.iscoroutinefunction(fn):
+
+            @wraps(fn)
+            def sync_wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+                # Get stable thread-local event loop
+                if isinstance(self, SwarmTask):
+                    loop = self.get_loop()
+                    # Run the coroutine to completion on this thread's loop
+                    return loop.run_until_complete(fn(self, *args, **kwargs))
+                else:
+                    # Fallback for non-SwarmTask instances
+                    return asyncio.run(fn(self, *args, **kwargs))
+
+            # Ensure base=SwarmTask for all tasks
+            task_kwargs.setdefault("base", SwarmTask)
+            return app.task(*task_args, **task_kwargs)(sync_wrapper)
+
+        # Plain sync function
+        task_kwargs.setdefault("base", SwarmTask)
         return app.task(*task_args, **task_kwargs)(fn)
 
     return decorator
@@ -57,26 +84,58 @@ def typed_task(*task_args: Any, **task_kwargs: Any) -> Callable[[Callable[..., A
 
 # Module-level storage for browser engines (per worker process)
 _engines: dict[str, BrowserEngine] = {}
-_redis_client: RedisBytes | None = None
+
+# Weak reference dictionary to store Redis clients per event loop
+# This ensures clients are garbage collected when the loop is destroyed
+_loop_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, RedisBytes] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 class BrowserTask(SwarmTask):
     """Base task for browser operations with session management."""
 
     async def get_redis(self) -> RedisBytes:
-        """Get or create Redis client."""
-        global _redis_client
-        if _redis_client is None:
+        """Get or create Redis client for the current event loop."""
+        loop = asyncio.get_running_loop()
+        client = _loop_clients.get(loop)
+
+        if client is None:
             settings = Settings()
             if not settings.redis.url:
                 raise ValueError("Redis URL not configured")
-            _redis_client = redis_asyncio.from_url(settings.redis.url)
-        return _redis_client
+
+            # Create client with limited connection pool for thread pool workers
+            # Each thread gets its own loop and client, so we don't need many connections
+            client = redis_asyncio.from_url(
+                settings.redis.url,
+                max_connections=2,  # Limit connections per event loop
+            )
+            _loop_clients[loop] = client
+            logger.debug(f"Created new Redis client for event loop {id(loop)}")
+
+        return client
 
     async def get_or_create_engine(self, task_id: str) -> BrowserEngine:
         """Get existing browser engine or create a new one for the task."""
-        if task_id in _engines:
-            return _engines[task_id]
+        engine = _engines.get(task_id)
+
+        # Check if engine exists but has a closed event loop
+        if engine:
+            try:
+                # Check if the engine's event loop is closed
+                if hasattr(engine, "_loop") and engine._loop and engine._loop.is_closed():
+                    logger.warning(f"Engine for task {task_id} has closed event loop, recreating")
+                    await engine.stop(graceful=True)
+                    del _engines[task_id]
+                    engine = None
+            except Exception as e:
+                logger.error(f"Error checking engine state: {e}")
+                del _engines[task_id]
+                engine = None
+
+        if engine:
+            return engine
 
         logger.info(f"Creating browser engine for task {task_id}")
         engine = BrowserEngine(headless=True, proxy=None, timeout_ms=60000)
@@ -109,8 +168,11 @@ class BrowserTask(SwarmTask):
             except Exception as e:
                 logger.error(f"Error cleaning up browser engine: {e}")
 
-        redis = await self.get_redis()
-        await redis.delete(f"browser:session:{task_id}")
+        try:
+            redis = await self.get_redis()
+            await redis.delete(f"browser:session:{task_id}")
+        except Exception as e:
+            logger.error(f"Error cleaning up Redis session data: {e}")
 
     def on_failure(
         self,
@@ -138,7 +200,7 @@ async def goto(self: BrowserTask, url: str, task_id: str | None = None) -> dict[
     Returns:
         Dict with success status and navigation details
     """
-    task_id = task_id or self.request.id
+    task_id = self.resolve_task_id(task_id)
 
     engine = await self.get_or_create_engine(task_id)
     await engine.goto(url)
@@ -162,7 +224,7 @@ async def click(self: BrowserTask, selector: str, task_id: str | None = None) ->
     Returns:
         Dict with click result
     """
-    task_id = task_id or self.request.id
+    task_id = self.resolve_task_id(task_id)
 
     engine = await self.get_or_create_engine(task_id)
     await engine.click(selector)
@@ -185,7 +247,7 @@ async def fill(
     Returns:
         Dict with fill result
     """
-    task_id = task_id or self.request.id
+    task_id = self.resolve_task_id(task_id)
 
     engine = await self.get_or_create_engine(task_id)
     await engine.fill(selector, text)
@@ -208,7 +270,7 @@ async def upload(
     Returns:
         Dict with upload result
     """
-    task_id = task_id or self.request.id
+    task_id = self.resolve_task_id(task_id)
 
     engine = await self.get_or_create_engine(task_id)
     await engine.upload(selector, Path(file_path))
@@ -234,7 +296,7 @@ async def wait_for(
     Returns:
         Dict with wait result
     """
-    task_id = task_id or self.request.id
+    task_id = self.resolve_task_id(task_id)
 
     engine = await self.get_or_create_engine(task_id)
     await engine.wait_for(selector, state)
@@ -253,7 +315,7 @@ async def screenshot(self: BrowserTask, task_id: str | None = None) -> dict[str,
     Returns:
         Dict with base64 encoded screenshot
     """
-    task_id = task_id or self.request.id
+    task_id = self.resolve_task_id(task_id)
 
     engine = await self.get_or_create_engine(task_id)
 
@@ -286,7 +348,7 @@ async def status(self: BrowserTask, task_id: str | None = None) -> dict[str, Any
     Returns:
         Dict with session status
     """
-    task_id = task_id or self.request.id
+    task_id = self.resolve_task_id(task_id)
 
     if task_id in _engines:
         engine = _engines[task_id]
@@ -324,7 +386,7 @@ async def start(self: BrowserTask, task_id: str | None = None) -> dict[str, Any]
     Returns:
         Dict with session start result
     """
-    task_id = task_id or self.request.id
+    task_id = self.resolve_task_id(task_id)
 
     engine = await self.get_or_create_engine(task_id)
     await engine.health_check()
