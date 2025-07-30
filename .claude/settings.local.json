@@ -3,7 +3,11 @@
     "allow": [
       "Bash(make:*)",
       "Bash(poetry run mypy:*)",
-      "Bash(python -m ruff:*)"
+      "Bash(python -m ruff:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker inspect:*)",
+      "Bash(docker compose:*)"
     ],
     "deny": []
   }
