@@ -2,6 +2,7 @@
 # Add the src directory to the Python path for all tests
 
 import asyncio
+import os
 import warnings
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
@@ -9,8 +10,29 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# Load .env file to get REDIS_PASSWORD
+from dotenv import load_dotenv
+
 from swarm.core.logger_setup import setup_logging
 from swarm.core.settings import Settings
+
+load_dotenv()
+
+# Configure Redis URLs for tests
+# This ensures all tests have proper authentication from .env file
+password = os.getenv("REDIS_PASSWORD", "")
+if password:
+    # Always use authenticated URLs for tests when password is set
+    auth_part = f"default:{password}@"
+    redis_url = f"redis://{auth_part}localhost:6379/0"
+
+    # Override any Redis URLs to include authentication
+    os.environ["REDIS_URL"] = redis_url
+    os.environ["CELERY_BROKER_URLS"] = f"{redis_url};{redis_url}"
+    os.environ["CELERY_BROKER_URL"] = redis_url
+
+    # Also set the password separately for tests that build their own URLs
+    os.environ["REDIS_PASSWORD"] = password
 
 # Silence noisy third-party deprecations we can’t fix locally.
 warnings.filterwarnings(
@@ -39,6 +61,7 @@ Provides a CLI-runner; no DB fixtures remain.
 # Global logging setup                                              +
 # ------------------------------------------------------------------+
 setup_logging({"root": {"level": "WARNING"}})
+
 
 # ------------------------------------------------------------------+
 # Global Playwright headless override (safety in CI)                 +
