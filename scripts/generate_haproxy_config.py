@@ -20,6 +20,12 @@ import sys
 from urllib.parse import urlparse
 
 
+# Use print for logging since we're in a minimal container
+def log(message: str) -> None:
+    """Log a message to stdout for Docker/Alloy to capture."""
+    print(f"[haproxy-config] {message}", flush=True)
+
+
 def parse_redis_url(url: str) -> dict[str, str | int | bool | None]:
     """Parse a Redis URL into components."""
     parsed = urlparse(url)
@@ -54,17 +60,31 @@ def generate_haproxy_config(redis_urls: str) -> str:
     url_list = [url.strip() for url in redis_urls.split(";") if url.strip()]
 
     if not url_list:
+        log("ERROR: No Redis URLs provided after parsing")
         raise ValueError("No Redis URLs provided")
+
+    log(f"Configuring HAProxy for {len(url_list)} Redis backends")
 
     # Parse each URL into components
     servers = []
     for i, url in enumerate(url_list):
-        server = parse_redis_url(url)
-        # Generate unique server name based on index
-        server["name"] = f"redis_{i}"
-        # First server is primary, others are backups
-        server["is_backup"] = i > 0
-        servers.append(server)
+        try:
+            server = parse_redis_url(url)
+            # Generate unique server name based on index
+            server["name"] = f"redis_{i}"
+            # First server is primary, others are backups
+            server["is_backup"] = i > 0
+            servers.append(server)
+
+            # Log server configuration (hide password)
+            log(
+                f"  Server {server['name']}: {server['host']}:{server['port']} "
+                f"(SSL: {server['is_ssl']}, Backup: {server['is_backup']}, "
+                f"Auth: {'YES' if server['password'] else 'NO'})"
+            )
+        except Exception as e:
+            log(f"ERROR: Failed to parse Redis URL #{i + 1}: {e}")
+            raise
 
     config = """global
     # No daemon mode - must run in foreground for Docker
@@ -88,9 +108,11 @@ frontend http_stats
     stats uri /stats
     stats refresh 5s
 
-# Redis frontend - clients connect here
+# Redis frontend - clients connect here without auth
+# Clients connect to this port WITHOUT passwords in their URLs
 frontend redis_frontend
     bind *:6380
+    mode tcp
     default_backend redis_backend
 
 backend redis_backend
@@ -98,67 +120,87 @@ backend redis_backend
     balance first
     option tcp-check
     option allbackups
+    option redispatch  # Try next server on connection failure
+    retries 3
+    timeout connect 5s
+    timeout server 50s
 """
 
-    # Determine health check type based on first server's auth settings
-    # (assuming all servers use same auth for simplicity)
+    # Health checks use password from URL parsing
     first_server = servers[0]
-    if first_server.get("password") and not first_server.get("is_ssl"):
-        # For non-SSL with auth, we can do full health check
+    if first_server.get("password"):
+        password_str = str(first_server["password"])
+        # Build Redis RESP protocol frame: *2\r\n$4\r\nAUTH\r\n$<len>\r\n<password>\r\n
+        resp_cmd = f"*2\r\n$4\r\nAUTH\r\n${len(password_str)}\r\n{password_str}\r\n"
+        auth_hex = resp_cmd.encode().hex()
+
         config += f"""
-    # Health check with authentication
+    # Health check sequence with AUTH
     tcp-check connect
-    tcp-check send AUTH\\ {first_server["password"]}\\r\\n
+    tcp-check send-binary {auth_hex}
     tcp-check expect string +OK
-    tcp-check send PING\\r\\n
+    tcp-check send "PING\\r\\n"
     tcp-check expect string +PONG
-    tcp-check send QUIT\\r\\n
-    tcp-check expect string +OK
 """
     else:
-        # For SSL or no auth, simple health check
         config += """
-    # Enable tcp-check for scriptable health checks
-    option tcp-check
+    # Health check sequence without AUTH
     tcp-check connect
+    tcp-check send "PING\\r\\n"
+    tcp-check expect string +PONG
 """
 
-    # Add all servers dynamically with per-server SSL settings
+    # Add all servers dynamically
     for server in servers:
         # Build server line with appropriate options
-        server_line = f"server {server['name']} {server['host']}:{server['port']}"
-
-        # Add health check parameters
         check_inter = "2s" if server.get("is_backup") else "3s"
         check_fall = 2 if server.get("is_backup") else 3
-        server_line += f" check inter {check_inter} fall {check_fall} rise 2"
+
+        server_line = (
+            f"    server {server['name']} {server['host']}:{server['port']}"
+            f" check inter {check_inter} fall {check_fall} rise 2"
+        )
 
         # Add SSL options for SSL servers
         if server.get("is_ssl"):
-            server_line += " ssl verify none"
-            # Add check-ssl for SSL health checks
-            server_line += " check-ssl"
+            server_line += " ssl verify none check-ssl"
 
         # Mark backup servers
         if server.get("is_backup"):
             server_line += " backup"
 
-        config += f"\n    {server_line}\n"
+        config += server_line + "\n"
 
     return config
 
 
 def main() -> None:
     """Generate HAProxy config from environment variables."""
+    log("Starting HAProxy configuration generation")
+
     # Use CELERY_BROKER_URLS format (semicolon-separated URLs)
     redis_urls = os.getenv("CELERY_BROKER_URLS")
 
     if not redis_urls:
-        print("Error: CELERY_BROKER_URLS environment variable not set", file=sys.stderr)
-        print("Expected format: redis://host1:port;redis://host2:port", file=sys.stderr)
+        log("ERROR: CELERY_BROKER_URLS environment variable not set")
+        log("Expected format: redis://host1:port;redis://host2:port")
         sys.exit(1)
 
-    config = generate_haproxy_config(redis_urls)
+    # Log sanitized URLs (hide passwords)
+    urls_list = redis_urls.split(";")
+    log(f"Found {len(urls_list)} Redis URLs in CELERY_BROKER_URLS")
+    for i, url in enumerate(urls_list):
+        if "@" in url:
+            sanitized = url.split("@")[1]
+            log(f"  URL {i + 1}: ...@{sanitized}")
+        else:
+            log(f"  URL {i + 1}: {url}")
+
+    try:
+        config = generate_haproxy_config(redis_urls)
+    except Exception as e:
+        log(f"FATAL: Failed to generate HAProxy config: {e}")
+        sys.exit(1)
 
     # Output to stdout (can be redirected to file)
     print(config)
@@ -166,21 +208,18 @@ def main() -> None:
     # Also save to file if requested
     output_file = os.getenv("HAPROXY_CONFIG_OUTPUT", "config/haproxy-redis-generated.cfg")
     if output_file:
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
-        with open(output_file, "w") as f:
-            f.write(config)
-        print(f"\nConfiguration saved to: {output_file}", file=sys.stderr)
+        log(f"Saving configuration to: {output_file}")
+        try:
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            with open(output_file, "w") as f:
+                f.write(config)
+            log("Configuration saved successfully")
+        except Exception as e:
+            log(f"ERROR: Failed to write config file: {e}")
+            sys.exit(1)
 
-        # Show parsed URLs for verification
-        url_list = [url.strip() for url in redis_urls.split(";") if url.strip()]
-        print(f"\nConfigured {len(url_list)} Redis backends:", file=sys.stderr)
-        for i, url in enumerate(url_list):
-            server = parse_redis_url(url)
-            server_type = "primary" if i == 0 else f"backup-{i}"
-            print(
-                f"  {server_type}: {server['host']}:{server['port']} (SSL: {server['is_ssl']})",
-                file=sys.stderr,
-            )
+    # Log completion
+    log("HAProxy configuration generation completed successfully")
 
 
 if __name__ == "__main__":
