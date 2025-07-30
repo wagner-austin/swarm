@@ -26,8 +26,10 @@ async def redis_backend() -> AsyncGenerator[RedisBackend, None]:
 
     # Create backend using test Redis URL when in test environment
     try:
-        # Use test Redis URL from environment or default to local Redis
-        test_redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        # Use test Redis URL from environment or default to local Redis with auth
+        password = os.getenv("REDIS_PASSWORD", "")
+        auth_part = f"default:{password}@" if password else ""
+        test_redis_url = os.getenv("REDIS_URL", f"redis://{auth_part}localhost:6379/0")
 
         # Create history backend with test URL
         backend = RedisBackend(test_redis_url, max_turns=5)
