@@ -31,7 +31,7 @@ class DockerApiBackend(ScalingBackend):
 
     def __init__(
         self,
-        image: str = "swarm:latest",
+        image: str = "swarm-worker:latest",
         network: str | None = None,
         project_name: str = "swarm",
         app_mount_path: str | None = None,
@@ -47,6 +47,7 @@ class DockerApiBackend(ScalingBackend):
             app_mount_path: Path to mount as /app in container (auto-detected if None)
             worker_metrics_port: Port for worker metrics endpoint (default: 9100)
         """
+        logger.info(f"Initializing DockerApiBackend with image: {image}")
         self.image = image
         self.project_name = project_name
         self.client = docker.from_env()
@@ -118,6 +119,7 @@ class DockerApiBackend(ScalingBackend):
     async def _create_worker_container(self, worker_type: str, instance_num: int) -> bool:
         """Create a single worker container."""
         container_name = f"{self.project_name}_{worker_type}_{instance_num}"
+        logger.info(f"Creating worker container: {container_name}")
 
         # Proactively remove any pre-existing container with the same name to avoid
         # 409 Conflict errors if a crashed container was left behind.
@@ -131,7 +133,7 @@ class DockerApiBackend(ScalingBackend):
             await self._remove_container(existing_container)
         except NotFound:
             # Expected case – there is no container with that name.
-            pass
+            logger.debug(f"No existing container named {container_name} (expected)")
         except Exception as cleanup_exc:
             logger.error(
                 "Error removing pre-existing container %s: %s", container_name, cleanup_exc
@@ -139,12 +141,23 @@ class DockerApiBackend(ScalingBackend):
             return False
 
         try:
-            # Get broker URLs from environment or use default
-            broker_urls = os.getenv("CELERY_BROKER_URLS", "redis://redis:6379/0")
+            # Single entrypoint for workers → HAProxy
+            # Always use HAProxy for workers - they should never have direct Redis URLs
+            # Get Redis password from environment
+            redis_password = os.getenv("REDIS_PASSWORD", "")
+            if not redis_password:
+                logger.warning(
+                    "REDIS_PASSWORD not set in environment - workers may fail to authenticate"
+                )
+            haproxy_url = f"redis://default:{redis_password}@haproxy-redis:6380/0"
+            logger.info("DockerApiBackend: Configuring worker with HAProxy URL on port 6380")
 
             # Environment variables for Celery worker
             environment = {
-                "CELERY_BROKER_URLS": broker_urls,  # Pass through the broker URLs
+                "CELERY_BROKER_URLS": haproxy_url,  # Use HAProxy with auth
+                "REDIS_URL": haproxy_url,  # For libraries that look for REDIS_URL
+                "REDIS__URL": haproxy_url,  # Settings class expects double underscore for nested config
+                "REDIS__ENABLED": "true",  # Enable Redis in Settings
                 "DISPLAY": ":99",
                 "LOG_FORMAT": "json",
                 "LOG_TO_FILE": "0",
@@ -153,7 +166,9 @@ class DockerApiBackend(ScalingBackend):
                 "CELERY_QUEUES": worker_type,  # Which queue to consume
                 "CELERY_HOSTNAME": f"{worker_type}-{instance_num}@%h",
                 "CELERY_CONCURRENCY": "2",
+                "CELERY_POOL": "threads" if worker_type == "browser" else "prefork",
                 "CELERY_LOGLEVEL": "info",
+                "WORKER_METRICS_PORT": str(self.worker_metrics_port),  # For Prometheus metrics
             }
 
             # Container configuration
