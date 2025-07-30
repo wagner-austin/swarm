@@ -75,6 +75,11 @@ class BrowserEngine(ServiceABC):
             raise
         self._page = await self._browser.new_page()
 
+        # Set reasonable timeouts to prevent blocking workers
+        # 10 seconds for navigation, 5 seconds for element actions
+        self._page.set_default_navigation_timeout(10000)
+        self._page.set_default_timeout(5000)
+
         # --- WSLogger integration ---
         browser_id = uuid.uuid4().hex
         session_id = os.environ.get("SESSION_ID", uuid.uuid4().hex)

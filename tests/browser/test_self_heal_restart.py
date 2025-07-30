@@ -18,6 +18,14 @@ class _DummyPage:  # noqa: D101 – internal test helper
     async def close(self) -> None:  # noqa: D401
         return None
 
+    def set_default_navigation_timeout(self, _timeout: int) -> None:  # noqa: D401
+        """Mock set_default_navigation_timeout method."""
+        pass
+
+    def set_default_timeout(self, _timeout: int) -> None:  # noqa: D401
+        """Mock set_default_timeout method."""
+        pass
+
 
 class _DummyContext:  # noqa: D101 – mimics BrowserContext
     def __init__(self, browser: _DummyBrowser) -> None:
