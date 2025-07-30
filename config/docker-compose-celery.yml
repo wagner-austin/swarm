@@ -96,7 +96,7 @@ services:
   celery-worker-browser:
     build:
       context: ..
-      target: runtime-worker
+      target: runtime-swarm
     container_name: celery-worker-browser
     entrypoint: ["/usr/local/bin/entrypoint.worker.sh"]
     env_file:
