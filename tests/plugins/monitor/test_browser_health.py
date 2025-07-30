@@ -45,7 +45,6 @@ async def test_browser_health_monitor_creation(
     assert cog.redis is mock_redis
     assert cog.check_interval == 15.0
     assert cog.min_healthy_workers == 1
-    assert cog.max_heartbeat_age == 60.0
 
 
 @pytest.mark.asyncio
@@ -81,18 +80,14 @@ async def test_browser_health_monitor_start_stop_monitoring(
 async def test_browser_health_check_with_healthy_workers(
     container_with_mocked_redis: tuple[Container, MagicMock, MagicMock],
 ) -> None:
-    """Test health check with healthy workers."""
+    """Test health check with healthy workers using Celery ping."""
     container, mock_discord_bot, mock_redis = container_with_mocked_redis
 
-    # Mock healthy worker heartbeats
+    # Mock Celery app and control.ping response
     import time
+    from unittest.mock import AsyncMock
 
     current_time = time.time()
-    mock_redis.keys.return_value = [b"worker:heartbeat:worker1", b"worker:heartbeat:worker2"]
-    mock_redis.hget.side_effect = lambda key, field: {
-        ("worker:heartbeat:worker1", "timestamp"): str(current_time - 30).encode(),
-        ("worker:heartbeat:worker2", "timestamp"): str(current_time - 45).encode(),
-    }.get((key, field))
 
     # Mock the health status data that gets written and read back
     mock_redis.hgetall.return_value = {
@@ -105,14 +100,26 @@ async def test_browser_health_check_with_healthy_workers(
     # Create BrowserHealthMonitor cog using REAL DI container factory
     cog = container.browser_health_monitor_cog(discord_bot=mock_discord_bot)
 
-    # Check health
-    await cog._check_worker_health()
+    # Mock Celery control.ping() to return 2 workers
+    with patch("swarm.celery_app.app.control") as mock_control:
+        mock_ping = MagicMock(
+            return_value=[{"celery@worker1": {"ok": "pong"}}, {"celery@worker2": {"ok": "pong"}}]
+        )
+        mock_control.ping = mock_ping
+
+        # Mock asyncio.to_thread to directly call the function
+        with patch(
+            "asyncio.to_thread",
+            new=AsyncMock(side_effect=lambda func, *args, **kwargs: func(*args, **kwargs)),
+        ):
+            # Check health
+            await cog._check_worker_health()
+
     health_status = await cog.get_health_status()
     is_healthy = not health_status.get("is_degraded", True)
 
     assert is_healthy is True
     assert health_status["healthy_workers"] == 2
-    mock_redis.keys.assert_called_once_with("worker:heartbeat:*")
     # Verify hset was called to store health data
     mock_redis.hset.assert_called_once()
 
