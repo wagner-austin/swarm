@@ -36,9 +36,10 @@ python-json-logger = "^3.3.0"
 # --- docker api for scaling ---
 docker = ">=7.0.0"
 # --- celery for distributed task queue ---
-celery = {extras = ["redis"], version = "^5.4.0"}
+celery = {extras = ["redis"], version = ">=5.3,<5.4"}
 flower = ">=2.0"  # Celery monitoring
 "async-timeout" = ">=4.0"  # Timeout handling for celery_autoscaler
+asgiref = ">=3.8"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"
