@@ -25,18 +25,21 @@ if [[ "${ENABLE_X11:-1}" == "1" ]]; then
 fi
 
 # Launch the Celery worker
-# Use prefork pool for browser automation (Playwright compatible)
-CELERY_ARGS="--queues=${CELERY_QUEUES:-browser} \
-  --concurrency=${CELERY_CONCURRENCY:-1} \
-  --pool=${CELERY_POOL:-prefork} \
-  --loglevel=${CELERY_LOGLEVEL:-info} \
-  --max-tasks-per-child=${CELERY_MAX_TASKS:-100} \
-  --without-gossip \
-  --without-mingle"
+QUEUE="${CELERY_QUEUES:-browser}"
 
-# Add autoscale if configured
-if [[ -n "${CELERY_AUTOSCALE:-}" ]]; then
-  CELERY_ARGS="$CELERY_ARGS --autoscale=${CELERY_AUTOSCALE}"
+# Pick the pool type based on the queue
+if [[ "$QUEUE" == "browser" ]]; then
+  POOL_TYPE="threads"         # Use threads pool for async browser tasks
+  CONCURRENCY="${CELERY_CONCURRENCY:-2}"   # tune per node
+else
+  POOL_TYPE="prefork"
+  CONCURRENCY="${CELERY_CONCURRENCY:-1}"
 fi
 
-exec python -m swarm.celery_worker $CELERY_ARGS "$@"
+exec python -m swarm.celery_worker \
+      --queues="$QUEUE" \
+      --pool="$POOL_TYPE" \
+      --concurrency="$CONCURRENCY" \
+      --loglevel="${CELERY_LOGLEVEL:-info}" \
+      --max-tasks-per-child="${CELERY_MAX_TASKS:-100}" \
+      --events
