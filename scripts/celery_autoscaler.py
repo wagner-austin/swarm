@@ -32,15 +32,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import aiohttp
 import async_timeout
 
+from swarm.core.logger_setup import setup_logging
 from swarm.distributed.backends import DockerApiBackend, FlyIOBackend, KubernetesBackend
 from swarm.distributed.core.config import DistributedConfig
 from swarm.distributed.services.scaling_service import ScalingBackend, ScalingDecision
 
 __all__ = ["CeleryAutoscaler"]
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Use centralized JSON logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -73,8 +73,17 @@ class CeleryAutoscaler:
 
     async def setup(self) -> None:
         """Set up the autoscaler."""
+        logger.info("Celery Autoscaler starting up")
+        logger.info(f"Flower URL: {self.flower_url}")
+        logger.info(f"Orchestrator: {self.orchestrator}")
+        logger.info(f"Check interval: {self.check_interval}s")
+        logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
+
         # Load configuration
         self.config = DistributedConfig.load()
+        logger.info(
+            f"Loaded config with {len(self.config.worker_types)} worker types: {list(self.config.worker_types.keys())}"
+        )
 
         # Create HTTP session for Flower API
         self._session = aiohttp.ClientSession()
@@ -82,13 +91,14 @@ class CeleryAutoscaler:
         # Set up auth if provided
         if self.flower_username and self.flower_password:
             self._auth = aiohttp.BasicAuth(self.flower_username, self.flower_password)
+            logger.info("Flower authentication configured")
 
         # Select backend
         if self.orchestrator == "docker" or self.orchestrator == "docker-api":
             project_name = os.environ.get("COMPOSE_PROJECT_NAME", "swarm")
             worker_metrics_port = int(os.environ.get("WORKER_METRICS_PORT", "9100"))
             self.backend = DockerApiBackend(
-                image="swarm:latest",
+                image="swarm-worker:latest",
                 network=None,
                 project_name=project_name,
                 app_mount_path=None,
