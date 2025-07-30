@@ -1,4 +1,4 @@
-FROM haproxy:2.8-alpine
+FROM haproxy:3.2-alpine
 
 # Switch to root for package installation (standard Alpine pattern)
 USER root
