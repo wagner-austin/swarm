@@ -37,8 +37,13 @@ async def test_haproxy_redis_connectivity() -> None:
     if not services_ok:
         pytest.skip(message)
 
-    # Test Redis operations through HAProxy (no auth needed in test environment)
-    client = redis.from_url("redis://localhost:6380/0", decode_responses=True)
+    # Test Redis operations through HAProxy
+    import os
+
+    password = os.getenv("REDIS_PASSWORD", "")
+    auth_part = f"default:{password}@" if password else ""
+
+    client = redis.from_url(f"redis://{auth_part}localhost:6380/0", decode_responses=True)
 
     try:
         # Write test data

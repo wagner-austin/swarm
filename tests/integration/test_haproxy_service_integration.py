@@ -90,14 +90,22 @@ def test_services_redis_configuration_consistency() -> None:
                 env_vars = json.loads(result.stdout)
 
                 # Find Redis URLs in environment
+                # Priority: REDIS_URL > CELERY_BROKER_URL > any other *_URL
+                redis_url = None
                 for var in env_vars:
-                    if ("REDIS_URL" in var or "BROKER_URL" in var) and "://" in var:
-                        # Extract just the host:port part
-                        if ":6380" in var:
-                            redis_configs[service] = "haproxy"
-                        elif ":6379" in var:
-                            redis_configs[service] = "direct"
-                        break
+                    if "=" in var and "://" in var:
+                        key, value = var.split("=", 1)
+                        if key == "REDIS_URL":
+                            redis_url = value
+                            break
+                        elif key == "CELERY_BROKER_URL" and not redis_url:
+                            redis_url = value
+
+                if redis_url:
+                    if ":6380" in redis_url:
+                        redis_configs[service] = "haproxy"
+                    elif ":6379" in redis_url:
+                        redis_configs[service] = "direct"
         except (subprocess.CalledProcessError, json.JSONDecodeError):
             pass
 
@@ -166,9 +174,9 @@ async def test_flower_connects_through_haproxy() -> None:
 
         if result.returncode == 0:
             broker_url = result.stdout.strip()
-            # In test environment, Flower should use local Redis directly
-            assert "redis:6379" in broker_url, (
-                f"Flower not using test Redis. Broker URL: {broker_url}"
+            # In test environment, Flower should use HAProxy for consistency
+            assert "haproxy-redis:6380" in broker_url, (
+                f"Flower not using HAProxy. Broker URL: {broker_url}"
             )
         else:
             pytest.skip("Flower container not running. Run 'docker compose up -d flower' first.")
@@ -188,11 +196,17 @@ async def test_haproxy_health_check() -> None:
     if not services_ok:
         pytest.skip(message)
 
-    # Connect through HAProxy (no auth needed in test environment)
-    haproxy_client = redis.from_url("redis://localhost:6380/0", decode_responses=True)
+    # Get Redis password from environment
+    import os
+
+    password = os.getenv("REDIS_PASSWORD", "")
+    auth_part = f"default:{password}@" if password else ""
+
+    # Connect through HAProxy with auth in URL
+    haproxy_client = redis.from_url(f"redis://{auth_part}localhost:6380/0", decode_responses=True)
 
     # Connect directly to Redis
-    direct_client = redis.from_url("redis://localhost:6379/0", decode_responses=True)
+    direct_client = redis.from_url(f"redis://{auth_part}localhost:6379/0", decode_responses=True)
 
     try:
         # Both should work

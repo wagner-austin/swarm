@@ -16,18 +16,55 @@ import redis.asyncio as redis
 from swarm.infra import async_close_redis
 
 
+async def check_haproxy_redis_connection(host: str, port: int, password: str | None = None) -> bool:
+    """Check if HAProxy Redis is accessible (connect with auth in URL)."""
+    client = None
+    try:
+        print(f"[DEBUG] Checking HAProxy Redis at {host}:{port}")
+
+        # Build URL with ACL credentials so AUTH is sent in the first packet
+        url = (
+            f"redis://default:{password}@{host}:{port}/0"
+            if password
+            else f"redis://{host}:{port}/0"
+        )
+        client = redis.from_url(url, decode_responses=True, socket_connect_timeout=2)
+
+        # If the URL contained creds, ping succeeds immediately
+        await client.ping()
+        print("[DEBUG] ✓ Connected to HAProxy Redis")
+        return True
+    except Exception as e:
+        print(f"[DEBUG] ✗ Failed to connect to HAProxy Redis at {host}:{port}: {e}")
+        return False
+    finally:
+        if client:
+            await async_close_redis(client)
+
+
 async def check_redis_connection(host: str, port: int, password: str | None = None) -> bool:
     """Check if Redis is accessible."""
     try:
+        # Build the URL with proper authentication format
+        if password:
+            url = f"redis://default:{password}@{host}:{port}/0"
+        else:
+            url = f"redis://{host}:{port}/0"
+
+        # Debug output
+        print(f"[DEBUG] Checking Redis at {host}:{port}, password={'YES' if password else 'NO'}")
+
         client = redis.from_url(
-            f"redis://{':' + password + '@' if password else ''}{host}:{port}/0",
+            url,
             decode_responses=True,
             socket_connect_timeout=2,
         )
         await client.ping()
         await async_close_redis(client)
+        print(f"[DEBUG] ✓ Connected to Redis at {host}:{port}")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] ✗ Failed to connect to Redis at {host}:{port}: {e}")
         return False
 
 
@@ -35,6 +72,7 @@ async def check_haproxy_stats(host: str = "localhost", port: int = 8080) -> dict
     """Check HAProxy stats to see backend status."""
     stats: dict[str, Any] = {}
     try:
+        print(f"[DEBUG] Checking HAProxy stats at {host}:{port}")
         async with aiohttp.ClientSession() as session:
             async with session.get(f"http://{host}:{port}/stats;csv") as resp:
                 if resp.status == 200:
@@ -68,8 +106,9 @@ async def check_haproxy_stats(host: str = "localhost", port: int = 8080) -> dict
                                 "status": status,
                                 "check_status": check_status,
                             }
-    except Exception:
-        pass
+                print(f"[DEBUG] ✓ HAProxy stats retrieved: {len(stats)} backends")
+    except Exception as e:
+        print(f"[DEBUG] ✗ Failed to get HAProxy stats: {e}")
 
     return stats
 
@@ -77,13 +116,17 @@ async def check_haproxy_stats(host: str = "localhost", port: int = 8080) -> dict
 async def check_flower_api(host: str = "localhost", port: int = 5555) -> bool:
     """Check if Flower API is responsive."""
     try:
+        print(f"[DEBUG] Checking Flower API at {host}:{port}")
         async with aiohttp.ClientSession() as session:
             async with session.get(f"http://{host}:{port}/api/workers") as resp:
                 if resp.status == 200:
                     await resp.json()
+                    print("[DEBUG] ✓ Flower API is responsive")
                     return True
-    except Exception:
-        pass
+                else:
+                    print(f"[DEBUG] ✗ Flower API returned status {resp.status}")
+    except Exception as e:
+        print(f"[DEBUG] ✗ Failed to connect to Flower API: {e}")
 
     return False
 
@@ -104,10 +147,23 @@ def check_docker_daemon() -> bool:
 
 async def check_docker_services_running() -> tuple[bool, str]:
     """Check if required Docker services are running."""
+    # Get Redis password from environment
+    import os
+
+    redis_password = os.getenv("REDIS_PASSWORD")
+
+    # Debug: Show what password we're using
+    print("\n[DEBUG] check_docker_services_running:")
+    print(f"  REDIS_PASSWORD from env: {'SET' if redis_password else 'NOT SET'}")
+    print(f"  REDIS_URL from env: {os.getenv('REDIS_URL', 'NOT SET')}")
+
     # Check all required services
+    # For HAProxy, we need a special check that connects without auth then sends AUTH
+    haproxy_ok = await check_haproxy_redis_connection("localhost", 6380, redis_password)
+
     checks = {
-        "Local Redis (6379)": await check_redis_connection("localhost", 6379),
-        "HAProxy Redis (6380)": await check_redis_connection("localhost", 6380),
+        "Local Redis (6379)": await check_redis_connection("localhost", 6379, redis_password),
+        "HAProxy Redis (6380)": haproxy_ok,
         "HAProxy Stats (8080)": bool(await check_haproxy_stats()),
         "Flower API (5555)": await check_flower_api(),
     }
