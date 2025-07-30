@@ -29,6 +29,8 @@ explorer_downloads/
 ChromeProfiles/
 backups/
 temp.txt
+lib/
+logs/
 
 # Build metadata
 *.egg-info/
