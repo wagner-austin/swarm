@@ -33,8 +33,12 @@ class Task(Generic[_P, _R]):
 class AsyncResult(Generic[_R]):
     def get(self, timeout: float | None = None) -> _R: ...
 
+class Control:
+    def ping(self, timeout: float | None = None) -> list[dict[str, Any]]: ...
+
 class Celery:
     conf: Any
+    control: Control
     def __init__(self, *a: Any, **kw: Any) -> None: ...
     def task(
         self, *a: Any, **kw: Any

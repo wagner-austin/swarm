@@ -62,8 +62,8 @@ def parse_args() -> argparse.Namespace:
         "--pool",
         type=str,
         default="prefork",
-        choices=["prefork", "eventlet", "gevent", "solo"],
-        help="Pool implementation: prefork (default), eventlet/gevent (for async), solo (single thread)",
+        choices=["prefork", "eventlet", "gevent", "solo", "threads"],
+        help="Pool implementation: prefork (default), eventlet/gevent (for async), threads (for I/O bound), solo (single thread)",
     )
 
     parser.add_argument(
@@ -105,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         help="Disable synchronization with other workers at startup",
     )
 
+    parser.add_argument(
+        "--events",
+        action="store_true",
+        help="Enable sending task events for monitoring",
+    )
+
     return parser.parse_args()
 
 
@@ -112,13 +118,14 @@ def start_worker(
     queues: list[str],
     concurrency: int,
     loglevel: str,
-    pool: Literal["prefork", "eventlet", "gevent", "solo"] = "prefork",
+    pool: Literal["prefork", "eventlet", "gevent", "solo", "threads"] = "prefork",
     hostname: str | None = None,
     autoscale: str | None = None,
     max_tasks_per_child: int = 100,
     without_heartbeat: bool = False,
     without_gossip: bool = False,
     without_mingle: bool = False,
+    events: bool = False,
 ) -> None:
     """
     Start a Celery worker with the specified configuration.
@@ -127,7 +134,7 @@ def start_worker(
         queues: List of queue names to consume from
         concurrency: Number of concurrent worker processes/threads
         loglevel: Logging level
-        pool: Pool implementation (prefork, eventlet, gevent, solo)
+        pool: Pool implementation (prefork, eventlet, gevent, solo, asyncio)
         hostname: Custom worker hostname
         autoscale: Autoscaling configuration as "max,min"
         max_tasks_per_child: Max tasks before worker restart
@@ -142,6 +149,13 @@ def start_worker(
     logger.info(
         f"Starting Celery worker: queues={queues}, concurrency={concurrency}, loglevel={loglevel}"
     )
+
+    # Start Prometheus metrics server for health checks
+    from prometheus_client import start_http_server
+
+    metrics_port = int(os.getenv("WORKER_METRICS_PORT", "9100"))
+    start_http_server(metrics_port, addr="0.0.0.0")
+    logger.info(f"Started metrics server on port {metrics_port}")
 
     # Start the worker using the Worker class
     from celery.apps.worker import Worker
@@ -158,6 +172,7 @@ def start_worker(
         without_heartbeat=without_heartbeat,
         without_gossip=without_gossip,
         without_mingle=without_mingle,
+        events=events,
     )
     worker.start()
 
@@ -192,6 +207,7 @@ def main() -> None:
             without_heartbeat=args.without_heartbeat,
             without_gossip=args.without_gossip,
             without_mingle=args.without_mingle,
+            events=args.events,
         )
     except KeyboardInterrupt:
         logger.info("Worker shutting down...")
