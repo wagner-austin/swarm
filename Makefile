@@ -75,7 +75,7 @@ check: lint test docker-status
 # Tests
 # ---------------------------------------------------------------------------
 compose-test:                ## start test stack (local Redis only, no Upstash)
-	docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --force-recreate redis haproxy-redis flower autoscaler swarm
+	docker compose -f docker-compose.yml -f docker-compose.test.yml up -d redis haproxy-redis flower autoscaler swarm
 	@echo "⏳ Waiting for services to be healthy..."
 	@$(PYTHON) -c "import time; time.sleep(5)"
 	docker compose ps
