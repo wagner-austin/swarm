@@ -9,15 +9,19 @@ This replaces the custom broker.py with Celery, providing:
 - Monitoring via Flower
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import ssl
 from typing import Any, Iterator
 
+import celery.signals as signals
 from celery import Celery
+from celery.app.task import Task as CeleryTask
 from kombu import Queue
 
-from swarm.core.logger_setup import setup_logging
+from swarm.core.logger_setup import bind_log_context, setup_logging
 from swarm.core.settings import Settings
 
 # Initialize logging first
@@ -148,6 +152,54 @@ app.conf.task_queues = (
 
 # Import tasks to register them
 app.autodiscover_tasks(["swarm.tasks"])
+
+# Configure Celery signals for logging context
+
+
+@signals.task_prerun.connect
+def bind_task_context(
+    sender: CeleryTask[Any, Any],
+    task_id: str,
+    task: CeleryTask[Any, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    **extra: Any,
+) -> None:
+    """Bind task context to all logs within this task."""
+    bind_log_context(job_id=task_id)
+    logger.debug(f"Task {task.name} starting with ID {task_id}")
+
+
+@signals.task_postrun.connect
+def unbind_task_context(
+    sender: CeleryTask[Any, Any],
+    task_id: str,
+    task: CeleryTask[Any, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    retval: Any | None,
+    state: str,
+    **extra: Any,
+) -> None:
+    """Clear task context after task completes."""
+    logger.debug(f"Task {task.name} completed with ID {task_id}")
+    bind_log_context(job_id="-")
+
+
+@signals.task_failure.connect
+def log_task_failure(
+    sender: CeleryTask[Any, Any],
+    task_id: str,
+    exception: Exception,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    traceback: Any,
+    einfo: Any,
+    **extra: Any,
+) -> None:
+    """Log task failures with full context."""
+    logger.error(f"Task failed with ID {task_id}: {exception}")
+
 
 # Log configuration on startup
 if isinstance(broker_urls, list):
