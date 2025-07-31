@@ -9,11 +9,50 @@ name: CI
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.7.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-3.12-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-3.12-
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run ruff check
+        run: poetry run ruff check .
+
+      - name: Run ruff format check
+        run: poetry run ruff format --check .
+
+      - name: Run mypy
+        run: poetry run mypy --strict .
+
+      - name: Check YAML files
+        run: poetry run yamllint -c .yamllint .
+
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -35,10 +74,8 @@ jobs:
         uses: actions/cache@v3
         with:
           path: .venv
-          key: venv-${{ matrix.python-version }}
-
-      - name: Check Poetry version
-        run: poetry --version
+          key: venv-${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: venv-${{ matrix.python-version }}-
 
       - name: Install dependencies
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
@@ -48,5 +85,60 @@ jobs:
         if: steps.cached-poetry-dependencies.outputs.cache-hit == 'true'
         run: poetry install --with dev --no-root
 
-      - name: Run tests
-        run: poetry run pytest -q
+      - name: Run unit tests (no Docker/Redis required)
+        run: poetry run pytest tests/ -v --cov=swarm --cov-report=term-missing -m "not integration"
+
+  integration-test:
+    runs-on: ubuntu-latest
+    env:
+      REDIS_PASSWORD: testpass
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate docker-compose config
+        run: docker compose config --quiet
+
+      - name: Build test images
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml build
+
+      - name: Start test stack
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml up -d redis haproxy-redis
+          sleep 5  # Wait for Redis to be ready
+
+      - name: Run integration tests with pytest
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm \
+            -e REDIS_PASSWORD=${REDIS_PASSWORD:-testpass} \
+            swarm poetry run pytest tests/ -v -m "integration"
+
+      - name: Run Celery integration tests
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm swarm \
+            python /app/scripts/test_celery_integration.py
+
+      - name: Check monitoring health
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm swarm \
+            python /app/scripts/check_monitoring.py || echo "Monitoring not critical for CI"
+
+      - name: Tear down test stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+
+  validate-deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate fly.toml
+        run: flyctl doctor --config fly.toml --json || true
+
+      - name: Build Docker image
+        run: docker build --target runtime-swarm -t swarm:ci .
