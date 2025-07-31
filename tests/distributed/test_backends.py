@@ -15,7 +15,7 @@ import pytest
 from swarm.distributed.backends.docker_api import DockerApiBackend
 from swarm.distributed.backends.fly_io import FlyIOBackend
 from swarm.distributed.backends.kubernetes import KubernetesBackend
-from swarm.distributed.services.scaling_service import ScalingBackend
+from swarm.distributed.protocols import ScalingBackend
 
 
 class TestScalingBackendProtocol:
