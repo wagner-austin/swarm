@@ -10,7 +10,6 @@ from swarm.core.settings import Settings
 from swarm.distributed.backends import DockerApiBackend, FlyIOBackend, KubernetesBackend
 from swarm.distributed.celery_browser import CeleryBrowserRuntime
 from swarm.distributed.core.config import DistributedConfig
-from swarm.distributed.services.scaling_service import ScalingService
 from swarm.frontends.discord.discord_interactions import safe_send
 from swarm.history.backends import HistoryBackend
 from swarm.history.factory import choose as history_backend_factory
@@ -123,14 +122,6 @@ class Container(containers.DeclarativeContainer):
     # Scaling backend selection based on environment
     scaling_backend = providers.Singleton(
         lambda: DockerApiBackend()  # Default to Docker API backend
-    )
-
-    # Scaling service
-    scaling_service = providers.Singleton(
-        ScalingService,
-        redis_client=redis_client,
-        config=distributed_config,
-        backend=scaling_backend,
     )
 
     remote_browser: providers.Factory[CeleryBrowserRuntime] = providers.Factory(
