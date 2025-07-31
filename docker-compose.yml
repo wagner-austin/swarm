@@ -1,4 +1,18 @@
 ---
+# Docker Compose configuration for Swarm
+#
+# Profiles:
+# - Default (no profile): Core services only (redis, haproxy, swarm, autoscaler)
+# - monitoring: Add Flower and Celery-exporter for task monitoring
+# - observability: Add full observability stack (Prometheus, Grafana, Loki, Alloy)
+# - debug: Add VNC-enabled worker for browser debugging (see docker-compose.override.yml)
+#
+# Usage examples:
+#   docker compose up -d                    # Core services only
+#   docker compose --profile monitoring up -d   # Core + monitoring
+#   docker compose --profile observability up -d    # Core + full observability
+#   docker compose --profile monitoring --profile observability up -d  # Everything
+#
 services:
   redis:
     image: redis:7-alpine
@@ -41,6 +55,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
+    profiles: ["observability"]
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
@@ -55,6 +70,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
+    profiles: ["observability"]
     ports:
       - "3000:3000"
     environment:
@@ -74,6 +90,7 @@ services:
   loki:
     image: grafana/loki:3.2.0   # newer maintenance release
     container_name: loki
+    profiles: ["observability"]
     volumes:
       - ./config/loki-config.yml:/etc/loki/local-config.yaml:ro
       - ./loki-data:/tmp/loki
@@ -91,6 +108,7 @@ services:
     # v1.9.2 is the latest GA release (2025-06-27); pin for repeatable builds
     image: grafana/alloy:v1.9.2
     container_name: alloy
+    profiles: ["observability"]
     volumes:
       - ./config/alloy-config.river:/etc/alloy/config.river:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -142,7 +160,7 @@ services:
       - USE_DISTRIBUTED_WORKERS=true
       # --- Logging Configuration ---
       - LOG_FORMAT=json
-      - LOG_TO_FILE=0
+      - LOG_TO_FILE=false
       # --- Redis Configuration ---
       # All services connect to HAProxy WITH auth on port 6380
       # HAProxy passes connections through to backends (TCP proxy)
@@ -172,6 +190,7 @@ services:
   flower:
     image: mher/flower:2.0
     container_name: flower
+    profiles: ["monitoring"]
     command:
       - celery
       - --broker=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
@@ -202,10 +221,11 @@ services:
   celery-exporter:
     image: danihodovic/celery-exporter:0.10.4
     container_name: celery-exporter
+    profiles: ["monitoring"]
     command:
       - --broker-url=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
       - --retry-interval=10
-      - --log-level=info
+      - --log-level=INFO
       - --port=9808
     ports:
       - "9808:9808"
@@ -214,7 +234,15 @@ services:
     depends_on:
       - haproxy-redis
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9808/health"]
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(
+            'http://localhost:9808/health'
+          ).getcode()==200 else 1)
       interval: 30s
       timeout: 5s
       retries: 3
