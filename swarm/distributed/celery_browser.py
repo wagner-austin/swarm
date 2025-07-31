@@ -27,7 +27,7 @@ class CeleryBrowserRuntime:
     """
 
     def __init__(self) -> None:
-        self._active_tasks: dict[str, AsyncResult] = {}
+        self._active_tasks: dict[str, AsyncResult[Any]] = {}
 
     async def goto(self, url: str, worker_hint: str | None = None) -> None:
         """Navigate to a URL."""
