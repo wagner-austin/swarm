@@ -145,6 +145,21 @@ def start_worker(
     # Setup logging
     setup_logging()
 
+    # Bind deployment context for structured logging
+    from swarm.core.logger_setup import (
+        auto_detect_deployment_context,
+        bind_deployment_context,
+        bind_log_context,
+    )
+
+    # Set deployment context (hostname, container_id, etc)
+    deployment_context = auto_detect_deployment_context()
+    bind_deployment_context(context=deployment_context)
+
+    # Set worker identity
+    worker_id = hostname or os.getenv("WORKER_ID", f"worker-{os.getpid()}")
+    bind_log_context(service="celery-worker", worker_id=worker_id)
+
     # Log startup information
     logger.info(
         f"Starting Celery worker: queues={queues}, concurrency={concurrency}, loglevel={loglevel}"
@@ -157,24 +172,38 @@ def start_worker(
     start_http_server(metrics_port, addr="0.0.0.0")
     logger.info(f"Started metrics server on port {metrics_port}")
 
-    # Start the worker using the Worker class
-    from celery.apps.worker import Worker
+    # Start the worker using app.worker_main() - the CLI-approved entry point
+    # This avoids mypy issues with Worker constructor kwargs
+    argv = [
+        "worker",
+        "--hostname",
+        hostname or "swarm@%h",
+        "--pool",
+        pool,
+        "--loglevel",
+        loglevel,
+        "--concurrency",
+        str(concurrency),
+        "--queues",
+        ",".join(queues),
+        "--max-tasks-per-child",
+        str(max_tasks_per_child),
+    ]
 
-    worker = Worker(
-        app=app,
-        hostname=hostname,
-        pool_cls=pool,
-        loglevel=loglevel,
-        concurrency=concurrency,
-        queues=queues,
-        autoscale=autoscale,
-        max_tasks_per_child=max_tasks_per_child,
-        without_heartbeat=without_heartbeat,
-        without_gossip=without_gossip,
-        without_mingle=without_mingle,
-        events=events,
-    )
-    worker.start()
+    # Add optional flags
+    if autoscale:
+        argv.extend(["--autoscale", autoscale])
+    if without_heartbeat:
+        argv.append("--without-heartbeat")
+    if without_gossip:
+        argv.append("--without-gossip")
+    if without_mingle:
+        argv.append("--without-mingle")
+    if events:
+        argv.append("--events")
+
+    # Use the official worker_main entry point
+    app.worker_main(argv)
 
 
 def main() -> None:
