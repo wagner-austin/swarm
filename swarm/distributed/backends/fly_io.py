@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Optional
 
-from swarm.distributed.services.scaling_service import ScalingBackend
+from swarm.distributed.protocols import ScalingBackend
 
 logger = logging.getLogger(__name__)
 

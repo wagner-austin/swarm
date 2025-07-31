@@ -17,7 +17,7 @@ try:
 except ImportError:
     raise ImportError("Docker SDK required. Install with: pip install docker")
 
-from swarm.distributed.services.scaling_service import ScalingBackend
+from swarm.distributed.protocols import ScalingBackend
 
 logger = logging.getLogger(__name__)
 
