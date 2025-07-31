@@ -1,16 +1,68 @@
-app = "corvis-ai"              # <── the app you really want
+app = "corvis-ai"
 primary_region = "lax"
+kill_signal = "SIGTERM"
+kill_timeout = 30
 
 [build]
   dockerfile = "Dockerfile"
 
 [env]
   PYTHONUNBUFFERED = "1"
-  METRICS_PORT = 9200          # strings are fine inside [env]
+  USE_DISTRIBUTED_WORKERS = "true"
+  LOG_FORMAT = "json"
+  LOG_TO_FILE = "0"
+  # Redis settings
+  REDIS__ENABLED = "true"
+  # These will be set via fly secrets set:
+  # REDIS__URL
+  # CELERY_BROKER_URLS
+  # FLY_API_TOKEN (for autoscaler)
+  
+  # Metrics ports
+  METRICS_PORT = "9200"         # Main swarm process
+  WORKER_METRICS_PORT = "9100"  # Worker processes
 
 [processes]
+  # Main Discord bot
   swarm = "python -m swarm.core"
+  # Celery worker for browser automation
+  worker = "/usr/local/bin/entrypoint.worker.sh"
+  # Flower monitoring UI (optional - can be removed to save resources)
+  flower = "celery --broker=$CELERY_BROKER_URLS flower --port=5555 --persistent"
+  # Autoscaler using Fly.io backend
+  autoscaler = "python -m scripts.celery_autoscaler --flower-url=http://localhost:5555 --orchestrator=fly.io --fly-api-token=$FLY_API_TOKEN"
+
+# Health checks for each process type
+[[checks]]
+  processes = ["swarm"]
+  type = "http"
+  port = 9200
+  path = "/metrics"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+
+[[checks]]
+  processes = ["worker"]
+  type = "http"
+  port = 9100
+  path = "/metrics"  # prometheus_client only provides /metrics endpoint
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "60s"  # Workers need time to start browser
+
+# Internal service for metrics/health - no public exposure needed
+[[services]]
+  processes = ["swarm"]
+  internal_port = 9200
+  protocol = "tcp"
+  
+  # No public ports - this is a Discord bot, not a web service
+  # Fly internal network allows metrics scraping
 
 [metrics]
-  port = 9200                  # ← NO quotes, must be an int
+  port = 9200
   path = "/metrics"
+
+[experimental]
+  auto_rollback = true
