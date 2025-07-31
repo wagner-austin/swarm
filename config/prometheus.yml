@@ -23,3 +23,10 @@ scrape_configs:
       - targets: ['worker:9100']
     scrape_interval: 15s
     metrics_path: /metrics
+
+  - job_name: 'celery_exporter'
+    static_configs:
+      # Celery task metrics: queue depth, task latency, success/failure rates
+      - targets: ['celery-exporter:9808']
+    scrape_interval: 15s
+    metrics_path: /metrics
