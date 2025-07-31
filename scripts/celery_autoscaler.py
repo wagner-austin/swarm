@@ -35,7 +35,7 @@ import async_timeout
 from swarm.core.logger_setup import setup_logging
 from swarm.distributed.backends import DockerApiBackend, FlyIOBackend, KubernetesBackend
 from swarm.distributed.core.config import DistributedConfig
-from swarm.distributed.services.scaling_service import ScalingBackend, ScalingDecision
+from swarm.distributed.protocols import ScalingBackend, ScalingDecision
 
 __all__ = ["CeleryAutoscaler"]
 
