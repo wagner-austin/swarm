@@ -16,12 +16,12 @@ Discord is merely ONE frontend interface. The system is designed to be platform-
 4. **Distributed & Scalable**: Can scale to hundreds of workers for complex multi-step tasks
 5. **Platform-Agnostic**: The core system doesn't care if requests come from Discord, Telegram, or API
 
-## What Needs to Change
+## What Still Needs to Change
 - **Remove Channel-Centric Design**: Current `/close_channel` and channel-to-browser mapping is wrong
 - **Add Task Planning**: Need intelligent task decomposition and planning capabilities
 - **Worker Capabilities**: Workers should advertise what they can do, not be hardcoded types
 - **Session Management**: Sessions should be task-scoped, not channel-scoped
-- **Job Visibility**: Need better monitoring of what each worker is doing and job progress
+- ✅ ~~**Job Visibility**: Need better monitoring~~ - DONE with celery-exporter and structured logging
 
 ## Collaboration Guidelines for Claude
 
@@ -43,37 +43,6 @@ Discord is merely ONE frontend interface. The system is designed to be platform-
 3. **Consider Standard Tools**: Before building custom solutions, consider if Redis, Docker, K8s, or other tools already solve the problem.
 4. **Visibility Matters**: Design with observability in mind - we need to see what workers are doing.
 
-## Current Implementation Notes
-
-### Major Migration Completed (2025-07-17)
-Successfully migrated from custom Redis streams broker to **Celery** distributed task queue:
-
-1. **Celery Integration Complete**: 
-   - All browser tasks now use Celery with proper retry/timeout handling
-   - Flower monitoring UI integrated for task visibility (port 5555)
-   - Automatic failover between Upstash and local Redis
-
-2. **Autoscaler Rewritten**:
-   - Uses Celery's inspect API via Flower for queue monitoring
-   - Properly distinguishes between active and pending tasks
-   - Can bootstrap from zero workers (no chicken-and-egg problem)
-
-3. **Type Safety Maintained**:
-   - All code passes mypy strict mode
-   - Proper handling of Task generic types using TYPE_CHECKING pattern
-   - Async Redis operations using redis.asyncio
-
-4. **Channel-Centric Design Still Present**: 
-   - `/close_channel` commands still exist but less critical with Celery
-   - Session management needs refactoring for task-scoped design
-
-### Migration Benefits Realized
-- **Automatic retries**: Celery handles failed tasks with exponential backoff
-- **Task routing**: Different queues for browser, tankpit, llm workers  
-- **Better monitoring**: Flower provides real-time task status and history
-- **Connection pooling**: Redis connections managed efficiently by Celery
-- **No more zombie jobs**: Failed tasks properly handled, no infinite loops
-
 ## Key Commands
 - **Run tests**: `make test` or `poetry run pytest`
 - **Lint & format**: `make lint` (runs ruff fix, ruff format, mypy strict, yamllint)
@@ -91,11 +60,13 @@ Swarm uses several ports for different services:
 - **9200**: Swarm metrics (main Discord frontend)
 - **9100**: Worker metrics (default, configurable via WORKER_METRICS_PORT)
 - **5555**: Flower (Celery monitoring UI)
+- **9808**: Celery-exporter (Prometheus metrics for Celery)
 - **9090**: Prometheus
 - **3000**: Grafana
 - **3100**: Loki
 - **12345**: Alloy UI
 - **6379**: Redis
+- **6380**: HAProxy-Redis (failover proxy)
 
 To avoid port conflicts:
 1. Set `WORKER_METRICS_PORT` environment variable to change worker metrics port
@@ -132,27 +103,19 @@ Successfully implemented three scaling backends:
    - Scales deployment replicas
    - Status: ✅ Complete with type safety
 
-### Recent Improvements
-1. **Protocol Implementation**: All backends now properly implement the `ScalingBackend` protocol
-   - Made protocol `@runtime_checkable` for better type safety
-   - All backends explicitly inherit from `ScalingBackend`
-   
-2. **Type Safety**: Fixed all mypy strict mode errors
-   - Added assert statements for runtime safety checks
-   - Fixed subprocess command type issues
-   - Added comprehensive type annotations to tests
-   
-3. **Integration Updates**:
-   - `celery_autoscaler.py`: Uses Flower API for queue monitoring
-   - `orchestrator.py`: Updated to use `check_and_scale_all()` method
-   - Both handle None backend cases gracefully
+### Key Architectural Patterns Established
+1. **Dynamic Dispatch Safety**: Always filter kwargs using `filter_kwargs_for_method` before calling dynamically dispatched methods
+2. **Worker State Machine**: Formal states (IDLE, WAITING, BUSY, ERROR, SHUTDOWN) with proper transitions
+3. **Idempotent Stream Creation**: Redis streams and consumer groups created safely for concurrent startup
+4. **Session Cleanup**: Browser and TankPit engines cleaned up after each job and at shutdown
+5. **Observability First**: Health/metrics endpoints, structured logging, deployment context awareness
 
 ### Testing Approach
 - Moving away from mocks to test actual features
 - Test files in `tests/distributed/`:
   - `test_config.py` - Tests distributed configuration
   - `test_pool.py` - Tests worker pool management
-  - `test_scaling_service.py` - Tests ScalingService with FakeScalingBackend
+  - `test_scaling_service.py` - Tests ScalingService (ORPHANED - to be removed)
   - `test_backends.py` - Tests backend implementations (uses subprocess mocking)
   - `test_celery_autoscaler.py` - Tests the Celery autoscaler script
   - `test_scaling_integration.py` - Integration tests for complete scaling flow
@@ -173,95 +136,120 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 - Ruff for linting/formatting
 - MyPy for type checking
 
-## Recent Changes (from git log)
-- Successfully migrated from custom broker.py to Celery (2025-07-17)
-- Integrated Flower for Celery monitoring
-- Fixed all mypy strict mode errors with TYPE_CHECKING pattern
-- Autoscaler now uses Celery's inspect API via Flower
-- All tests updated to work with Celery
+## Recent Observability Improvements (2025-07-30)
 
-## Celery Migration Details
+### Monitoring Stack Enhanced
+1. **Added celery-exporter** - Lightweight Prometheus metrics (20MB) replacing flower-refresher
+2. **Enhanced Worker Logging**:
+   - Celery signals automatically bind job_id to all task logs
+   - Worker startup binds deployment context (hostname, container_id)
+   - All logs now have structured context: service, worker_id, job_id
+3. **Removed flower-refresher** - Was spamming logs every 5 seconds
+4. **Updated Prometheus** - Now scrapes celery-exporter on port 9808
+5. **Documentation Created**:
+   - `docs/celery-monitoring-setup.md` - Complete monitoring setup guide
+   - `docs/capability-queue-mapping.md` - Future capability-based routing design
+   - `docs/service-architecture.md` - Maps all services and identifies orphaned code
+   - `docs/service-cleanup-tasks.md` - Specific cleanup instructions
 
-**Successfully replaced custom Redis streams with Celery (2025-07-17):**
+### Discovered Issues
+1. **ScalingService is orphaned** - Defined but never used (replaced by celery_autoscaler)
+2. **Services scattered** - No central organization or registry
+3. **Old dashboard outdated** - Expects metrics from old Worker system, not Celery
 
-1. **Queue Monitoring**: Celery autoscaler uses Flower API to get accurate queue depths
-2. **Worker Scaling**: Properly scales based on pending tasks, not active ones  
-3. **Task Lifecycle**: Celery handles retries, timeouts, and dead letter queues automatically
-4. **Zero-worker Bootstrap**: Autoscaler can start workers from zero (fixed chicken-and-egg problem)
-5. **SSL Support**: Added proper SSL configuration for Upstash Redis with rediss:// URLs
-
-## Test Organization
-
-### Unit Tests
-- Individual component testing with mocks where necessary
-- Backend command construction verification
-
-### Integration Tests
-- **test_scaling_integration.py**: Complete scaling flow with dependency injection
-- **test_celery_autoscaler.py**: Celery autoscaler service testing
-- Tests job timeout scenarios when no workers exist
-- Tests autoscaler creating workers on demand
-
-## Completed Tasks
-1. ✅ Implemented ScalingBackend protocol with @runtime_checkable
-2. ✅ All backends (Docker API, Fly.io, Kubernetes) implement the protocol
-3. ✅ Fixed all mypy strict mode errors
-4. ✅ Added comprehensive test coverage
-5. ✅ Created integration tests with dependency injection
-6. ✅ Cleaned up test organization and naming
-7. ✅ Migrated from custom broker.py to Celery distributed task queue
-8. ✅ Integrated Flower monitoring UI for task visibility
-9. ✅ Fixed autoscaler to work with Celery and bootstrap from zero workers
-10. ✅ Updated all tests to work with CeleryBrowserRuntime
+### Monitoring Commands
+- **Check monitoring health**: `python scripts/check_monitoring.py`
+- **Import Grafana dashboard**: Use ID 10026 (Celery Monitoring)
+- **View worker logs**: Loki query: `{service="celery-worker"} | json`
+- **Check metrics**: `curl localhost:9808/metrics` (celery-exporter)
 
 ## Handoff Context for Next Conversation
 
-### Where We Left Off (2025-07-17)
-1. **Completed Celery migration** - All browser tasks now use Celery instead of custom broker
-2. **Fixed autoscaler issues** - Now uses Flower API for accurate queue monitoring  
-3. **Maintained type safety** - All code passes mypy strict mode
-4. **Updated documentation** - README reflects new Celery architecture
+### Current State (2025-07-30)
+- **Celery migration complete** - All browser tasks use Celery with proper retry/timeout handling
+- **Observability enhanced** - Added celery-exporter, structured logging with job_id context
+- **Architecture documented** - Created guides for services, capabilities, monitoring setup
+- **Issues identified** - Found orphaned ScalingService, outdated dashboard, scattered services
 
 ### Immediate Next Steps (Phase 1)
 
-1. **Remove Discord-centric design**:
+1. **Clean up orphaned code**:
+   - Remove ScalingService from containers.py and its file
+   - Move ScalingBackend protocol to `swarm/distributed/protocols.py`
+   - Update all imports in backends and autoscaler
+   - Remove QueueMetricsService (incompatible with Celery)
+
+2. **Organize services**:
+   - Create `swarm/services/` directory structure
+   - Move services to appropriate subdirectories
+   - Document service lifecycle and dependencies
+
+3. **Remove Discord-centric design**:
    - Delete `close_channel` from web.py (still exists)
    - Remove channel_id from browser session management
    - Create abstract `Context` class to replace Discord interactions
 
-2. **Add more worker types**:
+4. **Add more worker types**:
    - Implement tankpit worker queue and tasks
    - Add LLM worker type for local model inference
    - Create capability-based task routing
 
-3. **Improve task decomposition**:
+5. **Improve task decomposition**:
    - Add task planner that breaks complex requests into subtasks
    - Implement dependency graph for subtask execution
    - Add progress streaming via Redis pub/sub
 
-4. **Multi-frontend support**:
+6. **Multi-frontend support**:
    - Extract Discord-specific code to adapter
    - Add Telegram frontend
    - Add REST API frontend
 
-### Key Insights Gained
-- The project is an AI task assistant, NOT a Discord-only system
-- Discord is just one frontend among many planned
-- Need task decomposition and capability-based workers
-- Session management should be task-scoped, not channel-scoped
-- Existing QueueMetricsService solves the scaling problem but isn't used
+## Key Architectural Decisions
 
-### Key Files in Celery Migration
-- `swarm/celery_app.py` - Celery configuration with task routing
-- `swarm/tasks/browser.py` - Browser tasks using Celery
-- `swarm/distributed/celery_runtime.py` - CeleryBrowserRuntime adapter
-- `scripts/celery_autoscaler.py` - Autoscaler using Flower API
-- `scripts/entrypoint.worker.sh` - Worker entrypoint for Celery
-- `docker-compose.yml` - Added Flower service, updated for Celery
+### 1. Task Execution Model
+**Decision: Async with progress streaming via Redis pub/sub**
+- Tasks execute asynchronously with real-time progress updates
+- Frontends can subscribe to task progress streams
+- Supports long-running complex tasks without timeout issues
 
-## Architecture Decisions Made
+### 2. Worker Capability Model  
+**Decision: Start with static capabilities, evolve to learned**
+- Phase 1: Workers declare capabilities in configuration
+- Phase 2: Track success rates per capability
+- Phase 3: ML-based capability matching and load balancing
 
-### Technology Stack (Decided)
+### 3. Task Persistence
+**Decision: Persistent task history with replay capability**
+- All tasks stored with full execution history
+- Can replay failed tasks from point of failure
+- Optional audit trail export for compliance
+
+### 4. Session Management
+**Decision: Task-scoped sessions tied to task lifecycle**
+- Resources (browser, connections, files) created per task
+- Sessions shared across all subtasks within a task
+- Automatic cleanup when task completes/fails
+- Enables massive parallelism - different tasks get different sessions
+
+#### Example Task-Scoped Session Flow:
+```
+Task: "Research and summarize competitor analysis"
+├─ Create: Session Pool (5 browsers, 1 database connection)
+├─ Subtask: Analyze competitor A → uses browser 1
+├─ Subtask: Analyze competitor B → uses browser 2 (parallel)
+├─ Subtask: Analyze competitor C → uses browser 3 (parallel)
+├─ Subtask: Store results → uses database connection
+├─ Subtask: Generate report → uses browsers 1-3 for screenshots
+└─ Cleanup: All resources destroyed
+
+Benefits:
+- Workers remain stateless (just execute with provided resources)
+- Failed workers can be replaced (session state in Redis)
+- Natural parallelism (each task isolated)
+- Resource efficiency (cleanup guaranteed)
+```
+
+### 5. Technology Stack (Implemented)
 1. **Queue System**: ✅ COMPLETED - Migrated to **Celery** with Redis backend
    - Reduced codebase complexity significantly
    - Handles retries, routing, monitoring automatically  
@@ -273,34 +261,52 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
    - Kubernetes for 100+ workers and production scale
    - Already have backends for both, minimal maintenance overhead
 
-3. **Local LLM Integration** (Phase 2):
+3. **Local LLM Integration** (Planned):
    - New worker type: `llm_worker` using llama.cpp or vLLM
    - Runs on local RTX 3090 Ti (24GB VRAM)
    - Capabilities: analyze, summarize, extract, reason
    - Models: Llama 2 70B quantized, Mixtral 8x7B
 
-### Specific Implementation Path
+## Master Implementation Checklist
 
-**Phase 1: Core Fixes** ✅ COMPLETED (2025-07-17)
-- ✅ Fixed job lifecycle with Celery (no more infinite retries)
-- ✅ Autoscaler uses Flower API (accurate worker scaling)
-- ✅ Celery handles dead letter queue automatically
-- ⏳ Still need to remove Discord-channel assumptions
+### Distributed Swarm/Worker System
+- [x] Migrate to Celery distributed task queue
+- [x] Implement Celery tasks for browser operations
+- [x] Add CeleryBrowserRuntime adapter
+- [x] Build Celery worker entrypoint
+    - [x] Updated entrypoint.worker.sh for Celery
+    - [x] Support for different queue types (browser, tankpit, llm)
+    - [x] Proper SSL configuration for Upstash Redis
+- [x] Add Flower monitoring integration
+- [x] Implement Celery autoscaler using Flower API
+- [x] Update all tests to work with Celery
+- [ ] Add multi-frontend support (Discord, Telegram, web, SMS, etc.)
+    - [ ] Separate out logic from frontend specific code in swarm/plugins/commands/
+- [ ] Add worker capability advertisement/heartbeat
+- [x] Refactor queue naming in ProxyService/engines for generic MITM support
+- [x] Add docker-compose example for swarm and workers
 
-**Phase 2: Celery Migration** ✅ COMPLETED (2025-07-17)
-- ✅ Replaced broker.py with Celery
-- ✅ Migrated browser jobs to Celery tasks
-- ✅ Set up Celery routing for different queues
-- ✅ Added Flower for monitoring
+### Observability
+- [x] Add HTTP server for /health and /metrics endpoints
+- [x] Flower UI for real-time Celery task monitoring (port 5555)
+- [x] Add celery-exporter for Prometheus metrics (port 9808)
+- [x] Integrate Prometheus metrics for workers
+- [x] Centralize logs with Loki and Alloy
+- [x] Enhanced structured logging with job_id and worker_id context
+- [ ] Add comprehensive Grafana dashboards for job queue, worker health, and resource usage
 
-**Phase 3: Task Intelligence (Month 2-3)**
-- Add LLM workers for local processing
-- Implement task decomposition service
-- Create capability-based routing
-- Build simple web UI
+### Operational Excellence
+- [x] Docker Compose/Fly.io/Kubernetes configs for orchestrator + scalable workers + Redis
+- [x] Healthchecks and graceful shutdown for all services
+- [x] HAProxy for Redis failover (Upstash ↔ local Redis)
+- [ ] Document scaling, rolling upgrades, and zero-downtime deploys
+- [ ] Document security model (network, secrets, etc.)
+- [ ] Add Redis Sentinel for production HA
 
-**Phase 4: Scale & Polish (Month 3+)**
-- Deploy to Kubernetes cluster
-- Add more worker capabilities
-- Implement task progress streaming
-- Create Telegram & API frontends
+### Advanced Features
+- [ ] Streaming results/logs via Redis Pub/Sub
+- [ ] Smart job routing based on worker capabilities
+- [x] Autoscaling workers based on queue depth via Flower API
+- [x] Task retries and dead letter queue via Celery
+- [ ] Task decomposition and dependency management
+- [ ] Progress tracking for complex multi-step tasks
