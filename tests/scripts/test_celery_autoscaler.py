@@ -8,7 +8,7 @@ import aiohttp
 import pytest
 
 from scripts.celery_autoscaler import CeleryAutoscaler
-from swarm.distributed.services.scaling_service import ScalingDecision
+from swarm.distributed.protocols import ScalingDecision
 
 
 class TestCeleryAutoscaler:
