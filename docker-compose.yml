@@ -197,32 +197,27 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Flower refresher - keeps Flower's worker list accurate as autoscaler creates/destroys workers
-  # This is the production-recommended approach for dynamic Celery environments
-  flower-refresher:
-    image: curlimages/curl:latest
-    container_name: flower-refresher
+  # Celery Exporter for Prometheus metrics
+  # Provides task-level metrics without the overhead of Flower
+  celery-exporter:
+    image: danihodovic/celery-exporter:0.10.4
+    container_name: celery-exporter
     command:
-      - sh
-      - -c
-      - |
-        while true; do
-          sleep 5
-          curl -s http://flower:5555/api/workers?refresh=true > /dev/null 2>&1
-          echo "$(date): Refreshed Flower worker list"
-        done
+      - --broker-url=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+      - --retry-interval=10
+      - --log-level=info
+      - --port=9808
+    ports:
+      - "9808:9808"
+    environment:
+      - CE_BROKER_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
     depends_on:
-      - flower
+      - haproxy-redis
     healthcheck:
-      test:
-        - CMD
-        - curl
-        - -f
-        - http://flower:5555/healthcheck
+      test: ["CMD", "wget", "-qO-", "http://localhost:9808/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
     restart: unless-stopped
 
   # Worker containers are created dynamically by autoscaler using swarm-worker:latest image
