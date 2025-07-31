@@ -2,26 +2,39 @@
 # Entrypoint for distributed worker container
 set -euo pipefail
 
-# Optionally set up X11 if browser jobs are required
-if [[ "${ENABLE_X11:-1}" == "1" ]]; then
-  echo "[worker entrypoint] Setting up X11 for browser jobs..."
-  touch ~/.Xauthority
-  xauth add :99 . $(openssl rand -hex 16)
-  if ! xdpyinfo -display :99 >/dev/null 2>&1; then
-    rm -f /tmp/.X99-lock || true
-    Xvfb :99 -screen 0 1280x720x24 -ac -nolisten tcp &
-    XVFB_PID=$!
-    trap 'kill -TERM "$XVFB_PID"; wait "$XVFB_PID"' TERM INT
-    for i in {1..30}; do
-      if xdpyinfo -display :99 >/dev/null 2>&1; then break; fi
-      sleep 1
-    done
-    if ! xdpyinfo -display :99 >/dev/null 2>&1; then
-      echo "[worker entrypoint] ERROR: Xvfb failed to start"
-      exit 1
+# Modern Playwright runs perfectly headless without Xvfb (since Chromium v115)
+# Only enable X11/VNC for debugging when explicitly requested
+if [[ "${ENABLE_VNC:-0}" == "1" ]]; then
+  echo "[worker] Launching Xvfb + VNC for headful debugging..."
+  
+  # Start X virtual framebuffer
+  Xvfb :99 -screen 0 1280x720x24 -ac -nolisten tcp &
+  XVFB_PID=$!
+  trap 'kill -TERM "$XVFB_PID"; wait "$XVFB_PID"' TERM INT
+  
+  # Wait for X server
+  for i in {1..30}; do
+    if xdpyinfo -display :99 >/dev/null 2>&1; then
+      echo "[worker] Xvfb ready after ${i} attempts"
+      break
     fi
+    sleep 1
+  done
+  
+  # Start VNC server for remote viewing
+  x11vnc -display :99 -forever -nopw -quiet -rfbport 5900 -shared &
+  
+  # Start noVNC web interface if available
+  if command -v websockify >/dev/null 2>&1; then
+    websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+    echo "[worker] noVNC available at http://localhost:6080"
   fi
+  
   export DISPLAY=:99
+  export PLAYWRIGHT_HEADLESS=0  # Tell Playwright to open real browser windows
+else
+  echo "[worker] Starting in true headless mode - no Xvfb needed"
+  export PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 fi
 
 # Launch the Celery worker
