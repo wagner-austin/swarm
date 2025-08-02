@@ -75,12 +75,12 @@ check: lint test docker-status
 # Tests
 # ---------------------------------------------------------------------------
 compose-test:                ## start test stack (local Redis only, no Upstash)
-	docker compose -f docker-compose.yml -f docker-compose.test.yml up -d redis haproxy-redis flower autoscaler swarm
+	docker compose -f docker-compose.yml -f docker-compose.test.yml --profile monitoring up -d redis haproxy-redis flower autoscaler swarm
 	@echo "⏳ Waiting for services to be healthy..."
 	@$(PYTHON) -c "import time; time.sleep(5)"
 	docker compose ps
 
-test: install compose-test   ## run pytest suite with test stack
+test: install  ## run pytest suite with test stack
 	$(PYTEST)
 
 # ---------------------------------------------------------------------------
@@ -154,7 +154,7 @@ compose-recreate-all:
 compose: compose-up
 
 compose-down:          ## stop and remove docker compose services
-	docker compose down
+	docker compose down --remove-orphans
 
 docker-status:         ## show status of docker compose services
 	docker compose ps
