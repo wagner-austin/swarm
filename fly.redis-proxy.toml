@@ -1,0 +1,41 @@
+app = "swarm-redis-proxy"
+primary_region = "lax"
+kill_signal = "SIGTERM"
+
+[build]
+  dockerfile = "Dockerfile.haproxy"
+
+[env]
+  # Leave blank here; actual URLs come from secrets
+  CELERY_BROKER_URLS = ""
+
+# Required secret - set via `fly secrets set`:
+# CELERY_BROKER_URLS: Semicolon-separated Redis URLs (e.g., "redis://user:pass@upstash.io:6379;redis://user:pass@backup.com:6379")
+
+[[services]]
+  internal_port = 6380
+  protocol = "tcp"
+  
+  # Only accessible within Fly internal network
+  # No public ports - this is an internal proxy service
+
+[[services]]
+  internal_port = 8080  # HAProxy stats page
+  protocol = "tcp"
+  
+  # Optional: expose stats page internally for debugging
+  # Access via: fly ssh console -a swarm-redis-proxy
+  # Then: curl http://localhost:8080/stats
+
+# Health check for HAProxy
+[[checks]]
+  type = "tcp"
+  port = 6380
+  interval = "10s"
+  timeout = "3s"
+  grace_period = "15s"
+
+# Minimal resources - HAProxy is very efficient
+[vm]
+  size = "shared-cpu-1x"
+  memory = 256
