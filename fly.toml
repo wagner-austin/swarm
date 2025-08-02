@@ -11,16 +11,17 @@ kill_timeout = 30
   USE_DISTRIBUTED_WORKERS = "true"
   LOG_FORMAT = "json"
   LOG_TO_FILE = "0"
-  # Redis settings
   REDIS__ENABLED = "true"
-  # These will be set via fly secrets set:
-  # REDIS__URL
-  # CELERY_BROKER_URLS
-  # FLY_API_TOKEN (for autoscaler)
   
   # Metrics ports
   METRICS_PORT = "9200"         # Main swarm process
   WORKER_METRICS_PORT = "9100"  # Worker processes
+
+# Required secrets - set these via `fly secrets set`:
+# - REDIS__URL: Full Redis URL including password (points to swarm-redis-proxy.internal:6380)
+# - CELERY_BROKER_URL: Same as REDIS__URL
+# - DISCORD_TOKEN: Your Discord bot token
+# - FLY_API_TOKEN: For autoscaler to manage Fly machines
 
 [processes]
   # Main Discord bot
@@ -28,7 +29,7 @@ kill_timeout = 30
   # Celery worker for browser automation
   worker = "/usr/local/bin/entrypoint.worker.sh"
   # Flower monitoring UI (optional - can be removed to save resources)
-  flower = "celery --broker=$CELERY_BROKER_URLS flower --port=5555 --persistent"
+  flower = "celery --broker=${CELERY_BROKER_URL} flower --port=5555 --persistent"
   # Autoscaler using Fly.io backend
   autoscaler = "python -m scripts.celery_autoscaler --flower-url=http://localhost:5555 --orchestrator=fly.io --fly-api-token=$FLY_API_TOKEN"
 
@@ -48,7 +49,7 @@ kill_timeout = 30
   port = 9100
   path = "/metrics"  # prometheus_client only provides /metrics endpoint
   interval = "30s"
-  timeout = "5s"
+  timeout = "5s"  
   grace_period = "60s"  # Workers need time to start browser
 
 # Internal service for metrics/health - no public exposure needed
