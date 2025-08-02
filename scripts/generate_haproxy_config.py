@@ -11,8 +11,11 @@ Usage:
 Environment variables:
     CELERY_BROKER_URLS: Semicolon-separated list of Redis URLs
         Example: "redis://primary:6379;redis://backup1:6379;redis://backup2:6379"
+        The first URL is treated as primary, all others as backups.
 
-    The first URL is treated as primary, all others as backups.
+    MAXCONN: Maximum concurrent connections (default: 256)
+    TIMEOUT_CLIENT: Client timeout (default: 50s)
+    TIMEOUT_SERVER: Server timeout (default: 50s)
 """
 
 import os
@@ -86,16 +89,27 @@ def generate_haproxy_config(redis_urls: str) -> str:
             log(f"ERROR: Failed to parse Redis URL #{i + 1}: {e}")
             raise
 
-    config = """global
+    # Get maxconn from environment with validation
+    try:
+        maxconn = int(os.getenv("MAXCONN", "256"))
+    except ValueError:
+        log("Invalid MAXCONN value; defaulting to 256")
+        maxconn = 256
+
+    # Get timeout values from environment
+    timeout_client = os.getenv("TIMEOUT_CLIENT", "50s")
+    timeout_server = os.getenv("TIMEOUT_SERVER", "50s")
+
+    config = f"""global
     # No daemon mode - must run in foreground for Docker
-    maxconn 256
+    maxconn {maxconn}
     log stdout local0 warning
 
 defaults
     mode tcp
     timeout connect 5000ms
-    timeout client 50000ms
-    timeout server 50000ms
+    timeout client {timeout_client}
+    timeout server {timeout_server}
     option tcplog
     log global
     retries 3

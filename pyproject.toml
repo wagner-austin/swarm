@@ -73,6 +73,7 @@ mypy_path = "stubs"
 exclude = [
     "tests/helpers/mocks.py",
     "tests/helpers/__init__.py",
+    "scripts/debug/",
 ]
 # Strictness knobs ─ tighten gradual typing
 strict_optional = true
