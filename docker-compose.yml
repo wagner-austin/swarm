@@ -43,6 +43,10 @@ services:
       - CELERY_BROKER_URLS=${HAPROXY_REDIS_URLS}
       - HAPROXY_CONFIG_OUTPUT=/config/haproxy-redis-generated.cfg
       # Password will be extracted from URL by entrypoint script
+      # Connection limits - prevent socket exhaustion during tests/load
+      - MAXCONN=2048  # 8x default, handles CI bursts + production traffic
+      - TIMEOUT_CLIENT=30s  # Match Celery's long-poll for result backend
+      - TIMEOUT_SERVER=30s
     volumes:
       - ./config:/config
     ports:
@@ -276,6 +280,8 @@ services:
   #     - WORKER_PORT=9110
   #     - DISPLAY=:99
   #     - REDIS_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+  #     - REDIS__URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+  #     - REDIS__ENABLED=true
   #     - CELERY_BROKER_URLS=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
   #     - WORKER_ID=worker-special
   #     - JOB_TYPE_PREFIX=tankpit
