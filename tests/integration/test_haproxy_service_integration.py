@@ -165,21 +165,21 @@ async def test_celery_broker_has_valid_redis_url() -> None:
 async def test_flower_connects_through_haproxy() -> None:
     """Verify Flower is configured to use HAProxy."""
     try:
-        # Check Flower's environment in Docker
+        # Check Flower's command to see broker URL
         result = subprocess.run(
-            ["docker", "exec", "flower", "printenv", "CELERY_BROKER_URL"],
+            ["docker", "inspect", "flower", "--format", "{{.Config.Cmd}}"],
             capture_output=True,
             text=True,
         )
 
         if result.returncode == 0:
-            broker_url = result.stdout.strip()
-            # In test environment, Flower should use HAProxy for consistency
-            assert "haproxy-redis:6380" in broker_url, (
-                f"Flower not using HAProxy. Broker URL: {broker_url}"
-            )
+            cmd_str = result.stdout.strip()
+            # Flower should be using HAProxy (port 6380) in its broker URL
+            assert "haproxy-redis:6380" in cmd_str, f"Flower not using HAProxy. Command: {cmd_str}"
         else:
-            pytest.skip("Flower container not running. Run 'docker compose up -d flower' first.")
+            pytest.skip(
+                "Flower container not running. Run 'docker compose --profile monitoring up -d flower' first."
+            )
     except subprocess.CalledProcessError:
         pytest.skip("Unable to check Flower configuration. Ensure Docker is running.")
 
