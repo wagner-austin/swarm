@@ -410,7 +410,7 @@ async def cleanup(self: BrowserTask, task_id: str) -> dict[str, Any]:
     return {"success": True, "task_id": task_id}
 
 
-@app.task(bind=True, name="browser.scrape_data")
+@typed_task(bind=True, name="browser.scrape_data")
 def scrape_data(self: TaskType, url: str, actions: list[dict[str, Any]]) -> dict[str, Any]:
     """
     High-level orchestration task to scrape data from a web page with actions.
