@@ -249,7 +249,7 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
     log_format = os.getenv("LOG_FORMAT", "json").lower()
     if log_format == "pretty":
         config["root"]["handlers"] = ["rich"]
-    if os.getenv("LOG_TO_FILE"):
+    if os.getenv("LOG_TO_FILE", "").lower() in ("true", "1", "yes", "on"):
         # Dynamically create file handler when requested
         log_file = os.getenv("LOG_FILE_PATH", "logs/swarm.log")
         log_dir = os.path.dirname(log_file)
