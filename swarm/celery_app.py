@@ -17,7 +17,7 @@ import ssl
 from typing import Any, Iterator
 
 import celery.signals as signals
-from celery import Celery
+from celery.app.base import Celery
 from celery.app.task import Task as CeleryTask
 from kombu import Queue
 
@@ -34,38 +34,6 @@ logger.info("Initializing Celery configuration")
 logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
 logger.info(f"Redis enabled: {settings.redis.enabled}")
 logger.info(f"Redis URL from settings: {'SET' if settings.redis.url else 'NOT SET'}")
-
-# Get Celery broker URLs from environment
-# This can be a single URL or semicolon-separated list for failover
-celery_broker_urls = os.getenv("CELERY_BROKER_URLS")
-logger.info(f"CELERY_BROKER_URLS env var: {'SET' if celery_broker_urls else 'NOT SET'}")
-
-# Fallback to REDIS_URL if CELERY_BROKER_URLS not set
-if not celery_broker_urls:
-    primary_url = settings.redis.url
-    if not primary_url:
-        logger.error("FATAL: Neither CELERY_BROKER_URLS nor REDIS_URL configured")
-        logger.error(
-            f"Environment variables checked: CELERY_BROKER_URLS={celery_broker_urls}, REDIS__URL={os.getenv('REDIS__URL')}"
-        )
-        raise ValueError("Neither CELERY_BROKER_URLS nor REDIS_URL configured")
-    celery_broker_urls = primary_url
-    logger.warning("CELERY_BROKER_URLS not set, using REDIS_URL from settings")
-
-# Parse broker URLs - handle both single URL and semicolon-separated list
-broker_urls: str | list[str]
-if ";" in celery_broker_urls:
-    broker_urls_list = celery_broker_urls.split(";")
-    broker_urls = [url.strip() for url in broker_urls_list if url.strip()]
-    logger.info(f"Celery configured with {len(broker_urls)} broker URLs for failover")
-    # Log sanitized URLs (hide passwords)
-    for i, url in enumerate(broker_urls):
-        sanitized = url.split("@")[1] if "@" in url else url
-        logger.info(f"  Broker {i + 1}: ...@{sanitized}")
-else:
-    broker_urls = celery_broker_urls
-    sanitized = broker_urls.split("@")[1] if "@" in broker_urls else broker_urls
-    logger.info(f"Celery configured with single broker URL: ...@{sanitized}")
 
 # Determine if we're in production
 is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
@@ -84,74 +52,147 @@ def fix_ssl_url(url: str) -> str:
     return url
 
 
-# Process URLs to add SSL parameters
-if isinstance(broker_urls, list):
-    broker_urls = [fix_ssl_url(url) for url in broker_urls]
-else:
-    broker_urls = fix_ssl_url(broker_urls)
+def create_celery(
+    name: str = "swarm",
+    broker_url: str | None = None,
+    result_backend: str | None = None,
+) -> Celery:
+    """Create a Celery application with the given configuration.
 
-# Create Celery app
-app = Celery("swarm")
+    This factory pattern allows tests to create isolated Celery instances
+    without affecting the global app state.
+    """
+    # Use provided broker URL or fall back to environment
+    if broker_url is None:
+        # Get Celery broker URLs from environment
+        # This can be a single URL or semicolon-separated list for failover
+        celery_broker_urls = os.getenv("CELERY_BROKER_URLS")
+        logger.info(f"CELERY_BROKER_URLS env var: {'SET' if celery_broker_urls else 'NOT SET'}")
+
+        # Fallback to REDIS_URL if CELERY_BROKER_URLS not set
+        if not celery_broker_urls:
+            primary_url = settings.redis.url
+            if not primary_url:
+                logger.error("FATAL: Neither CELERY_BROKER_URLS nor REDIS_URL configured")
+                logger.error(
+                    f"Environment variables checked: CELERY_BROKER_URLS={celery_broker_urls}, REDIS__URL={os.getenv('REDIS__URL')}"
+                )
+                raise ValueError("Neither CELERY_BROKER_URLS nor REDIS_URL configured")
+            celery_broker_urls = primary_url
+            logger.warning("CELERY_BROKER_URLS not set, using REDIS_URL from settings")
+    else:
+        celery_broker_urls = broker_url
+
+    # Parse broker URLs - handle both single URL and semicolon-separated list
+    broker_urls: str | list[str]
+    if ";" in celery_broker_urls:
+        broker_urls_list = celery_broker_urls.split(";")
+        broker_urls = [url.strip() for url in broker_urls_list if url.strip()]
+        logger.info(f"Celery configured with {len(broker_urls)} broker URLs for failover")
+        # Log sanitized URLs (hide passwords)
+        for i, url in enumerate(broker_urls):
+            sanitized = url.split("@")[1] if "@" in url else url
+            logger.info(f"  Broker {i + 1}: ...@{sanitized}")
+    else:
+        broker_urls = celery_broker_urls
+        sanitized = broker_urls.split("@")[1] if "@" in broker_urls else broker_urls
+        logger.info(f"Celery configured with single broker URL: ...@{sanitized}")
+
+    # Process URLs to add SSL parameters
+    if isinstance(broker_urls, list):
+        broker_urls = [fix_ssl_url(url) for url in broker_urls]
+    else:
+        broker_urls = fix_ssl_url(broker_urls)
+
+    # Use provided result backend or default to broker URL
+    if result_backend is None:
+        result_backend = broker_urls[0] if isinstance(broker_urls, list) else broker_urls
+
+    # Create Celery app
+    celery_app = Celery(name)
+
+    # Connection pool limit - prevents unbounded socket creation
+    POOL_LIMIT = 10
+
+    # Configure Celery
+    celery_app.conf.update(
+        broker_url=broker_urls,  # List of URLs for automatic failover!
+        # Result backend must be a single URL - use primary only
+        result_backend=result_backend,
+        broker_failover_strategy="round-robin",  # Use built-in round-robin strategy
+        broker_connection_retry_on_startup=True,  # Retry connection on startup
+        broker_connection_retry=True,  # Retry broker connection on failure
+        broker_connection_max_retries=10,  # Max retries before giving up
+        broker_pool_limit=POOL_LIMIT,  # Connection pool size for broker
+        # CRITICAL: Cap result backend connections to prevent socket exhaustion
+        redis_backend_max_connections=POOL_LIMIT,  # Was unbounded (None)
+        broker_transport_options={
+            "priority_steps": list(range(10)),
+            # Visibility timeout should be longer than the longest task
+            "visibility_timeout": 43200,  # 12 hours for long-running tasks
+            # Health check interval
+            "health_check_interval": 30,  # Check broker health every 30 seconds
+            # Socket options for better reliability through HAProxy
+            "socket_keepalive": True,
+            "socket_timeout": 10,
+            # Max connections for Celery 5.3+
+            "max_connections": POOL_LIMIT,
+        },
+        # Result backend transport options - needed for Celery <5.3
+        result_backend_transport_options={
+            "max_connections": POOL_LIMIT,
+        },
+        # Task settings
+        task_serializer="json",
+        accept_content=["json"],
+        result_serializer="json",
+        timezone="UTC",
+        enable_utc=True,
+        # Retry settings
+        task_acks_late=True,  # Acknowledge after task completion
+        task_reject_on_worker_lost=True,
+        # Performance settings
+        worker_prefetch_multiplier=1,  # One task at a time for browser workers
+        worker_max_tasks_per_child=100,  # Restart worker after 100 tasks
+        # Error handling
+        task_default_retry_delay=30,  # 30 seconds
+        task_max_retries=3,
+        # Event settings for monitoring
+        worker_send_task_events=True,  # Send task events for Flower
+        task_send_sent_event=True,  # Send event when task is sent
+    )
+
+    # Define task queues for different job types
+    celery_app.conf.task_routes = {
+        "browser.*": {"queue": "browser"},
+        "browser.cleanup": {"queue": "browser"},  # Explicit for clarity
+        "browser.scrape_data": {"queue": "default"},  # Orchestration task runs on default queue
+        "tankpit.*": {"queue": "tankpit"},
+        "llm.*": {"queue": "llm"},
+    }
+
+    celery_app.conf.task_queues = (
+        Queue("browser", routing_key="browser", priority=5),
+        Queue("tankpit", routing_key="tankpit", priority=3),
+        Queue("llm", routing_key="llm", priority=1),
+        Queue("default", routing_key="default", priority=0),
+    )
+
+    # Import tasks to register them
+    celery_app.autodiscover_tasks(["swarm.tasks"])
+
+    # Log configuration on startup
+    if isinstance(broker_urls, list):
+        logger.info(f"Celery broker failover configured with {len(broker_urls)} URLs")
+        logger.info("Failover strategy: round-robin")
+    else:
+        logger.info("Celery configured with single broker URL")
+
+    return celery_app
 
 
-# Configure Celery
-app.conf.update(
-    broker_url=broker_urls,  # List of URLs for automatic failover!
-    # Result backend must be a single URL - use primary only
-    result_backend=broker_urls[0] if isinstance(broker_urls, list) else broker_urls,
-    broker_failover_strategy="round-robin",  # Use built-in round-robin strategy
-    broker_connection_retry_on_startup=True,  # Retry connection on startup
-    broker_connection_retry=True,  # Retry broker connection on failure
-    broker_connection_max_retries=10,  # Max retries before giving up
-    broker_pool_limit=10,  # Connection pool size
-    broker_transport_options={
-        "priority_steps": list(range(10)),
-        # Visibility timeout should be longer than the longest task
-        "visibility_timeout": 43200,  # 12 hours for long-running tasks
-        # Health check interval
-        "health_check_interval": 30,  # Check broker health every 30 seconds
-        # Socket options for better reliability through HAProxy
-        "socket_keepalive": True,
-        "socket_timeout": 10,
-    },
-    # Task settings
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-    # Retry settings
-    task_acks_late=True,  # Acknowledge after task completion
-    task_reject_on_worker_lost=True,
-    # Performance settings
-    worker_prefetch_multiplier=1,  # One task at a time for browser workers
-    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks
-    # Error handling
-    task_default_retry_delay=30,  # 30 seconds
-    task_max_retries=3,
-    # Event settings for monitoring
-    worker_send_task_events=True,  # Send task events for Flower
-    task_send_sent_event=True,  # Send event when task is sent
-)
-
-# Define task queues for different job types
-app.conf.task_routes = {
-    "browser.*": {"queue": "browser"},
-    "browser.cleanup": {"queue": "browser"},  # Explicit for clarity
-    "browser.scrape_data": {"queue": "default"},  # Orchestration task runs on default queue
-    "tankpit.*": {"queue": "tankpit"},
-    "llm.*": {"queue": "llm"},
-}
-
-app.conf.task_queues = (
-    Queue("browser", routing_key="browser", priority=5),
-    Queue("tankpit", routing_key="tankpit", priority=3),
-    Queue("llm", routing_key="llm", priority=1),
-    Queue("default", routing_key="default", priority=0),
-)
-
-# Import tasks to register them
-app.autodiscover_tasks(["swarm.tasks"])
+# Create the default global app instance using the factory
+app = create_celery()
 
 # Configure Celery signals for logging context
 
@@ -199,16 +240,3 @@ def log_task_failure(
 ) -> None:
     """Log task failures with full context."""
     logger.error(f"Task failed with ID {task_id}: {exception}")
-
-
-# Log configuration on startup
-if isinstance(broker_urls, list):
-    logger.info(f"Celery broker failover configured with {len(broker_urls)} URLs")
-    logger.info("Failover strategy: round-robin")
-else:
-    logger.info("Celery configured with single broker URL")
-
-
-def get_celery_app() -> Celery:
-    """Get the configured Celery application."""
-    return app
