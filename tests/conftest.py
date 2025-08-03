@@ -1,8 +1,25 @@
+# ruff: noqa: E402
 #!/usr/bin/env python
 # Add the src directory to the Python path for all tests
 
-import asyncio
 import os
+
+from dotenv import load_dotenv
+
+# IMPORTANT: Configure Celery singleton BEFORE any imports
+load_dotenv()
+
+password = os.getenv("REDIS_PASSWORD", "")
+auth_part = f"default:{password}@" if password else ""
+# Use HAProxy for consistency with production
+BROKER = f"redis://{auth_part}localhost:6380/0"
+
+os.environ["REDIS_URL"] = BROKER
+os.environ["CELERY_BROKER_URL"] = BROKER
+os.environ["CELERY_BROKER_URLS"] = BROKER
+
+# Now import everything else
+import asyncio
 import warnings
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
@@ -10,13 +27,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Load .env file to get REDIS_PASSWORD
-from dotenv import load_dotenv
-
 from swarm.core.logger_setup import setup_logging
 from swarm.core.settings import Settings
-
-load_dotenv()
 
 # Configure Redis URLs for tests
 # This ensures all tests have proper authentication from .env file
@@ -24,11 +36,12 @@ password = os.getenv("REDIS_PASSWORD", "")
 if password:
     # Always use authenticated URLs for tests when password is set
     auth_part = f"default:{password}@"
-    redis_url = f"redis://{auth_part}localhost:6379/0"
+    # Use HAProxy for tests to match production behavior
+    redis_url = f"redis://{auth_part}localhost:6380/0"
 
     # Override any Redis URLs to include authentication
     os.environ["REDIS_URL"] = redis_url
-    os.environ["CELERY_BROKER_URLS"] = f"{redis_url};{redis_url}"
+    os.environ["CELERY_BROKER_URLS"] = redis_url
     os.environ["CELERY_BROKER_URL"] = redis_url
 
     # Also set the password separately for tests that build their own URLs
