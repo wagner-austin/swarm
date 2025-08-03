@@ -87,7 +87,7 @@ class BrowserHealthMonitor(BaseDIClientCog):
                 # Each response is a dict like: {'celery@hostname': {'ok': 'pong'}}
                 # TODO: In the future, check worker capabilities/queues to identify browser workers
                 # For now, count all workers since we only have one worker type
-                healthy_workers = len(ping_responses)
+                healthy_workers = len(ping_responses) if ping_responses else 0
                 logger.info(
                     f"Worker health check complete: {healthy_workers} workers responded to ping"
                 )
