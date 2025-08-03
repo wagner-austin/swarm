@@ -20,7 +20,7 @@ Discord is merely ONE frontend interface. The system is designed to be platform-
 - **Remove Channel-Centric Design**: Current `/close_channel` and channel-to-browser mapping is wrong
 - **Add Task Planning**: Need intelligent task decomposition and planning capabilities
 - **Worker Capabilities**: Workers should advertise what they can do, not be hardcoded types
-- **Session Management**: Sessions should be task-scoped, not channel-scoped
+- **Session Management**: ~~Sessions should be task-scoped, not channel-scoped~~ - IN PROGRESS with browser session affinity design
 - ✅ ~~**Job Visibility**: Need better monitoring~~ - DONE with celery-exporter and structured logging
 
 ## Collaboration Guidelines for Claude
@@ -129,6 +129,13 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 2. Using the FakeScalingBackend for integration tests
 3. Testing command construction separately from execution
 
+### Key Architectural Patterns Established
+1. **Dynamic Dispatch Safety**: Always filter kwargs using `filter_kwargs_for_method` before calling dynamically dispatched methods
+2. **Worker State Machine**: Formal states (IDLE, WAITING, BUSY, ERROR, SHUTDOWN) with proper transitions
+3. **Idempotent Stream Creation**: Redis streams and consumer groups created safely for concurrent startup
+4. **Session Cleanup**: Browser and TankPit engines cleaned up after each job and at shutdown
+5. **Observability First**: Health/metrics endpoints, structured logging, deployment context awareness
+
 ### Dependencies
 - Redis for distributed state management
 - Docker/Docker Compose for containerization
@@ -136,7 +143,7 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 - Ruff for linting/formatting
 - MyPy for type checking
 
-## Recent Observability Improvements (2025-07-30)
+## Recent Observability Improvements (2025-08-03)
 
 ### Monitoring Stack Enhanced
 1. **Added celery-exporter** - Lightweight Prometheus metrics (20MB) replacing flower-refresher
@@ -151,11 +158,20 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
    - `docs/capability-queue-mapping.md` - Future capability-based routing design
    - `docs/service-architecture.md` - Maps all services and identifies orphaned code
    - `docs/service-cleanup-tasks.md` - Specific cleanup instructions
+   - `docs/browser-session-affinity-design.md` - Production-grade solution for session routing
+   - `docs/haproxy-deployment.md` - HAProxy Redis proxy deployment guide
+
+### Recent Infrastructure Improvements (2025-08-03)
+1. **HAProxy Configuration** - Added configurable connection limits and timeouts via env vars
+2. **Docker Compose Profiles** - Added monitoring profile for optional services
+3. **Debug Worker** - Created VNC-enabled worker configuration for visual debugging
+4. **Fly.io Redis Proxy** - Separate deployment config for dedicated Redis proxy service
 
 ### Discovered Issues
 1. **ScalingService is orphaned** - Defined but never used (replaced by celery_autoscaler)
 2. **Services scattered** - No central organization or registry
 3. **Old dashboard outdated** - Expects metrics from old Worker system, not Celery
+4. **Browser session affinity** - Tasks with same session routed to different workers (design complete, implementation pending)
 
 ### Monitoring Commands
 - **Check monitoring health**: `python scripts/check_monitoring.py`
@@ -165,41 +181,50 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 
 ## Handoff Context for Next Conversation
 
-### Current State (2025-07-30)
+### Current State (2025-08-03)
 - **Celery migration complete** - All browser tasks use Celery with proper retry/timeout handling
 - **Observability enhanced** - Added celery-exporter, structured logging with job_id context
-- **Architecture documented** - Created guides for services, capabilities, monitoring setup
-- **Issues identified** - Found orphaned ScalingService, outdated dashboard, scattered services
+- **Architecture documented** - Created comprehensive guides including session affinity design
+- **Infrastructure improved** - HAProxy configuration, Docker profiles, debug worker with VNC
+- **Session affinity designed** - Production-grade solution with Lua scripts, TTL management, cleanup jobs
 
 ### Immediate Next Steps (Phase 1)
 
-1. **Clean up orphaned code**:
-   - Remove ScalingService from containers.py and its file
-   - Move ScalingBackend protocol to `swarm/distributed/protocols.py`
-   - Update all imports in backends and autoscaler
-   - Remove QueueMetricsService (incompatible with Celery)
+1. **Implement browser session affinity**:
+   - Create SessionRegistry with Lua scripts for atomicity
+   - Implement BrowserSessionRouter for Celery task routing
+   - Add worker heartbeat with capability advertisement
+   - Update BrowserTask to register/unregister sessions
+   - Create direct worker queues for session-affined routing
+   - Add integration test for concurrent goto/click operations
 
-2. **Organize services**:
+2. **Clean up orphaned code**: ✅ COMPLETE
+   - ✅ Remove ScalingService from containers.py and its file (DONE)
+   - ✅ Remove QueueMetricsService (DONE)
+   - ✅ ScalingBackend protocol already in `swarm/distributed/protocols.py` (DONE)
+   - ✅ All imports already use correct path (DONE)
+
+3. **Organize services**:
    - Create `swarm/services/` directory structure
    - Move services to appropriate subdirectories
    - Document service lifecycle and dependencies
 
-3. **Remove Discord-centric design**:
+4. **Remove Discord-centric design**:
    - Delete `close_channel` from web.py (still exists)
    - Remove channel_id from browser session management
    - Create abstract `Context` class to replace Discord interactions
 
-4. **Add more worker types**:
+5. **Add more worker types**:
    - Implement tankpit worker queue and tasks
    - Add LLM worker type for local model inference
    - Create capability-based task routing
 
-5. **Improve task decomposition**:
+6. **Improve task decomposition**:
    - Add task planner that breaks complex requests into subtasks
    - Implement dependency graph for subtask execution
    - Add progress streaming via Redis pub/sub
 
-6. **Multi-frontend support**:
+7. **Multi-frontend support**:
    - Extract Discord-specific code to adapter
    - Add Telegram frontend
    - Add REST API frontend
@@ -282,7 +307,7 @@ Benefits:
 - [x] Update all tests to work with Celery
 - [ ] Add multi-frontend support (Discord, Telegram, web, SMS, etc.)
     - [ ] Separate out logic from frontend specific code in swarm/plugins/commands/
-- [ ] Add worker capability advertisement/heartbeat
+- [ ] Add worker capability advertisement/heartbeat (IN PROGRESS - session affinity design complete)
 - [x] Refactor queue naming in ProxyService/engines for generic MITM support
 - [x] Add docker-compose example for swarm and workers
 

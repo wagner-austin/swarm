@@ -18,7 +18,7 @@ Building an AI-powered task execution system capable of handling complex, real-w
 5. **Massively Scalable**: Support hundreds of concurrent workers across multiple machines
 6. **Observable**: Full visibility into task progress, worker status, and system health
 
-## Current Implementation Status (2025-07-28)
+## Current Implementation Status (2025-08-03)
 - ✅ Migrated from custom broker to Celery distributed task queue
 - ✅ Fixed job lifecycle with proper retry/timeout handling via Celery
 - ✅ Autoscaler now uses Flower API for accurate queue monitoring
@@ -26,10 +26,12 @@ Building an AI-powered task execution system capable of handling complex, real-w
 - ✅ Implemented HAProxy for automatic Redis failover (Upstash ↔ local Redis)
 - ✅ All services now use HAProxy endpoint (port 6380) for resilience
 - ✅ Created test-specific Docker profile to avoid Upstash rate limits
+- ✅ Designed production-grade browser session affinity solution
+- ✅ Enhanced monitoring with celery-exporter and structured logging
 - ⏳ System is still Discord-channel-centric instead of task-centric
 - ⏳ No task planning or decomposition logic yet
 - ⏳ Workers are type-based (browser, tankpit) instead of capability-based
-- ⏳ Need to implement task-scoped sessions
+- ⏳ Browser session affinity implementation in progress
 
 ## Implementation History & Lessons Learned
 ### Key Architectural Patterns Established
@@ -45,6 +47,11 @@ Building an AI-powered task execution system capable of handling complex, real-w
 - [x] **Fix job acknowledgment** - Celery handles this automatically
 - [x] **Complete QueueMetrics integration** - Autoscaler uses Flower API
 - [x] **Implement dead letter queue** - Celery handles with max_retries
+- [ ] **Implement browser session affinity** (In Progress)
+  - SessionRegistry with Lua scripts for atomicity
+  - BrowserSessionRouter for intelligent task routing
+  - Worker heartbeat with capability advertisement
+  - Direct worker queues for session-affined routing
 - [ ] **Remove Discord-channel code** (Still needed)
   - Delete close_channel, closeall commands
   - Remove channel_id from session management
