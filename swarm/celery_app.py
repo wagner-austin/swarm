@@ -23,6 +23,7 @@ from kombu import Queue
 
 from swarm.core.logger_setup import bind_log_context, setup_logging
 from swarm.core.settings import Settings
+from swarm.distributed.browser_router import BrowserSessionRouter
 
 # Initialize logging first
 setup_logging()
@@ -157,9 +158,16 @@ def create_celery(
         # Error handling
         task_default_retry_delay=30,  # 30 seconds
         task_max_retries=3,
+        # Result expiration - CRITICAL for free tier Redis (Upstash 100k commands/10 days)
+        # Clean up task results after 1 hour to prevent infinite accumulation
+        result_expires=3600,  # 1 hour in seconds
         # Event settings for monitoring
-        worker_send_task_events=True,  # Send task events for Flower
-        task_send_sent_event=True,  # Send event when task is sent
+        # DISABLED by default - events cost 10-20 Redis commands per task!
+        # Flower still works for autoscaler (uses API, not events)
+        # celery-exporter provides metrics WITHOUT events via Celery Inspect API
+        # Set CELERY_SEND_EVENTS=true environment variable to enable for debugging
+        worker_send_task_events=os.getenv("CELERY_SEND_EVENTS", "false").lower() == "true",
+        task_send_sent_event=os.getenv("CELERY_SEND_EVENTS", "false").lower() == "true",
     )
 
     # Define task queues for different job types
@@ -193,6 +201,13 @@ def create_celery(
 
 # Create the default global app instance using the factory
 app = create_celery()
+
+# Preserve the existing dict while adding the router object
+prev_routes = app.conf.task_routes
+
+# Celery accepts a list/tuple mixing router objects and dicts
+# BrowserSessionRouter gets first shot, falls through to dict if it returns None
+app.conf.task_routes = [BrowserSessionRouter(), prev_routes]
 
 # Configure Celery signals for logging context
 
@@ -240,3 +255,60 @@ def log_task_failure(
 ) -> None:
     """Log task failures with full context."""
     logger.error(f"Task failed with ID {task_id}: {exception}")
+
+
+"""Worker lifecycle management
+
+Registers each Celery worker in Redis and maintains a lightweight heartbeat
+used by the BrowserHealthMonitor and the affinity router.
+"""
+
+_worker_lifecycle = None  # Global instance
+
+
+@signals.worker_ready.connect
+def register_worker(sender: Any, **kwargs: Any) -> None:
+    """Register worker when Celery starts."""
+    from swarm.distributed.worker_lifecycle import WorkerLifecycle
+
+    global _worker_lifecycle
+
+    # Extract worker ID from hostname
+    # Celery hostname format: "name@host" or just "host"
+    hostname = sender.hostname if hasattr(sender, "hostname") else None
+    if not hostname:
+        logger.error("Cannot register worker: no hostname found")
+        return
+
+    # Extract the host part after @
+    if "@" in hostname:
+        worker_id = hostname.split("@", 1)[1]
+    else:
+        worker_id = hostname
+
+    logger.info(f"Worker ready signal received, registering worker: {worker_id}")
+
+    try:
+        # Create and register lifecycle manager
+        _worker_lifecycle = WorkerLifecycle(worker_id)
+        _worker_lifecycle.register()
+        _worker_lifecycle.start_heartbeat()
+
+        logger.info(f"Worker {worker_id} registered and heartbeat started")
+    except Exception as e:
+        logger.error(f"Failed to register worker {worker_id}: {e}", exc_info=True)
+
+
+@signals.worker_shutting_down.connect
+def unregister_worker(sender: Any, **kwargs: Any) -> None:
+    """Clean up when worker shuts down."""
+    global _worker_lifecycle
+
+    if _worker_lifecycle:
+        logger.info(f"Worker shutting down, stopping heartbeat for {_worker_lifecycle.worker_id}")
+        try:
+            _worker_lifecycle.stop_heartbeat()
+        except Exception as e:
+            logger.error(f"Error during worker shutdown: {e}", exc_info=True)
+        finally:
+            _worker_lifecycle = None
