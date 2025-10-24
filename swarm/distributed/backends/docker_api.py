@@ -165,9 +165,14 @@ class DockerApiBackend(ScalingBackend):
                 "WORKER_TYPE": worker_type,  # For worker identification
                 "CELERY_QUEUES": worker_type,  # Which queue to consume
                 "CELERY_HOSTNAME": f"{worker_type}-{instance_num}@%h",
-                "CELERY_CONCURRENCY": "2",
+                "CELERY_CONCURRENCY": "2",  # Allow multiple threads - loop-local engines handle it
                 "CELERY_POOL": "threads" if worker_type == "browser" else "prefork",
-                "CELERY_LOGLEVEL": "info",
+                "CELERY_LOGLEVEL": os.getenv("CELERY_LOGLEVEL", "info"),
+                # Lower Redis command usage: make events opt-in and slow heartbeat by default
+                # Toggle events by setting CELERY_SEND_EVENTS=true when needed for debugging
+                "CELERY_SEND_EVENTS": os.getenv("CELERY_SEND_EVENTS", "false"),
+                # Heartbeat interval in seconds (default 60 to reduce Redis ops ~3x vs 20s)
+                "WORKER_HEARTBEAT_INTERVAL": os.getenv("WORKER_HEARTBEAT_INTERVAL", "60"),
                 "WORKER_METRICS_PORT": str(self.worker_metrics_port),  # For Prometheus metrics
             }
 
