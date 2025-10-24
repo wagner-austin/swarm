@@ -30,3 +30,10 @@ scrape_configs:
       - targets: ['celery-exporter:9808']
     scrape_interval: 15s
     metrics_path: /metrics
+
+  - job_name: 'haproxy_stats'
+    static_configs:
+      # HAProxy stats: backend health, connection counts, failover status
+      - targets: ['haproxy-redis:8080']
+    scrape_interval: 10s
+    metrics_path: /stats;csv

@@ -1,0 +1,117 @@
+---
+# Grafana Alert Rules for Redis/HAProxy Monitoring
+# Import this into Grafana to get alerts for:
+# 1. Redis authentication failures
+# 2. Failover events (Upstash → Local)
+# 3. Connection errors
+
+apiVersion: 1
+groups:
+  - name: Redis Health Alerts
+    interval: 30s
+    rules:
+      - uid: redis_auth_failure
+        title: Redis Authentication Failures
+        condition: B
+        data:
+          - refId: A
+            queryModel:
+              expr: |
+                rate({job="docker"} |= "ERR invalid password" or
+                     {job="docker"} |= "NOAUTH Authentication required" or
+                     {job="docker"} |= "AuthenticationError"[5m]) > 0
+              refId: A
+            datasourceUid: loki
+          - refId: B
+            queryModel:
+              expr: $A > 0
+              reducer: last
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  type: query
+        noDataState: NoData
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          description: Redis authentication failures detected. Check REDIS_PASSWORD in .env
+          summary: Redis Auth Failed
+        labels:
+          severity: critical
+          component: redis
+
+      - uid: redis_failover_active
+        title: Redis Failover Active
+        condition: B
+        data:
+          - refId: A
+            queryModel:
+              expr: |
+                count_over_time({container="haproxy-redis"}
+                  |= "Running on backup"[1m]) > 0
+              refId: A
+            datasourceUid: loki
+          - refId: B
+            queryModel:
+              expr: $A > 0
+              reducer: last
+        noDataState: NoData
+        execErrState: Alerting
+        for: 30s
+        annotations:
+          description: HAProxy has failed over from Upstash to local Redis backup
+          summary: Redis Failover - Running on Backup
+        labels:
+          severity: warning
+          component: haproxy
+
+      - uid: redis_connection_errors
+        title: Redis Connection Errors
+        condition: B
+        data:
+          - refId: A
+            queryModel:
+              expr: |
+                rate({job="docker"}
+                  |= "redis.exceptions.ConnectionError" or
+                  |= "Connection refused" or
+                  |= "Connection reset"[5m]) > 0.1
+              refId: A
+            datasourceUid: loki
+          - refId: B
+            queryModel:
+              expr: $A > 0.1
+              reducer: last
+        noDataState: NoData
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          description: Elevated Redis connection errors detected
+          summary: Redis Connection Issues
+        labels:
+          severity: warning
+          component: redis
+
+      - uid: haproxy_down
+        title: HAProxy Down
+        condition: A
+        data:
+          - refId: A
+            queryModel:
+              expr: up{job="haproxy_stats"} == 0
+              refId: A
+            datasourceUid: prometheus
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          description: HAProxy stats endpoint is not responding
+          summary: HAProxy Redis Proxy Down
+        labels:
+          severity: critical
+          component: haproxy
