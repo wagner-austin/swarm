@@ -51,6 +51,15 @@ class Web(
             browser = CeleryBrowserRuntime()
         self.browser = browser
 
+    def _session_id_for_interaction(self, interaction: discord.Interaction) -> str:
+        """Derive a stable session id for this Discord context (guild/channel).
+
+        Uses guild_id if present, otherwise 'dm'. Always includes channel_id.
+        """
+        guild_part = str(interaction.guild_id) if interaction.guild_id is not None else "dm"
+        channel_part = str(interaction.channel_id)
+        return f"discord:{guild_part}:{channel_part}"
+
     async def _check_browser_health(self) -> bool:
         """Check if browser workers are healthy before executing commands."""
         try:
@@ -77,11 +86,12 @@ class Web(
         """Open a new browser page and optionally navigate to the specified URL."""
         await safe_defer(interaction, ephemeral=True, thinking=True)
         try:
+            session_id = self._session_id_for_interaction(interaction)
             if url:
                 processed_url = self.validate_url(url)
                 # Start browser first, then navigate
-                await self.browser.start()
-                await self.browser.goto(processed_url)
+                await self.browser.start(session_id=session_id)
+                await self.browser.goto(processed_url, session_id=session_id)
                 await self.safe_send(
                     interaction,
                     f"🟢 Started browser and navigated to **{processed_url}**",
@@ -89,7 +99,7 @@ class Web(
                 )
             else:
                 # Just start the browser without navigating anywhere specific
-                await self.browser.start()
+                await self.browser.start(session_id=session_id)
                 await self.safe_send(
                     interaction, "🟢 Browser started successfully.", ephemeral=True
                 )
@@ -137,7 +147,8 @@ class Web(
         await safe_defer(interaction, ephemeral=True, thinking=True)
         try:
             processed_url = self.validate_url(url)
-            await self.browser.goto(processed_url)
+            session_id = self._session_id_for_interaction(interaction)
+            await self.browser.goto(processed_url, session_id=session_id)
             await self.safe_send(
                 interaction,
                 f"🟢 Navigated to **{processed_url}**",
@@ -209,8 +220,10 @@ class Web(
             return
 
         try:
+            session_id = self._session_id_for_interaction(interaction)
             img_bytes: bytes = await self.browser.screenshot(
                 filename=unique_name,
+                session_id=session_id,
             )
             if len(img_bytes) > 7 << 20:  # > 7 MiB, resize
                 try:
@@ -259,7 +272,8 @@ class Web(
         """Show information about the browser instance for the current channel."""
         await safe_defer(interaction, thinking=True, ephemeral=True)
         try:
-            status = await self.browser.status()
+            session_id = self._session_id_for_interaction(interaction)
+            status = await self.browser.status(session_id=session_id)
             # Format status for display
             if not status:
                 await self.safe_send(interaction, "No active browser workers.", ephemeral=True)

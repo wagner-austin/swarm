@@ -22,9 +22,9 @@ The browser automation plugin provides a set of commands for controlling a Chrom
 |---------|-----------|-------------|
 | `!browser` | - | Shows usage information for browser commands |
 | `!browser start` | `<url> [visible]` | Starts a browser session, optionally navigates to a URL and makes it visible |
-| `!browser open` | `<url>` | Navigates to a URL in the active browser session |
+| `!browser open` | `<url>` | Navigates to a URL in the active browser session (per-channel session affinity) |
 | `!browser close` | - | Closes the active browser session |
-| `!browser screenshot` | `[filename]` | Takes a screenshot and sends it in the chat |
+| `!browser screenshot` | `[filename]` | Takes a screenshot and sends it in the chat (uses the channel’s session) |
 | `!browser status` | - | Checks if the browser is running |
 
 #### Implementation Notes
