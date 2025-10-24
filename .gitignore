@@ -40,3 +40,9 @@ logs/
 
 # Ignore generated HAProxy config
 config/haproxy-redis-generated.cfg
+
+# Ignore temporary debug artifacts
+test_output.txt
+tests/integration/__tmp_view__.txt
+worker_logs.txt
+ull
