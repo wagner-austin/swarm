@@ -34,7 +34,9 @@ class BrowserHealthMonitor(BaseDIClientCog):
         self.bot = discord_bot
         self.redis = redis_client
         self.monitoring_task: asyncio.Task[None] | None = None
-        self.check_interval = 15.0  # seconds
+        # Reduced from 15s to 60s to save Redis commands (was 57,600 commands/10 days)
+        # 60s is still fast enough to detect worker failures for fail-fast behavior
+        self.check_interval = 60.0  # seconds
         self.min_healthy_workers = 1
 
     async def cog_load(self) -> None:
@@ -67,38 +69,17 @@ class BrowserHealthMonitor(BaseDIClientCog):
                 await asyncio.sleep(self.check_interval)
 
     async def _check_worker_health(self) -> None:
-        """Check health of browser workers and update status."""
+        """Check health of browser workers via Redis heartbeats and update status."""
         try:
-            # Import Celery app here to avoid circular imports
-            from swarm.celery_app import app
-
             current_time = time.time()
+
+            # Count workers with active heartbeat keys
             healthy_workers = 0
+            pattern = "browser:worker:*"
+            async for key in self.redis.scan_iter(match=pattern):  # type: ignore[attr-defined]
+                # Optional: we could also check remaining TTL here if needed
+                healthy_workers += 1
 
-            # Use Celery's control API to ping workers
-            # This returns a list of dictionaries with worker responses
-            try:
-                # Get the control interface and run ping in a thread to avoid blocking
-                control = app.control
-                logger.debug("Pinging Celery workers...")
-                ping_responses = await asyncio.to_thread(control.ping, timeout=2.0)
-
-                # Count browser workers from ping responses
-                # Each response is a dict like: {'celery@hostname': {'ok': 'pong'}}
-                # TODO: In the future, check worker capabilities/queues to identify browser workers
-                # For now, count all workers since we only have one worker type
-                healthy_workers = len(ping_responses) if ping_responses else 0
-                logger.info(
-                    f"Worker health check complete: {healthy_workers} workers responded to ping"
-                )
-
-            except Exception as e:
-                logger.warning(f"Failed to ping Celery workers: {e}")
-                # Fall back to checking if we have any Celery tasks registered
-                # This at least tells us if workers exist
-                pass
-
-            # Update health status
             is_degraded = healthy_workers < self.min_healthy_workers
 
             # Store status in Redis for web commands to check
@@ -112,7 +93,7 @@ class BrowserHealthMonitor(BaseDIClientCog):
                 },
             )
 
-            # Log status changes - always log at INFO level for visibility
+            # Log status
             if is_degraded:
                 logger.warning(
                     f"Browser pool DEGRADED: {healthy_workers}/{self.min_healthy_workers} workers healthy"
