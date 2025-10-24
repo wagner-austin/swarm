@@ -107,7 +107,7 @@ USER root
 # only extra packages for debug
 RUN apt-get update -qq && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        xvfb x11vnc websockify && \
+        xvfb x11vnc websockify novnc && \
     mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 USER pwuser
