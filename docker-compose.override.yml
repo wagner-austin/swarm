@@ -22,6 +22,7 @@ services:
       - CELERY_BROKER_URLS=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
       - WORKER_ID=debug-worker
       - LOG_LEVEL=debug
+      - CELERY_LOGLEVEL=debug
     ports:
       - "6080:6080"  # noVNC web interface
       - "5900:5900"  # Raw VNC port

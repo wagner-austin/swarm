@@ -152,9 +152,8 @@ services:
     # Discord frontend (no local workers)
     volumes:
       - .:/app
-      # Optional: Mount personas config if you have one locally
-      # Uncomment and adjust the path below if you want to use a custom personas file:
-      # - ${PERSONAS_CONFIG_PATH:-./config/personas.yaml}:/root/.config/swarm/personas/personas.yaml:ro
+      # Mount personas directory for custom personas
+      - ${USERPROFILE}/.config/swarm/personas:/home/pwuser/.config/swarm/personas:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro  # For DockerApiBackend
     depends_on:
       - redis
@@ -201,7 +200,8 @@ services:
       - flower
       - --port=5555
       - --url_prefix=
-      - --enable_events
+      # Disable Celery events in Flower – REST API is sufficient for autoscaler
+      - --events=false
       - --inspect-timeout=60
       - --persistent
       - --loglevel=info
@@ -313,6 +313,7 @@ services:
       context: .
       target: runtime-autoscaler
     container_name: autoscaler
+    profiles: ["monitoring"]
     env_file:
       - .env
     # Monitors Celery queues via Flower and scales workers
