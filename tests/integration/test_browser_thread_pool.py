@@ -84,12 +84,12 @@ def test_browser_goto_thread_pool() -> None:
     print(f"Task result: {res}")
     assert res["success"] is True
     assert res["url"] == "https://example.com"
-    # task_id should be the celery task ID
-    assert "task_id" in res
-    assert res["task_id"] == result.id
+    # session_id should default to the Celery task ID when not provided
+    assert "session_id" in res
+    assert res["session_id"] == result.id
 
     # Cleanup
-    cleanup.delay(task_id=res["task_id"]).get(timeout=10)
+    cleanup.delay(session_id=res["session_id"]).get(timeout=10)
 
 
 @pytest.mark.integration
@@ -105,12 +105,12 @@ def test_browser_screenshot_thread_pool() -> None:
     print(f"Goto task ID: {goto_result.id}")
     goto_res = goto_result.get(timeout=30)
     assert goto_res["success"] is True
-    task_id = goto_res["task_id"]
-    print(f"Using task_id for screenshot: {task_id}")
+    session_id = goto_res["session_id"]
+    print(f"Using session_id for screenshot: {session_id}")
 
     try:
         # Then take a screenshot using the same browser session
-        screenshot_res = screenshot.delay(task_id=task_id).get(timeout=30)
+        screenshot_res = screenshot.delay(session_id=session_id).get(timeout=30)
         assert screenshot_res["success"] is True
         assert "data" in screenshot_res
         # Should be base64 encoded
@@ -118,7 +118,7 @@ def test_browser_screenshot_thread_pool() -> None:
         assert len(screenshot_res["data"]) > 100  # Should have actual image data
     finally:
         # Cleanup the browser engine
-        cleanup.delay(task_id=task_id).get(timeout=10)
+        cleanup.delay(session_id=session_id).get(timeout=10)
 
 
 @pytest.mark.integration
@@ -126,25 +126,29 @@ def test_browser_screenshot_thread_pool() -> None:
 def test_browser_click_thread_pool() -> None:
     """Test that browser.click task executes without errors."""
     # Import tasks after app is configured
-    from swarm.tasks.browser import cleanup, click, goto  # noqa: E402
+    from swarm.tasks.browser import cleanup, click, goto, wait_for  # noqa: E402
 
     _wait_for_browser_worker()
 
-    # Navigate first and get the task_id for session reuse
+    # Navigate first and get the session_id for session reuse
     goto_result = goto.delay(url="https://example.com")
     goto_res = goto_result.get(timeout=30)  # Increased timeout for first browser launch
     assert goto_res["success"] is True
-    task_id = goto_res["task_id"]
+    session_id = goto_res["session_id"]
 
     try:
         # Click on the "More information..." link that exists on example.com
         # Using text selector for reliability
-        click_res = click.delay(task_id=task_id, selector='a:has-text("More information")').get(
-            timeout=30
-        )
+        # Wait for the element to be visible to reduce CI timing flakes
+        wait_for.delay(session_id=session_id, selector='a:has-text("More information")').get(timeout=60)
+        click_res = click.delay(
+            session_id=session_id,
+            selector='a:has-text("More information")',
+            no_wait_after=True,
+        ).get(timeout=30)
 
         assert click_res["success"] is True
         assert click_res["selector"] == 'a:has-text("More information")'
     finally:
         # Always cleanup the browser engine to prevent resource leaks
-        cleanup.delay(task_id=task_id).get(timeout=10)
+        cleanup.delay(session_id=session_id).get(timeout=10)
