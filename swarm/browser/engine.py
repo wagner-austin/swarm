@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import datetime
 import logging
 import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Awaitable, Callable, Dict, Literal, TypeVar
 
 from playwright.async_api import (
     Browser,
@@ -23,6 +25,55 @@ from swarm.core.service_base import ServiceABC
 bind_log_context(service="browser")
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+class AsyncRWLock:
+    """Writer-preferring readers-writers lock for a single event-loop.
+
+    This lock ensures:
+    - Multiple readers can access concurrently
+    - Writers get exclusive access
+    - Writers are preferred over new readers to prevent starvation
+    - All operations are async-safe and won't block the event loop
+    """
+
+    def __init__(self) -> None:
+        self._readers: int = 0
+        self._writer_active: bool = False
+        self._writer_waiting: int = 0
+        self._cond: asyncio.Condition = asyncio.Condition()
+
+    async def acquire_read(self) -> None:
+        """Acquire read lock. Waits if a writer is active or waiting."""
+        async with self._cond:
+            # Wait while a writer is active or waiting (writer preference)
+            await self._cond.wait_for(lambda: not self._writer_active and self._writer_waiting == 0)
+            self._readers += 1
+
+    async def release_read(self) -> None:
+        """Release read lock. Notifies waiting writers if this was the last reader."""
+        async with self._cond:
+            self._readers -= 1
+            if self._readers == 0:
+                self._cond.notify_all()
+
+    async def acquire_write(self) -> None:
+        """Acquire write lock. Waits for all readers to finish."""
+        async with self._cond:
+            self._writer_waiting += 1
+            try:
+                await self._cond.wait_for(lambda: self._readers == 0 and not self._writer_active)
+                self._writer_active = True
+            finally:
+                self._writer_waiting -= 1
+
+    async def release_write(self) -> None:
+        """Release write lock. Notifies all waiting readers and writers."""
+        async with self._cond:
+            self._writer_active = False
+            self._cond.notify_all()
 
 
 def make_log_path(experiment_id: str, session_id: str, browser_id: str) -> str:
@@ -45,10 +96,121 @@ class BrowserEngine(ServiceABC):
         self._worker_id: str = str(uuid.uuid4())  # Unique identifier for this browser instance
         self._started_at: float = time.time()  # Track when the browser was created
 
+        # Store the event loop this engine belongs to (will be set in start())
+        self._loop: asyncio.AbstractEventLoop | None = None
+        # Async-native RW-lock for concurrent reads and exclusive writes (created in start())
+        self._rwlock: AsyncRWLock | None = None
+
+    # ------------------------------------------------------------------+
+    # Readers-Writers helpers                                          #
+    # ------------------------------------------------------------------+
+    async def _run_on_engine_loop(self, coro: Awaitable[T]) -> T:
+        """Execute coro in the engine's home loop, regardless of caller thread."""
+        if self._loop is None:
+            # Not initialized yet, run directly (will be same loop after start())
+            return await coro
+
+        current_loop = asyncio.get_running_loop()
+        if current_loop is self._loop:
+            # Same loop, run directly
+            return await coro
+        else:
+            # Different loop, proxy to engine's loop
+            logger.debug(
+                f"Proxying coroutine from loop {id(current_loop)} to engine loop {id(self._loop)}"
+            )
+
+            # Wrap the awaitable in a coroutine for run_coroutine_threadsafe
+            async def _await_coro() -> T:
+                return await coro
+
+            future: concurrent.futures.Future[T] = asyncio.run_coroutine_threadsafe(
+                _await_coro(), self._loop
+            )
+            # Wait for result in caller's loop
+            return await asyncio.wrap_future(future)
+
+    async def _read_inner(self, fn: Callable[[], Awaitable[T]]) -> T:
+        """Acquire a read lock and run the function."""
+        if self._rwlock is None:
+            raise RuntimeError("BrowserEngine not started")
+        await self._rwlock.acquire_read()
+        try:
+            return await fn()
+        finally:
+            await self._rwlock.release_read()
+
+    async def _write_inner(self, fn: Callable[[], Awaitable[T]]) -> T:
+        """Acquire a write lock and run the function."""
+        if self._rwlock is None:
+            raise RuntimeError("BrowserEngine not started")
+        await self._rwlock.acquire_write()
+        try:
+            return await fn()
+        finally:
+            await self._rwlock.release_write()
+
+    async def run_read(self, fn: Callable[[], Awaitable[T]]) -> T:
+        """Run *fn* while allowing other readers but blocking writers.
+
+        This is safe for operations that don't modify browser state:
+        - screenshot()
+        - page.title()
+        - page.content()
+        """
+        # If we're already on the engine's loop, run directly with the lock
+        current_loop = asyncio.get_running_loop()
+        if self._loop is None or current_loop is self._loop:
+            return await self._read_inner(fn)
+
+        # Different loop - need to proxy the entire operation including lock acquisition
+        async def _on_engine_loop() -> T:
+            return await self._read_inner(fn)
+
+        # Create the coroutine on the calling loop, then schedule on engine loop
+        future: concurrent.futures.Future[T] = asyncio.run_coroutine_threadsafe(
+            _on_engine_loop(), self._loop
+        )
+        # Wait for result in caller's loop
+        return await asyncio.wrap_future(future)
+
+    async def run_write(self, fn: Callable[[], Awaitable[T]]) -> T:
+        """Run *fn* with exclusive access (no other readers or writers).
+
+        This is required for operations that modify browser state:
+        - goto()
+        - click()
+        - fill()
+        - navigation
+
+        NOTE: Lock held for entire browser operation; acceptable while writer volume is low.
+        Future optimization: release lock after DOM mutation, await I/O outside lock.
+        """
+        # If we're already on the engine's loop, run directly with the lock
+        current_loop = asyncio.get_running_loop()
+        if self._loop is None or current_loop is self._loop:
+            return await self._write_inner(fn)
+
+        # Different loop - need to proxy the entire operation including lock acquisition
+        async def _on_engine_loop() -> T:
+            return await self._write_inner(fn)
+
+        # Create the coroutine on the calling loop, then schedule on engine loop
+        future: concurrent.futures.Future[T] = asyncio.run_coroutine_threadsafe(
+            _on_engine_loop(), self._loop
+        )
+        # Wait for result in caller's loop
+        return await asyncio.wrap_future(future)
+
     # ------------------------------------------------------------------+
     # Lifecycle                                                        #
     # ------------------------------------------------------------------+
     async def start(self) -> None:
+        # Initialize loop and lock on first start
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+            self._rwlock = AsyncRWLock()
+
         # Already initialised by WebRunner? → bail out early.
         if self._browser is not None:  # idempotent start()
             if self._page is None:  # but ensure we have a page
@@ -212,24 +374,49 @@ class BrowserEngine(ServiceABC):
     # ------------------------------------------------------------------+
     async def goto(self, url: str) -> None:
         await self._ensure_page()
-        assert self._page  # type narrowing
-        await self._page.goto(url, wait_until="load", timeout=self._timeout_ms)
-        self._last_url = url
+        page = self._page
+        assert page is not None  # type narrowing
 
-    async def click(self, selector: str) -> None:
+        async def _navigate() -> None:
+            await page.goto(url, wait_until="load", timeout=self._timeout_ms)
+            self._last_url = url
+
+        await self.run_write(_navigate)
+
+    async def click(self, selector: str, *, no_wait_after: bool = False) -> None:
         await self._ensure_page()
-        assert self._page is not None  # type narrowing
-        await self._page.locator(selector).click(timeout=self._timeout_ms)
+        page = self._page
+        assert page is not None  # type narrowing
+
+        async def _click() -> None:
+            # When clicking links that navigate off-site, Playwright will wait for navigation
+            # unless no_wait_after=True is specified. Expose this to callers to avoid
+            # environment-dependent delays (e.g., CI egress slowness).
+            await page.locator(selector).click(
+                timeout=self._timeout_ms, no_wait_after=no_wait_after
+            )
+
+        await self.run_write(_click)
 
     async def fill(self, selector: str, text: str) -> None:
         await self._ensure_page()
-        assert self._page is not None  # type narrowing
-        await self._page.locator(selector).fill(text, timeout=self._timeout_ms)
+        page = self._page
+        assert page is not None  # type narrowing
+
+        async def _fill() -> None:
+            await page.locator(selector).fill(text, timeout=self._timeout_ms)
+
+        await self.run_write(_fill)
 
     async def upload(self, selector: str, file_path: Path) -> None:
         await self._ensure_page()
-        assert self._page is not None  # type narrowing
-        await self._page.locator(selector).set_input_files(str(file_path))
+        page = self._page
+        assert page is not None  # type narrowing
+
+        async def _upload() -> None:
+            await page.locator(selector).set_input_files(str(file_path))
+
+        await self.run_write(_upload)
 
     async def wait_for(
         self,
@@ -237,23 +424,37 @@ class BrowserEngine(ServiceABC):
         state: Literal["visible", "hidden", "attached", "detached"] = "visible",
     ) -> None:
         await self._ensure_page()
-        assert self._page is not None  # type narrowing
-        await self._page.locator(selector).wait_for(state=state, timeout=self._timeout_ms)
+        page = self._page
+        assert page is not None  # type narrowing
+
+        async def _wait() -> None:
+            await page.locator(selector).wait_for(state=state, timeout=self._timeout_ms)
+
+        await self.run_write(_wait)
 
     async def screenshot(self, path: str) -> str:
         """Take a screenshot of the current page and save to the specified path."""
         await self._ensure_page()
-        assert self._page is not None  # for mypy
-        await self._page.screenshot(path=path)
+        page = self._page
+        assert page is not None  # type narrowing
+
+        async def _take_screenshot() -> None:
+            await page.screenshot(path=path)
+
+        await self.run_read(_take_screenshot)
         return path
 
     async def health_check(self) -> bool:
         """Perform a minimal health check to ensure browser is alive.
         This is used by the status command to trigger self-healing if needed.
         """
-        await self._ensure_page()
-        # If we got here without exception, browser is alive or was successfully restored
-        return True
+
+        async def _check() -> bool:
+            await self._ensure_page()
+            # If we got here without exception, browser is alive or was successfully restored
+            return True
+
+        return await self.run_write(_check)
 
     async def status(self) -> dict[str, Any]:
         """Get the current status of the browser engine.
@@ -265,15 +466,18 @@ class BrowserEngine(ServiceABC):
             # Perform health check first
             is_healthy = await self.health_check()
 
-            return {
-                "worker_id": self._worker_id,
-                "status": "healthy" if is_healthy else "unhealthy",
-                "browser_active": self._browser is not None,
-                "page_active": self._page is not None,
-                "url": self._page.url if self._page else None,
-                "sessions": 1 if self._page else 0,  # For compatibility with fake
-                "uptime": time.time() - self._started_at,
-            }
+            async def _get_status() -> dict[str, Any]:
+                return {
+                    "worker_id": self._worker_id,
+                    "status": "healthy" if is_healthy else "unhealthy",
+                    "browser_active": self._browser is not None,
+                    "page_active": self._page is not None,
+                    "url": self._page.url if self._page else None,
+                    "sessions": 1 if self._page else 0,  # For compatibility with fake
+                    "uptime": time.time() - self._started_at,
+                }
+
+            return await self.run_read(_get_status)
         except Exception as e:
             logger.error(f"Error getting browser status: {e}")
             return {
