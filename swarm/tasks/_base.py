@@ -27,7 +27,11 @@ class SwarmTask(BaseTask):
     _thread_local = threading.local()
 
     def resolve_task_id(self, supplied: str | None) -> str:
-        """Resolve task ID with fallback to request ID or UUID."""
+        """Resolve task ID with fallback to request ID or UUID (legacy helper)."""
+        return supplied or self.request.id or str(uuid.uuid4())
+
+    def resolve_session_id(self, supplied: str | None) -> str:
+        """Resolve session ID with fallback to Celery request ID or a new UUID."""
         return supplied or self.request.id or str(uuid.uuid4())
 
     @classmethod
