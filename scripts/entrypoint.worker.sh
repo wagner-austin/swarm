@@ -7,8 +7,8 @@ set -euo pipefail
 if [[ "${ENABLE_VNC:-0}" == "1" ]]; then
   echo "[worker] Launching Xvfb + VNC for headful debugging..."
   
-  # Start X virtual framebuffer
-  Xvfb :99 -screen 0 1280x720x24 -ac -nolisten tcp &
+  # Start X virtual framebuffer; -dpms flag disables DPMS extension queries
+  Xvfb :99 -screen 0 1280x720x24 -ac -nolisten tcp -dpms &
   XVFB_PID=$!
   trap 'kill -TERM "$XVFB_PID"; wait "$XVFB_PID"' TERM INT
   
@@ -26,8 +26,15 @@ if [[ "${ENABLE_VNC:-0}" == "1" ]]; then
   
   # Start noVNC web interface if available
   if command -v websockify >/dev/null 2>&1; then
-    websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
-    echo "[worker] noVNC available at http://localhost:6080"
+    # Check if noVNC is installed, otherwise skip web interface
+    if [ -d "/usr/share/novnc" ]; then
+      websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+      echo "[worker] noVNC available at http://localhost:6080"
+    else
+      # Just proxy without web interface
+      websockify 6080 localhost:5900 &
+      echo "[worker] WebSocket proxy running on port 6080 (no web UI - use VNC client on port 5900)"
+    fi
   fi
   
   export DISPLAY=:99
@@ -40,19 +47,34 @@ fi
 # Launch the Celery worker
 QUEUE="${CELERY_QUEUES:-browser}"
 
+# Get hostname and sanitize it for queue naming (replace @ with _)
+HOSTNAME=$(hostname)
+SAFE_HOSTNAME=$(echo "$HOSTNAME" | tr '@' '_')
+
 # Pick the pool type based on the queue
 if [[ "$QUEUE" == "browser" ]]; then
   POOL_TYPE="threads"         # Use threads pool for async browser tasks
-  CONCURRENCY="${CELERY_CONCURRENCY:-2}"   # tune per node
+  CONCURRENCY="${CELERY_CONCURRENCY:-2}"   # Default to 2 threads - loop-local engines handle it
+  # Add direct queue for session affinity
+  QUEUES="${QUEUE},browser.direct.${SAFE_HOSTNAME}"
 else
   POOL_TYPE="prefork"
   CONCURRENCY="${CELERY_CONCURRENCY:-1}"
+  QUEUES="$QUEUE"
+fi
+
+echo "[worker] Starting worker ${HOSTNAME} with queues: ${QUEUES}"
+
+# Decide whether to emit Celery events (high Redis cost). Opt-in via env.
+EVENTS_FLAG=""
+if [[ "${CELERY_SEND_EVENTS:-false}" == "true" || "${WORKER_EVENTS:-false}" == "true" ]]; then
+  EVENTS_FLAG="--events"
 fi
 
 exec python -m swarm.celery_worker \
-      --queues="$QUEUE" \
+      --queues="$QUEUES" \
       --pool="$POOL_TYPE" \
       --concurrency="$CONCURRENCY" \
       --loglevel="${CELERY_LOGLEVEL:-info}" \
       --max-tasks-per-child="${CELERY_MAX_TASKS:-100}" \
-      --events
+      ${EVENTS_FLAG}
