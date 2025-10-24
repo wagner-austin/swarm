@@ -7,7 +7,9 @@
       "Bash(docker exec:*)",
       "Bash(docker logs:*)",
       "Bash(docker inspect:*)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(poetry show:*)",
+      "Bash(docker ps:*)"
     ],
     "deny": []
   }
