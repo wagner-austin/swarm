@@ -9,16 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import csv
+import io
 import logging
-from typing import Any, Coroutine, cast
+import os
+from typing import Any, Coroutine, Mapping, Optional, Tuple, cast
 
 import discord
+import requests
 from discord.ext import commands
 
 from swarm.frontends.discord.discord_owner import get_owner
 from swarm.utils.async_helpers import with_retries
-
-logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,64 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------+
 MAX_RETRY_ATTEMPTS = 5  # total tries per alert (initial + 4 retries)
 INITIAL_RETRY_DELAY = 1.0  # seconds; doubled each time
+
+# HAProxy configuration
+HAPROXY_BACKEND_NAME = os.getenv("HAPROXY_BACKEND_NAME", "redis_backend")
+
+
+def _g(row: Mapping[str, str], key: str, default: str = "") -> str:
+    """Get a field from a HAProxy CSV row, tolerant of '# ' prefixes."""
+    val = row.get(key)
+    if val:
+        return val
+    alt_key = key.lstrip("# ").strip()
+    alt = row.get(alt_key)
+    if alt:
+        return alt
+    return default
+
+
+def _to_int(v: str | None) -> int:
+    """Convert to int safely, defaulting to 0."""
+    try:
+        return int(v or 0)
+    except Exception:
+        return 0
+
+
+def read_haproxy_backend_status(
+    base: str, timeout: float = 2.0, auth: tuple[str, str] | None = None
+) -> tuple[bool, bool, bool]:
+    """Return (upstash_up, local_up, in_failover).
+
+    Failover = local (backup) is up AND (primary is down OR local is serving traffic).
+    """
+    url = f"{base.rstrip('/')}/stats;csv;norefresh"
+    r = requests.get(url, timeout=timeout, auth=auth)
+    r.raise_for_status()
+
+    rdr = csv.DictReader(io.StringIO(r.text))
+    upstash_up = False
+    local_up = False
+    local_has_sessions = False
+
+    for row in rdr:
+        px = _g(row, "# pxname")
+        sv = _g(row, "svname")
+        if px != HAPROXY_BACKEND_NAME or sv in ("FRONTEND", "BACKEND"):
+            continue
+
+        status = (_g(row, "status") or "").upper()
+        scur = _to_int(_g(row, "scur"))
+
+        if sv == "redis_0":  # primary (Upstash)
+            upstash_up = status == "UP"
+        elif sv == "redis_1":  # backup (local)
+            local_up = status == "UP"
+            local_has_sessions = scur > 0
+
+    in_failover = local_up and (not upstash_up or local_has_sessions)
+    return upstash_up, local_up, in_failover
 
 
 class AlertPump(commands.Cog):
@@ -56,12 +116,101 @@ class AlertPump(commands.Cog):
         if self._startup_alert_sent:
             return  # Do not send on subsequent reconnects
 
+        # Gather system information
+        import os
+
+        from swarm.core.settings import settings
+
+        # Determine Redis backend and check actual status
+        redis_info = "❌ Disabled"
+        actual_backend = ""
+
+        if settings.redis.enabled and settings.redis.url:
+            redis_url = settings.redis.url
+
+            # If using HAProxy, check which backend is actually active
+            if "haproxy" in redis_url.lower():
+                # Use config-driven URL and timeout
+                haproxy_base = os.getenv("HAPROXY_STATS_BASE", "http://haproxy-redis:8080")
+                timeout = float(os.getenv("HAPROXY_STATS_TIMEOUT", "2"))
+
+                user = os.getenv("HAPROXY_STATS_USER")
+                auth: tuple[str, str] | None = None
+                if user:  # truthy check - empty string won't create auth tuple
+                    auth = (user, os.getenv("HAPROXY_STATS_PASS", ""))
+
+                try:
+                    upstash_up, local_up, in_failover = read_haproxy_backend_status(
+                        haproxy_base, timeout, auth
+                    )
+
+                    # Log debug info if debug logging is enabled
+                    logger.debug(
+                        f"HAProxy status: primary_up={upstash_up}, backup_up={local_up}, failover={in_failover}"
+                    )
+
+                    if in_failover:
+                        actual_backend = "🔴 Local Redis (FAILOVER ACTIVE)"
+                    elif upstash_up and local_up:
+                        actual_backend = "☁️ Upstash (Primary)"
+                    elif upstash_up and not local_up:
+                        actual_backend = "☁️ Upstash (Primary, backup down)"
+                    elif local_up and not upstash_up:
+                        actual_backend = "💾 Local Redis (Upstash DOWN)"
+                    else:
+                        actual_backend = "⚠️ No backends available!"
+
+                    redis_info = f"🔄 HAProxy → {actual_backend}"
+
+                except Exception as e:
+                    # Keep it quiet in prod, verbose in debug
+                    logger.debug(f"Could not check HAProxy status via CSV: {e}")
+                    redis_info = "🔄 HAProxy (status unknown)"
+
+            elif "upstash" in redis_url.lower():
+                redis_info = "☁️ Upstash (Direct)"
+            elif "localhost" in redis_url or "127.0.0.1" in redis_url:
+                redis_info = "💾 Local Redis (Direct)"
+            else:
+                # Hide password but show host
+                if "@" in redis_url:
+                    host_part = redis_url.split("@")[1].split("/")[0]
+                    redis_info = f"🔗 {host_part}"
+                else:
+                    redis_info = "✅ Enabled"
+
+        # Check if distributed workers are enabled
+        use_distributed = os.getenv("USE_DISTRIBUTED_WORKERS", "false").lower() == "true"
+        workers_info = "🌐 Distributed (Celery)" if use_distributed else "🖥️ Local only"
+
+        # Get metrics port
+        metrics_port = os.getenv("METRICS_PORT", "9200")
+
+        # Get Gemini model
+        gemini_model = settings.gemini_model
+
+        # Build the embed with system info
         embed_online = discord.Embed(
-            title="Swarm online",
+            title="🟢 Swarm Online",
             description="✅ The swarm has started and is now online.",
             colour=discord.Colour.green(),
         )
-        logger.info("AlertPump: sending startup notification")
+
+        # Add system information fields
+        embed_online.add_field(name="Memory Backend", value=redis_info, inline=True)
+        embed_online.add_field(name="Worker Mode", value=workers_info, inline=True)
+        embed_online.add_field(name="Metrics", value=f"📊 Port {metrics_port}", inline=True)
+        embed_online.add_field(name="LLM Model", value=f"🤖 {gemini_model}", inline=True)
+
+        # Add deployment environment if available
+        deployment_env = os.getenv("DEPLOYMENT_ENV", "local")
+        if deployment_env != "local":
+            embed_online.add_field(name="Environment", value=f"🚀 {deployment_env}", inline=True)
+
+        # Add timestamp
+        embed_online.timestamp = discord.utils.utcnow()
+
+        logger.info("AlertPump: sending startup notification with system info")
         try:
             owner = await get_owner(self.discord_bot)
             await self._send_dm_with_retry(owner, content=None, embed=embed_online)
