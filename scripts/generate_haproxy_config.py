@@ -22,6 +22,11 @@ import os
 import sys
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 
 # Use print for logging since we're in a minimal container
 def log(message: str) -> None:
@@ -103,7 +108,7 @@ def generate_haproxy_config(redis_urls: str) -> str:
     config = f"""global
     # No daemon mode - must run in foreground for Docker
     maxconn {maxconn}
-    log stdout local0 warning
+    log stdout local0 info  # Log at info level to see health check state changes
 
 defaults
     mode tcp
@@ -132,52 +137,99 @@ frontend redis_frontend
 backend redis_backend
     mode tcp
     balance first
-    option tcp-check
     option allbackups
     option redispatch  # Try next server on connection failure
+    option log-health-checks  # Log health check results
     retries 3
     timeout connect 5s
-    timeout server 50s
+    timeout server 30s  # Upstash idle timeout
+    timeout client 28s  # Slightly less than server to avoid race condition
+    timeout tunnel 28s  # For long-lived connections (pub/sub if used)
+    option tcpka  # Enable TCP keepalive (tune sysctls or use send-proxy-v2)
 """
 
-    # Health checks use password from URL parsing
-    first_server = servers[0]
-    if first_server.get("password"):
-        password_str = str(first_server["password"])
-        # Build Redis RESP protocol frame: *2\r\n$4\r\nAUTH\r\n$<len>\r\n<password>\r\n
-        resp_cmd = f"*2\r\n$4\r\nAUTH\r\n${len(password_str)}\r\n{password_str}\r\n"
-        auth_hex = resp_cmd.encode().hex()
+    # Check for mixed SSL/non-SSL servers
+    ssl_schemes = {s.get("is_ssl") for s in servers}
+    mixed_ssl = len(ssl_schemes) > 1
 
-        config += f"""
-    # Health check sequence with AUTH
-    tcp-check connect
-    tcp-check send-binary {auth_hex}
-    tcp-check expect string +OK
-    tcp-check send "PING\\r\\n"
-    tcp-check expect string +PONG
-"""
+    if mixed_ssl:
+        log("WARNING: Mixed SSL and non-SSL Redis servers detected")
+        log("WARNING: Health checks disabled - using connection-only validation")
+        log("WARNING: Password changes won't be detected until traffic fails")
+        log("INFO: Upstash (SSL) as primary, Local Redis (non-SSL) as backup")
+
+        # List the servers for clarity
+        for server in servers:
+            scheme_type = "SSL" if server.get("is_ssl") else "non-SSL"
+            role = "primary" if not server.get("is_backup") else "backup"
+            log(f"  - {server['name']}: {server['host']}:{server['port']} ({scheme_type}, {role})")
+
+        # For mixed mode: no health checks, rely on passive connection monitoring
+        # ssl-hello-chk doesn't work with mixed SSL/non-SSL backends
+        config += "    # Mixed SSL/non-SSL mode - connection checks only, no health validation\n"
+        config += "    # WARNING: No active health checks - using passive checks only\n"
+        config += "    # NOTE: Clients must send AUTH themselves (transparent proxy mode)\n"
     else:
-        config += """
-    # Health check sequence without AUTH
-    tcp-check connect
-    tcp-check send "PING\\r\\n"
-    tcp-check expect string +PONG
-"""
+        # All servers have same SSL setting - can use full health checks
+        all_ssl = True in ssl_schemes  # True if all SSL, False if all non-SSL
+
+        # Get password from first server (assuming all use same auth)
+        first_server = servers[0]
+        password_str = (
+            str(first_server.get("password", "")) if first_server.get("password") else None
+        )
+
+        # Add tcp-check for full validation
+        config += "    # Uniform SSL configuration - full AUTH+PING health checks enabled\n"
+        config += "    option tcp-check  # Enable command-based health checks\n"
+
+        # Build health check sequence based on SSL and auth requirements
+        if all_ssl:
+            # SSL servers - use tcp-check connect ssl
+            config += "    # Health check for SSL Redis servers with AUTH+PING\n"
+            config += "    tcp-check connect ssl\n"
+        else:
+            # Non-SSL servers - use plain tcp-check connect
+            config += "    # Health check for non-SSL Redis servers with AUTH+PING\n"
+            config += "    tcp-check connect\n"
+
+        # Add AUTH if password is configured
+        if password_str:
+            # Build Redis RESP protocol frame: *2\r\n$4\r\nAUTH\r\n$<len>\r\n<password>\r\n
+            resp_cmd = f"*2\r\n$4\r\nAUTH\r\n${len(password_str)}\r\n{password_str}\r\n"
+            auth_hex = resp_cmd.encode().hex()
+            config += f"    tcp-check send-binary {auth_hex}\n"
+            config += "    tcp-check expect string +OK\n"
+
+        # Always send PING to verify Redis is responsive
+        config += '    tcp-check send "PING\\r\\n"\n'
+        config += "    tcp-check expect string +PONG\n"
+
+    config += "\n"
 
     # Add all servers dynamically
     for server in servers:
         # Build server line with appropriate options
-        check_inter = "2s" if server.get("is_backup") else "3s"
-        check_fall = 2 if server.get("is_backup") else 3
+        check_inter = "5s" if server.get("is_backup") else "3s"
+        check_fall = 3 if server.get("is_backup") else 2
 
-        server_line = (
-            f"    server {server['name']} {server['host']}:{server['port']}"
-            f" check inter {check_inter} fall {check_fall} rise 2"
-        )
+        # Base server configuration
+        server_line = f"    server {server['name']} {server['host']}:{server['port']}"
+
+        # Add check parameters
+        server_line += f" check inter {check_inter} fall {check_fall} rise 2"
 
         # Add SSL options for SSL servers
         if server.get("is_ssl"):
-            server_line += " ssl verify none check-ssl"
+            # Always need ssl verify none for data connections
+            server_line += " ssl verify none"
+
+            # Only add check-ssl if NOT in mixed mode (where ssl-hello-chk handles it)
+            # Also don't add it if using tcp-check connect ssl (avoids double handshake)
+            if not mixed_ssl:
+                # In uniform mode with tcp-check connect ssl, check-ssl is redundant
+                # but HAProxy needs it to know to use SSL for the health check connection
+                server_line += " check-ssl"
 
         # Mark backup servers
         if server.get("is_backup"):
