@@ -16,7 +16,8 @@ def get_bot_version() -> str:
 
         with open(pyproject_path, "rb") as f:
             pyproject_data = tomllib.load(f)
-            return str(pyproject_data["project"]["version"])
+            # Poetry format uses [tool.poetry.version], not [project.version]
+            return str(pyproject_data["tool"]["poetry"]["version"])
     except (FileNotFoundError, KeyError, tomllib.TOMLDecodeError):
         return "unknown"
 

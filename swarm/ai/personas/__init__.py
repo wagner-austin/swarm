@@ -76,12 +76,20 @@ _CUSTOM_DIR: Path = Path(
 ).expanduser()
 
 # ensure directory exists so admin cog can write immediately
-_CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    _CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
+except PermissionError:
+    # In Docker, might not have permission to create at module import
+    pass
 
 # extra secret location (never committed to git)
 _SECRET_FILE: Path = _CUSTOM_DIR.parent / "secrets" / "personas.yaml"
 # Make sure parent dir exists so admin upload can succeed at runtime
-_SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+try:
+    _SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+except PermissionError:
+    # In Docker, might not have permission to create at module import
+    pass
 
 
 # ---------------------------------------------------------------------------
