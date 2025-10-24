@@ -108,8 +108,8 @@ async def simulate_redis_failover() -> None:
     local_redis_ok = await check_redis_connection("localhost", 6379)
     haproxy_redis_ok = await check_redis_connection("localhost", 6380)
 
-    print(f"   Local Redis (6379): {'✓' if local_redis_ok else '✗'}")
-    print(f"   HAProxy Redis (6380): {'✓' if haproxy_redis_ok else '✗'}")
+    print(f"   Local Redis (6379): {'[OK]' if local_redis_ok else '[FAIL]'}")
+    print(f"   HAProxy Redis (6380): {'[OK]' if haproxy_redis_ok else '[FAIL]'}")
 
     # Check HAProxy stats
     stats = await check_haproxy_stats()
@@ -119,7 +119,7 @@ async def simulate_redis_failover() -> None:
 
     # Check Flower
     flower_ok = await check_flower_api()
-    print(f"\n   Flower API: {'✓' if flower_ok else '✗'}")
+    print(f"\n   Flower API: {'[OK]' if flower_ok else '[FAIL]'}")
 
     # Step 2: Test Redis operations through HAProxy
     print("\n2. Testing Redis operations through HAProxy...")
@@ -134,13 +134,13 @@ async def simulate_redis_failover() -> None:
         # Read back
         retrieved = await cast(Any, client).get(test_key)
         if retrieved == test_value:
-            print("   ✓ Redis read/write through HAProxy successful")
+            print("   [OK] Redis read/write through HAProxy successful")
         else:
-            print("   ✗ Redis read/write failed")
+            print("   [FAIL] Redis read/write failed")
 
         await async_close_redis(client)
     except Exception as e:
-        print(f"   ✗ Redis operations failed: {e}")
+        print(f"   [FAIL] Redis operations failed: {e}")
 
     # Step 3: Monitor Flower during simulated failures
     print("\n3. Monitoring Flower stability...")
@@ -154,7 +154,7 @@ async def simulate_redis_failover() -> None:
         stats = await check_haproxy_stats()
 
         print(f"\n   Check {i + 1}:")
-        print(f"   - Flower API: {'✓' if flower_ok else '✗'}")
+        print(f"   - Flower API: {'[OK]' if flower_ok else '[FAIL]'}")
         for server, info in stats.items():
             if info["status"] != "no check":
                 print(f"   - {server}: {info['status']}")

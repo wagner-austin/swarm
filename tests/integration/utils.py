@@ -32,10 +32,10 @@ async def check_haproxy_redis_connection(host: str, port: int, password: str | N
 
         # If the URL contained creds, ping succeeds immediately
         await client.ping()
-        print("[DEBUG] ✓ Connected to HAProxy Redis")
+        print("[DEBUG] [OK] Connected to HAProxy Redis")
         return True
     except Exception as e:
-        print(f"[DEBUG] ✗ Failed to connect to HAProxy Redis at {host}:{port}: {e}")
+        print(f"[DEBUG] [FAIL] Failed to connect to HAProxy Redis at {host}:{port}: {e}")
         return False
     finally:
         if client:
@@ -61,10 +61,10 @@ async def check_redis_connection(host: str, port: int, password: str | None = No
         )
         await client.ping()
         await async_close_redis(client)
-        print(f"[DEBUG] ✓ Connected to Redis at {host}:{port}")
+        print(f"[DEBUG] [OK] Connected to Redis at {host}:{port}")
         return True
     except Exception as e:
-        print(f"[DEBUG] ✗ Failed to connect to Redis at {host}:{port}: {e}")
+        print(f"[DEBUG] [FAIL] Failed to connect to Redis at {host}:{port}: {e}")
         return False
 
 
@@ -106,9 +106,9 @@ async def check_haproxy_stats(host: str = "localhost", port: int = 8080) -> dict
                                 "status": status,
                                 "check_status": check_status,
                             }
-                print(f"[DEBUG] ✓ HAProxy stats retrieved: {len(stats)} backends")
+                print(f"[DEBUG] [OK] HAProxy stats retrieved: {len(stats)} backends")
     except Exception as e:
-        print(f"[DEBUG] ✗ Failed to get HAProxy stats: {e}")
+        print(f"[DEBUG] [FAIL] Failed to get HAProxy stats: {e}")
 
     return stats
 
@@ -121,12 +121,12 @@ async def check_flower_api(host: str = "localhost", port: int = 5555) -> bool:
             async with session.get(f"http://{host}:{port}/api/workers") as resp:
                 if resp.status == 200:
                     await resp.json()
-                    print("[DEBUG] ✓ Flower API is responsive")
+                    print("[DEBUG] [OK] Flower API is responsive")
                     return True
                 else:
-                    print(f"[DEBUG] ✗ Flower API returned status {resp.status}")
+                    print(f"[DEBUG] [FAIL] Flower API returned status {resp.status}")
     except Exception as e:
-        print(f"[DEBUG] ✗ Failed to connect to Flower API: {e}")
+        print(f"[DEBUG] [FAIL] Failed to connect to Flower API: {e}")
 
     return False
 

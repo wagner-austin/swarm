@@ -8,7 +8,7 @@ import asyncio
 import json
 import os
 import subprocess
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import redis.asyncio as redis
@@ -203,10 +203,14 @@ async def test_haproxy_health_check() -> None:
     auth_part = f"default:{password}@" if password else ""
 
     # Connect through HAProxy with auth in URL
-    haproxy_client = redis.from_url(f"redis://{auth_part}localhost:6380/0", decode_responses=True)
+    haproxy_client: Any = redis.from_url(
+        f"redis://{auth_part}localhost:6380/0", decode_responses=True
+    )
 
     # Connect directly to Redis
-    direct_client = redis.from_url(f"redis://{auth_part}localhost:6379/0", decode_responses=True)
+    direct_client: Any = redis.from_url(
+        f"redis://{auth_part}localhost:6379/0", decode_responses=True
+    )
 
     try:
         # Both should work
@@ -216,15 +220,90 @@ async def test_haproxy_health_check() -> None:
         # Write through HAProxy
         test_key = "haproxy:health:test"
         test_value = "healthy"
-        await haproxy_client.set(test_key, test_value)  # type: ignore[arg-type]
+        await haproxy_client.set(test_key, test_value)
 
         # Read back through HAProxy - should see the value
-        haproxy_value = await haproxy_client.get(test_key)
-        assert haproxy_value == test_value, "HAProxy not storing/retrieving data correctly"  # type: ignore[comparison-overlap]
+        haproxy_value_raw = await haproxy_client.get(test_key)
+        # Normalize to string
+        haproxy_value: str = (
+            haproxy_value_raw.decode()
+            if isinstance(haproxy_value_raw, bytes)
+            else (haproxy_value_raw or "")
+        )
+        assert haproxy_value == test_value, "HAProxy not storing/retrieving data correctly"
 
-        # Verify data is also in local Redis (since test environment uses local Redis only)
-        direct_value = await direct_client.get(test_key)
-        assert direct_value == test_value, "Data not replicated to local Redis"  # type: ignore[comparison-overlap]
+        # Adapt to whichever backend is active behind HAProxy.
+        # If local is active (failover) or primary is down, the write should be visible on local Redis.
+        # If Upstash is primary, local is a cold backup and may NOT have the key (no replication expected).
+        import csv
+        import io
+
+        import requests
+
+        def _safe_int(val: Any) -> int:
+            try:
+                return int(val or 0)
+            except Exception:
+                return 0
+
+        def _haproxy_backend_status() -> tuple[bool, bool, bool]:
+            """Return (upstash_up, local_up, in_failover) using HAProxy CSV stats."""
+            # Prefer env var; otherwise choose based on execution environment
+            base = os.getenv(
+                "HAPROXY_STATS_BASE",
+                "http://haproxy-redis:8080" if is_running_in_docker() else "http://localhost:8080",
+            )
+            backend_name = os.getenv("HAPROXY_BACKEND_NAME", "redis_backend")
+            url = f"{base.rstrip('/')}/stats;csv;norefresh"
+
+            r = requests.get(url, timeout=2)
+            r.raise_for_status()
+
+            rdr = csv.DictReader(io.StringIO(r.text))
+            upstash_up = False
+            local_up = False
+            local_has_sessions = False
+
+            for row in rdr:
+                px = row.get("# pxname") or row.get("pxname", "")
+                sv = row.get("svname", "")
+                if px != backend_name or sv in ("FRONTEND", "BACKEND"):
+                    continue
+                status = (row.get("status") or "").upper()
+                scur = _safe_int(row.get("scur"))
+                if sv == "redis_0":
+                    upstash_up = status == "UP"
+                elif sv == "redis_1":
+                    local_up = status == "UP"
+                    local_has_sessions = scur > 0
+
+            in_failover = local_up and (not upstash_up or local_has_sessions)
+            return upstash_up, local_up, in_failover
+
+        upstash_up, local_up, in_failover = _haproxy_backend_status()
+
+        direct_value_raw = await direct_client.get(test_key)
+        # Normalize to string or None
+        direct_value: str | None = None
+        if direct_value_raw is not None:
+            direct_value = (
+                direct_value_raw.decode()
+                if isinstance(direct_value_raw, bytes)
+                else direct_value_raw
+            )
+
+        if in_failover or (local_up and not upstash_up):
+            # Local backend is serving traffic → the value must be in local Redis.
+            assert direct_value == test_value, (
+                f"Local Redis should reflect writes during failover "
+                f"(in_failover={in_failover}, local_up={local_up}, upstash_up={upstash_up}, got={direct_value!r})"
+            )
+        else:
+            # Upstash is primary → local may not have the key; that's expected.
+            assert direct_value in (None, test_value), (
+                f"Expected None or test_value when Upstash is primary "
+                f"(in_failover={in_failover}, local_up={local_up}, upstash_up={upstash_up}, got={direct_value!r})"
+            )
 
         # Cleanup
         await haproxy_client.delete(test_key)
