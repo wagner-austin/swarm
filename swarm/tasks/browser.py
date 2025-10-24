@@ -30,13 +30,17 @@ from typing import (
 )
 
 import redis.asyncio as redis_asyncio
-from celery import Celery, Task, group
+from celery import Celery, Task, group, signals
 
 from swarm.browser.engine import BrowserEngine
 from swarm.celery_app import app
 from swarm.core.settings import Settings
 from swarm.tasks._base import SwarmTask
 from swarm.types import RedisBytes
+from swarm.distributed.worker_lifecycle import WorkerLifecycle
+
+# Type for the creating sentinel
+_CreatingSentinel = Literal["__creating__"]
 
 if TYPE_CHECKING:
     # For type checking, use the generic version
@@ -82,8 +86,13 @@ def typed_task(*task_args: Any, **task_kwargs: Any) -> Callable[[Callable[..., A
     return decorator
 
 
-# Module-level storage for browser engines (per worker process)
-_engines: dict[str, BrowserEngine] = {}
+# Module-level storage for browser engines (global with thread safety)
+# Use a regular dict with threading lock to share engines across threads
+# Each engine still runs on its own event loop, but can be accessed from any thread
+# via the _run_on_engine_loop proxy method in BrowserEngine
+_CREATING_SENTINEL: _CreatingSentinel = "__creating__"
+_engines: dict[str, BrowserEngine | _CreatingSentinel] = {}
+_engines_lock = threading.Lock()
 
 # Weak reference dictionary to store Redis clients per event loop
 # This ensures clients are garbage collected when the loop is destroyed
@@ -116,63 +125,110 @@ class BrowserTask(SwarmTask):
 
         return client
 
-    async def get_or_create_engine(self, task_id: str) -> BrowserEngine:
-        """Get existing browser engine or create a new one for the task."""
-        engine = _engines.get(task_id)
+    async def get_or_create_engine(self, session_id: str) -> BrowserEngine:
+        """Return the BrowserEngine for session_id, creating it once in a thread-safe way."""
+        # Fast path: someone already created it
+        with _engines_lock:
+            existing = _engines.get(session_id)
+            if isinstance(existing, BrowserEngine):
+                thread_id = threading.current_thread().ident
+                logger.info(f"Session {session_id} on thread {thread_id} found existing engine")
+                return existing
+            if existing is _CREATING_SENTINEL:
+                # Another thread is creating; fall through to wait loop
+                logger.info(f"Another thread is creating engine for {session_id}, waiting...")
+                pass
+            else:
+                # We'll create it - claim creation slot
+                _engines[session_id] = _CREATING_SENTINEL
 
-        # Check if engine exists but has a closed event loop
-        if engine:
+        if existing is _CREATING_SENTINEL:
+            # Spin-wait until engine appears
+            while True:
+                await asyncio.sleep(0.05)  # 50ms to reduce CPU noise
+                with _engines_lock:
+                    engine = _engines.get(session_id)
+                    if isinstance(engine, BrowserEngine):
+                        logger.info(f"Engine for {session_id} created by another thread")
+                        return engine
+        else:
+            # We're the creator
             try:
-                # Check if the engine's event loop is closed
-                if hasattr(engine, "_loop") and engine._loop and engine._loop.is_closed():
-                    logger.warning(f"Engine for task {task_id} has closed event loop, recreating")
-                    await engine.stop(graceful=True)
-                    del _engines[task_id]
-                    engine = None
+                logger.info(f"Creating browser engine for session {session_id}")
+                engine = BrowserEngine(headless=True, proxy=None, timeout_ms=60000)
+                await engine.start()
+                with _engines_lock:
+                    _engines[session_id] = engine
+                    engine_count = sum(1 for v in _engines.values() if isinstance(v, BrowserEngine))
+                    logger.info(f"Stored engine for session {session_id} (total engines: {engine_count})")
+
+                # Register session with affinity registry
+                from swarm.distributed.session_registry import SessionRegistry
+
+                try:
+                    registry = SessionRegistry()
+                    worker_id = str(self.request.hostname or "unknown")
+                    # Sanitize worker ID to match router's expectations
+                    worker_id = worker_id.replace("@", "_")
+                    logger.info(f"Registering affinity for session {session_id} to worker {worker_id}")
+                    success = await registry.set_owner(session_id, worker_id)
+                    logger.info(f"Registry.set_owner returned: {success}")
+                    if success:
+                        logger.info(f"Successfully registered affinity for session {session_id}")
+                        # Track session ownership for deterministic cleanup on shutdown
+                        try:
+                            WorkerLifecycle(worker_id).add_session(session_id)
+                        except Exception as le:
+                            logger.warning(f"Failed to record session ownership in lifecycle: {le}")
+                    else:
+                        logger.error(f"Failed to register affinity for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Error registering session affinity: {e}", exc_info=True)
+
+                return engine
             except Exception as e:
-                logger.error(f"Error checking engine state: {e}")
-                del _engines[task_id]
-                engine = None
+                # Creation failed - remove sentinel
+                with _engines_lock:
+                    if _engines.get(session_id) is _CREATING_SENTINEL:
+                        del _engines[session_id]
+                logger.error(f"Failed to create engine for {session_id}: {e}")
+                raise
 
-        if engine:
-            return engine
-
-        logger.info(f"Creating browser engine for task {task_id}")
-        engine = BrowserEngine(headless=True, proxy=None, timeout_ms=60000)
-        await engine.start()
-
-        _engines[task_id] = engine
-        redis = await self.get_redis()
-
-        # Store session metadata in Redis hash
-        session_data = {
-            "worker": str(self.request.hostname or "unknown"),
-            "status": "active",
-            "created_at": str(asyncio.get_event_loop().time()),
-            "url": "none",  # Will be updated by goto
-        }
-        await redis.hset(
-            f"browser:session:{task_id}", mapping={k: v for k, v in session_data.items()}
-        )
-        await redis.expire(f"browser:session:{task_id}", 3600)
-
-        return engine
-
-    async def cleanup_engine(self, task_id: str) -> None:
+    async def cleanup_engine(self, session_id: str) -> None:
         """Clean up browser engine for a task."""
-        engine = _engines.pop(task_id, None)
-        if engine:
+        # Pop inside the lock
+        with _engines_lock:
+            engine = _engines.pop(session_id, None)
+
+        # Stop the engine outside the lock to avoid blocking other threads
+        if isinstance(engine, BrowserEngine):
             try:
                 await engine.stop(graceful=True)
-                logger.info(f"Cleaned up browser engine for task {task_id}")
+                logger.info(f"Cleaned up browser engine for session {session_id}")
             except Exception as e:
                 logger.error(f"Error cleaning up browser engine: {e}")
 
         try:
+            # Cleanup the session metadata hash (used by goto/status)
             redis = await self.get_redis()
-            await redis.delete(f"browser:session:{task_id}")
+            await redis.delete(f"browser:session:{session_id}")
         except Exception as e:
-            logger.error(f"Error cleaning up Redis session data: {e}")
+            logger.debug(f"Session metadata cleanup skipped: {e}")
+
+        # Always clear the affinity registry and update lifecycle ownership
+        try:
+            from swarm.distributed.session_registry import SessionRegistry
+
+            registry = SessionRegistry()
+            # Remove session from lifecycle set for this worker
+            try:
+                worker_id = str(self.request.hostname or "unknown").replace("@", "_")
+                WorkerLifecycle(worker_id).remove_session(session_id)
+            except Exception as le:
+                logger.warning(f"Failed to remove session from lifecycle: {le}")
+            await registry.clear_owner(session_id)
+        except Exception as e:
+            logger.error(f"Error clearing session from registry: {e}")
 
     def on_failure(
         self,
@@ -189,52 +245,54 @@ class BrowserTask(SwarmTask):
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.goto")
-async def goto(self: BrowserTask, url: str, task_id: str | None = None) -> dict[str, Any]:
+async def goto(self: BrowserTask, url: str, session_id: str | None = None) -> dict[str, Any]:
     """
     Navigate to a URL within a task's browser session.
 
     Args:
         url: The URL to navigate to
-        task_id: Task ID for session management (defaults to current task)
+        session_id: Session ID for session management (defaults to current task)
 
     Returns:
         Dict with success status and navigation details
     """
-    task_id = self.resolve_task_id(task_id)
+    session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(task_id)
+    engine = await self.get_or_create_engine(session_id)
     await engine.goto(url)
 
     # Update session metadata with current URL
     redis = await self.get_redis()
-    await redis.hset(f"browser:session:{task_id}", "url", url)
+    await redis.hset(f"browser:session:{session_id}", "url", url)
 
-    return {"success": True, "task_id": task_id, "url": url}
+    return {"success": True, "session_id": session_id, "url": url}
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.click")
-async def click(self: BrowserTask, selector: str, task_id: str | None = None) -> dict[str, Any]:
+async def click(
+    self: BrowserTask, selector: str, session_id: str | None = None, no_wait_after: bool = False
+) -> dict[str, Any]:
     """
     Click an element within a task's browser session.
 
     Args:
         selector: CSS selector for the element
-        task_id: Task ID for session management (defaults to current task)
+        session_id: Session ID for session management (defaults to current task)
 
     Returns:
         Dict with click result
     """
-    task_id = self.resolve_task_id(task_id)
+    session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(task_id)
-    await engine.click(selector)
+    engine = await self.get_or_create_engine(session_id)
+    await engine.click(selector, no_wait_after=no_wait_after)
 
-    return {"success": True, "task_id": task_id, "selector": selector}
+    return {"success": True, "session_id": session_id, "selector": selector}
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.fill")
 async def fill(
-    self: BrowserTask, selector: str, text: str, task_id: str | None = None
+    self: BrowserTask, selector: str, text: str, session_id: str | None = None
 ) -> dict[str, Any]:
     """
     Fill a form field within a task's browser session.
@@ -242,22 +300,22 @@ async def fill(
     Args:
         selector: CSS selector for the field
         text: Text to fill
-        task_id: Task ID for session management (defaults to current task)
+        session_id: Session ID for session management (defaults to current task)
 
     Returns:
         Dict with fill result
     """
-    task_id = self.resolve_task_id(task_id)
+    session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(task_id)
+    engine = await self.get_or_create_engine(session_id)
     await engine.fill(selector, text)
 
-    return {"success": True, "task_id": task_id, "selector": selector, "text": text}
+    return {"success": True, "session_id": session_id, "selector": selector, "text": text}
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.upload")
 async def upload(
-    self: BrowserTask, selector: str, file_path: str, task_id: str | None = None
+    self: BrowserTask, selector: str, file_path: str, session_id: str | None = None
 ) -> dict[str, Any]:
     """
     Upload a file to a form field.
@@ -265,17 +323,17 @@ async def upload(
     Args:
         selector: CSS selector for the file input
         file_path: Path to the file to upload
-        task_id: Task ID for session management (defaults to current task)
+        session_id: Session ID for session management (defaults to current task)
 
     Returns:
         Dict with upload result
     """
-    task_id = self.resolve_task_id(task_id)
+    session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(task_id)
+    engine = await self.get_or_create_engine(session_id)
     await engine.upload(selector, Path(file_path))
 
-    return {"success": True, "task_id": task_id, "selector": selector, "file_path": file_path}
+    return {"success": True, "session_id": session_id, "selector": selector, "file_path": file_path}
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.wait_for")
@@ -283,7 +341,7 @@ async def wait_for(
     self: BrowserTask,
     selector: str,
     state: Literal["visible", "hidden", "attached", "detached"] = "visible",
-    task_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Wait for an element to reach a specific state.
@@ -291,35 +349,35 @@ async def wait_for(
     Args:
         selector: CSS selector to wait for
         state: State to wait for
-        task_id: Task ID for session management (defaults to current task)
+        session_id: Session ID for session management (defaults to current task)
 
     Returns:
         Dict with wait result
     """
-    task_id = self.resolve_task_id(task_id)
+    session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(task_id)
+    engine = await self.get_or_create_engine(session_id)
     await engine.wait_for(selector, state)
 
-    return {"success": True, "task_id": task_id, "selector": selector, "state": state}
+    return {"success": True, "session_id": session_id, "selector": selector, "state": state}
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.screenshot")
-async def screenshot(self: BrowserTask, task_id: str | None = None) -> dict[str, Any]:
+async def screenshot(self: BrowserTask, session_id: str | None = None) -> dict[str, Any]:
     """
     Take a screenshot within a task's browser session.
 
     Args:
-        task_id: Task ID for session management (defaults to current task)
+        session_id: Session ID for session management (defaults to current task)
 
     Returns:
         Dict with base64 encoded screenshot
     """
-    task_id = self.resolve_task_id(task_id)
+    session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(task_id)
+    engine = await self.get_or_create_engine(session_id)
 
-    temp_path = os.path.join(tempfile.gettempdir(), f"screenshot_{task_id}_{os.getpid()}.png")
+    temp_path = os.path.join(tempfile.gettempdir(), f"screenshot_{session_id}_{os.getpid()}.png")
 
     try:
         await engine.screenshot(temp_path)
@@ -329,7 +387,7 @@ async def screenshot(self: BrowserTask, task_id: str | None = None) -> dict[str,
 
         return {
             "success": True,
-            "task_id": task_id,
+            "session_id": session_id,
             "data": base64.b64encode(image_data).decode("utf-8"),
         }
     finally:
@@ -338,76 +396,123 @@ async def screenshot(self: BrowserTask, task_id: str | None = None) -> dict[str,
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.status")
-async def status(self: BrowserTask, task_id: str | None = None) -> dict[str, Any]:
+async def status(self: BrowserTask, session_id: str | None = None) -> dict[str, Any]:
     """
     Get status of a browser session.
 
     Args:
-        task_id: Task ID for session management (defaults to current task)
+        session_id: Session ID for session management (defaults to current task)
 
     Returns:
         Dict with session status
     """
-    task_id = self.resolve_task_id(task_id)
+    session_id = self.resolve_session_id(session_id)
 
-    if task_id in _engines:
-        engine = _engines[task_id]
+    # Check if engine exists in global registry
+    with _engines_lock:
+        engine = _engines.get(session_id)
+
+    if isinstance(engine, BrowserEngine):
         engine_status = await engine.status()
         return {"success": True, "data": engine_status}
     else:
         redis = await self.get_redis()
-        session_data = await redis.hgetall(f"browser:session:{task_id}")
+        session_data = await redis.hgetall(f"browser:session:{session_id}")
 
         if session_data:
             # Decode bytes to strings
             decoded_data = {k.decode(): v.decode() for k, v in session_data.items()}
             return {
                 "success": True,
-                "data": {"task_id": task_id, **decoded_data},
+                "data": {"session_id": session_id, **decoded_data},
             }
         else:
             return {
                 "success": True,
                 "data": {
-                    "task_id": task_id,
+                    "session_id": session_id,
                     "status": "not_found",
                 },
             }
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.start")
-async def start(self: BrowserTask, task_id: str | None = None) -> dict[str, Any]:
+async def start(self: BrowserTask, session_id: str | None = None) -> dict[str, Any]:
     """
     Explicitly start a browser session for a task.
 
     Args:
-        task_id: Task ID for session management (defaults to current task)
+        session_id: Session ID for session management (defaults to current task)
 
     Returns:
         Dict with session start result
     """
-    task_id = self.resolve_task_id(task_id)
+    session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(task_id)
+    engine = await self.get_or_create_engine(session_id)
     await engine.health_check()
 
-    return {"success": True, "task_id": task_id}
+    return {"success": True, "session_id": session_id}
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.cleanup")
-async def cleanup(self: BrowserTask, task_id: str) -> dict[str, Any]:
+async def cleanup(self: BrowserTask, session_id: str) -> dict[str, Any]:
     """
     Clean up a browser session for a task.
 
     Args:
-        task_id: The task ID to cleanup
+        session_id: The session ID to cleanup
 
     Returns:
         Dict with cleanup status
     """
-    await self.cleanup_engine(task_id)
+    await self.cleanup_engine(session_id)
 
-    return {"success": True, "task_id": task_id}
+    return {"success": True, "session_id": session_id}
+
+
+def _cleanup_all_engines() -> None:
+    """Clean up all browser engines across all threads.
+
+    Handles engines on different event loops appropriately.
+    """
+    # Get a copy of all engines and clear the dict under the lock
+    with _engines_lock:
+        engines_to_clean = [(k, v) for k, v in _engines.items() if isinstance(v, BrowserEngine)]
+        _engines.clear()
+
+    if not engines_to_clean:
+        return
+
+    logger.info(f"Cleaning up {len(engines_to_clean)} browser engines")
+    for session_id, engine in engines_to_clean:
+        try:
+            if hasattr(engine, "_loop") and engine._loop and not engine._loop.is_closed():
+                # For engines with running loops, use thread-safe scheduling
+                if engine._loop.is_running():
+                    # Properly wrap the coroutine for run_coroutine_threadsafe
+                    async def _stop() -> None:
+                        await engine.stop(graceful=True)
+
+                    future = asyncio.run_coroutine_threadsafe(_stop(), engine._loop)
+                    future.result(timeout=10)  # Wait up to 10s for cleanup
+                else:
+                    # Loop exists but not running, run directly
+                    engine._loop.run_until_complete(engine.stop(graceful=True))
+            logger.debug(f"Cleaned up engine for session {session_id}")
+        except Exception as exc:
+            logger.warning(f"Error shutting down engine for session {session_id}: {exc}")
+
+
+# Register cleanup on worker shutdown
+@signals.worker_shutdown.connect
+def cleanup_engines_on_shutdown(**kwargs: Any) -> None:
+    """Clean up browser engines when worker shuts down.
+
+    Cleans up all engines regardless of which thread created them.
+    """
+    _cleanup_all_engines()
+    logger.info("Browser engine cleanup completed on worker shutdown")
 
 
 @typed_task(bind=True, name="browser.scrape_data")
@@ -424,12 +529,13 @@ def scrape_data(self: TaskType, url: str, actions: list[dict[str, Any]]) -> dict
     Returns:
         Dict with scraped data and results
     """
-    task_id = self.request.id
+    # Use Celery request id as default session id for orchestration
+    session_id = self.request.id
     results = []
 
     try:
         # Navigate first
-        nav_result = app.send_task("browser.goto", kwargs={"url": url, "task_id": task_id}).get(
+        nav_result = app.send_task("browser.goto", kwargs={"url": url, "session_id": session_id}).get(
             timeout=30
         )
         results.append({"action": "navigate", "result": nav_result})
@@ -444,7 +550,8 @@ def scrape_data(self: TaskType, url: str, actions: list[dict[str, Any]]) -> dict
             if action_type == "click":
                 tasks.append(
                     app.signature(
-                        "browser.click", kwargs={"selector": action["selector"], "task_id": task_id}
+                        "browser.click",
+                        kwargs={"selector": action["selector"], "session_id": session_id},
                     )
                 )
                 action_indices.append(i)
@@ -455,7 +562,7 @@ def scrape_data(self: TaskType, url: str, actions: list[dict[str, Any]]) -> dict
                         kwargs={
                             "selector": action["selector"],
                             "text": action["text"],
-                            "task_id": task_id,
+                            "session_id": session_id,
                         },
                     )
                 )
@@ -467,13 +574,13 @@ def scrape_data(self: TaskType, url: str, actions: list[dict[str, Any]]) -> dict
                         kwargs={
                             "selector": action["selector"],
                             "state": action.get("state", "visible"),
-                            "task_id": task_id,
+                            "session_id": session_id,
                         },
                     )
                 )
                 action_indices.append(i)
             elif action_type == "screenshot":
-                tasks.append(app.signature("browser.screenshot", kwargs={"task_id": task_id}))
+                tasks.append(app.signature("browser.screenshot", kwargs={"session_id": session_id}))
                 action_indices.append(i)
             else:
                 # For unknown actions, add result immediately
@@ -490,8 +597,8 @@ def scrape_data(self: TaskType, url: str, actions: list[dict[str, Any]]) -> dict
             for task_idx, action_idx in enumerate(action_indices):
                 results.append({"action": actions[action_idx], "result": group_results[task_idx]})
 
-        return {"success": True, "task_id": task_id, "url": url, "results": results}
+        return {"success": True, "session_id": session_id, "url": url, "results": results}
 
     finally:
         # Schedule cleanup as a separate task
-        app.send_task("browser.cleanup", kwargs={"task_id": task_id})
+        app.send_task("browser.cleanup", kwargs={"session_id": session_id})
