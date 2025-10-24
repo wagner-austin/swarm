@@ -1,0 +1,203 @@
+# Redis Failover Architecture - Current State and Solution
+
+## Current Problems
+
+### 1. Multiple Connection Points
+- **swarm service**: Connects via `REDIS__URL` pointing to HAProxy
+- **Celery workers**: Use `CELERY_BROKER_URLS` pointing to HAProxy  
+- **HAProxy**: Gets backend URLs from `HAPROXY_REDIS_URLS` env var
+- **Confusion**: Some services bypass HAProxy, some don't
+
+### 2. Broken Health Checks
+- HAProxy can't properly health check Upstash (SSL Redis)
+- TCP health checks with AUTH don't work over SSL
+- Results in false "DOWN" status and unnecessary failover to local Redis
+
+### 3. Inconsistent Configuration
+- `REDIS__URL` vs `REDIS_URL` vs `CELERY_BROKER_URLS` 
+- Some services expect semicolon-separated URLs, others single URL
+- HAProxy config generator uses different env var than other services
+
+## Proposed Solution: Single Source of Truth
+
+### Architecture
+```
+All Services → HAProxy (port 6380) → [Upstash Primary | Local Redis Backup]
+                    ↑
+            External Health Checker
+            (Python script with redis-py)
+```
+
+### 1. Unified Connection Configuration
+All services connect ONLY through HAProxy at `redis://default:password@haproxy-redis:6380/0`
+
+```yaml
+# docker-compose.yml - ALL services use same config
+environment:
+  # Single connection point for ALL services
+  REDIS_URL: redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+  CELERY_BROKER_URL: redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+  
+  # HAProxy backend configuration (only HAProxy uses this)
+  HAPROXY_BACKENDS: |
+    upstash,rediss://default:password@gorgeous-jawfish-49826.upstash.io:6379/0,primary
+    local,redis://default:password@redis:6379/0,backup
+```
+
+### 2. External Health Check Script
+```python
+#!/usr/bin/env python3
+"""
+/scripts/redis-health-check.py
+HAProxy external health checker for Redis (SSL and non-SSL)
+"""
+import sys
+import os
+import redis
+from urllib.parse import urlparse
+
+def check_redis_health(redis_url: str) -> bool:
+    """Check if Redis server is healthy."""
+    try:
+        parsed = urlparse(redis_url)
+        
+        # Create Redis client with appropriate SSL settings
+        client = redis.Redis(
+            host=parsed.hostname,
+            port=parsed.port or 6379,
+            password=parsed.password,
+            username=parsed.username or 'default',
+            ssl=parsed.scheme == 'rediss',
+            ssl_cert_reqs=None,  # Don't verify certs for Upstash
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            retry_on_timeout=False
+        )
+        
+        # Perform health checks
+        # 1. Basic connectivity
+        if not client.ping():
+            return False
+            
+        # 2. Check if we can write/read (optional, for thorough check)
+        test_key = f"health:check:{os.getpid()}"
+        client.setex(test_key, 5, "healthy")
+        value = client.get(test_key)
+        client.delete(test_key)
+        
+        return value == b"healthy"
+        
+    except Exception as e:
+        print(f"Health check failed: {e}", file=sys.stderr)
+        return False
+
+if __name__ == "__main__":
+    # HAProxy passes: <haproxy_server_address> <haproxy_server_port>
+    # We need to get the actual Redis URL from environment
+    server_name = os.getenv("HAPROXY_SERVER_NAME", "")
+    
+    # Map server name to Redis URL (configured via environment)
+    urls_map = {
+        "upstash": os.getenv("UPSTASH_URL"),
+        "local": os.getenv("LOCAL_REDIS_URL")
+    }
+    
+    redis_url = urls_map.get(server_name)
+    if not redis_url:
+        sys.exit(1)
+    
+    sys.exit(0 if check_redis_health(redis_url) else 1)
+```
+
+### 3. Updated HAProxy Configuration
+```
+global
+    maxconn 4096
+    log stdout local0
+
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    option tcplog
+
+frontend redis_frontend
+    bind *:6380
+    default_backend redis_backend
+
+backend redis_backend
+    mode tcp
+    balance first
+    option allbackups
+    
+    # Use external health checker for proper SSL support
+    option external-check
+    external-check path "/usr/bin:/usr/local/bin:/scripts"
+    external-check command /scripts/redis-health-check.py
+    
+    # Primary: Upstash (SSL)
+    server upstash gorgeous-jawfish-49826.upstash.io:6379 \
+        check inter 5s fall 3 rise 2 \
+        ssl verify none \
+        on-marked-down shutdown-sessions
+    
+    # Backup: Local Redis (non-SSL)
+    server local redis:6379 \
+        check inter 3s fall 2 rise 2 \
+        backup \
+        on-marked-up shutdown-backup-sessions
+```
+
+### 4. Environment Variables Cleanup
+```bash
+# .env file - simplified
+REDIS_PASSWORD=your-password-here
+
+# Single Redis URL for all services (points to HAProxy)
+REDIS_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+
+# Backend URLs (only for HAProxy health checker)
+UPSTASH_URL=rediss://default:${REDIS_PASSWORD}@gorgeous-jawfish-49826.upstash.io:6379/0
+LOCAL_REDIS_URL=redis://default:${REDIS_PASSWORD}@redis:6379/0
+```
+
+## Benefits of This Approach
+
+1. **Single Source of Truth**: All services connect to HAProxy only
+2. **Proper Health Checks**: External script handles SSL correctly
+3. **Clear Failover**: HAProxy manages all failover logic
+4. **Easy Debugging**: One place to check connection status
+5. **Production Ready**: External health checks are industry standard
+6. **Future Proof**: Easy to add more backends or change health check logic
+
+## Migration Steps
+
+1. Create `/scripts/redis-health-check.py`
+2. Update HAProxy Dockerfile to include Python and redis-py
+3. Modify `generate_haproxy_config.py` to use external checks
+4. Update docker-compose.yml environment variables
+5. Test failover by stopping Upstash and local Redis alternately
+6. Monitor HAProxy stats page at http://localhost:8404/stats
+
+## Testing Failover
+
+```bash
+# Check current backend status
+docker exec haproxy-redis sh -c "echo 'show servers state' | socat stdio /var/run/haproxy.sock"
+
+# Test Upstash failure (simulate)
+docker exec haproxy-redis sh -c "echo 'disable server redis_backend/upstash' | socat stdio /var/run/haproxy.sock"
+
+# Verify traffic goes to backup
+docker logs haproxy-redis --tail 10
+
+# Re-enable Upstash
+docker exec haproxy-redis sh -c "echo 'enable server redis_backend/upstash' | socat stdio /var/run/haproxy.sock"
+```
+
+## Monitoring
+
+- HAProxy stats: http://localhost:8404/stats
+- Health check logs: `docker logs haproxy-redis`
+- Connection routing: Watch HAProxy access logs

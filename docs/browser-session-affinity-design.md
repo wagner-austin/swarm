@@ -4,6 +4,11 @@
 
 This document outlines a production-grade solution for browser session affinity in our distributed Celery worker system. The design ensures browser sessions remain accessible across multiple tasks while supporting horizontal scaling, fault tolerance, and high availability.
 
+Implementation notes (current state):
+- Session affinity is identified by a `session_id` kwarg on all `browser.*` tasks.
+- The affinity router uses Redis key `browser:affinity:{session_id}` to route to a worker’s direct queue `browser.direct.{worker_id}`.
+- Worker liveness is tracked by the WorkerLifecycle heartbeat in Redis keys `browser:worker:{worker_id}`. The Discord BrowserHealthMonitor counts these keys to determine pool health (no Celery control ping is used for gating).
+
 ## Key Improvements Over Initial Design
 
 1. **True Atomicity**: Lua scripts for multi-key operations instead of simple pipelines
@@ -132,7 +137,7 @@ class BrowserSessionRouter:
         if not task.startswith('browser.'):
             return None
             
-        session_id = kwargs.get('session_id') or kwargs.get('task_id')
+        session_id = kwargs.get('session_id')
         
         # Step 1: Session affinity - route to existing session owner
         if session_id:
@@ -165,18 +170,11 @@ class BrowserSessionRouter:
         if not worker_hostname:
             return None
             
-        # Robust health check: verify heartbeat recency
-        worker_data = redis.hgetall(f"bs:worker:{worker_hostname}")
+        # Robust health check: verify heartbeat key is present
+        worker_data = redis.hgetall(f"browser:worker:{worker_hostname}")
         if not worker_data:
             return None
-            
-        last_heartbeat = datetime.fromisoformat(worker_data.get('last_heartbeat'))
-        age = (datetime.now(timezone.utc) - last_heartbeat).total_seconds()
-        
-        if age > 60:  # Worker TTL
-            logger.warning(f"Worker {worker_hostname} heartbeat too old: {age}s")
-            return None
-            
+        # TTL is managed server-side; existence implies healthy
         return worker_hostname
     
     def _select_capable_worker(self, capability: str) -> Optional[str]:
@@ -437,15 +435,156 @@ class SessionCircuitBreaker:
             logger.error(f"Circuit breaker opened for worker {worker}")
 ```
 
+## Current Implementation Status
+
+### What's Been Built (2025-08-05)
+
+1. **SessionRegistry** (`swarm/distributed/session_registry.py`)
+   - Basic Redis operations for session ownership
+   - TTL support (300s default)
+   - Async interface for setting/getting/clearing owners
+   - No Lua scripts yet (planned for Phase 2)
+
+2. **BrowserSessionRouter** (`swarm/distributed/browser_router.py`)
+   - Routes tasks to workers that own sessions
+   - Extracts worker ID from owner format (e.g., "swarm_abc123" -> "abc123")
+   - Returns direct queue routing info for owned sessions
+   - Falls back to default routing for new sessions
+
+3. **Worker Direct Queues**
+   - Workers automatically create `browser.direct.{worker_id}` queues on startup
+   - Tasks register sessions on first use (goto)
+   - Subsequent tasks (click, screenshot) route to same worker
+
+4. **Integration Tests** (`tests/integration/test_browser_session_affinity.py`)
+   - Tests for session distribution across workers
+   - Tests for affinity (same session -> same worker)
+   - Tests for concurrent operations
+   - All passing!
+
+### What's Missing: Worker Heartbeat
+
+The heartbeat system will provide:
+1. **Liveness Detection**: Know which workers are alive
+2. **Capability Advertisement**: Workers report what they can do
+3. **Orphan Detection**: Find sessions whose workers have died
+4. **Load Reporting**: Help with intelligent routing decisions
+
+## Worker Heartbeat Design
+
+### Heartbeat Implementation Plan
+
+1. **Worker Registration on Startup**
+   ```python
+   # In celery_worker.py or browser task init
+   class WorkerLifecycle:
+       def __init__(self, worker_id: str):
+           self.worker_id = worker_id
+           self.capabilities = self._detect_capabilities()
+           self.redis = redis.from_url(settings.redis.url)
+           
+       def register(self):
+           """Register worker in Redis with capabilities"""
+           worker_key = f"browser:worker:{self.worker_id}"
+           worker_data = {
+               "hostname": self.worker_id,
+               "capabilities": json.dumps(self.capabilities),
+               "started_at": datetime.utcnow().isoformat(),
+               "last_heartbeat": datetime.utcnow().isoformat(),
+               "status": "active",
+               "current_sessions": 0,
+               "max_sessions": 10,
+           }
+           self.redis.hset(worker_key, mapping=worker_data)
+           self.redis.expire(worker_key, 60)  # 60s TTL
+   ```
+
+2. **Heartbeat Thread**
+   ```python
+   def heartbeat_loop(self):
+       """Run in background thread, update every 20s"""
+       while not self.shutdown:
+           try:
+               worker_key = f"browser:worker:{self.worker_id}"
+               # Update heartbeat timestamp
+               self.redis.hset(worker_key, "last_heartbeat", datetime.utcnow().isoformat())
+               # Update session count
+               sessions = self.redis.keys(f"browser:affinity:*")
+               owned_sessions = sum(1 for s in sessions if self.redis.get(s) == self.worker_id)
+               self.redis.hset(worker_key, "current_sessions", owned_sessions)
+               # Extend TTL
+               self.redis.expire(worker_key, 60)
+           except Exception as e:
+               logger.error(f"Heartbeat failed: {e}")
+           time.sleep(20)
+   ```
+
+3. **Celery Signal Integration**
+   ```python
+   @signals.worker_ready.connect
+   def register_worker(sender, **kwargs):
+       """Register worker when Celery starts"""
+       worker_id = sender.hostname.split('@')[1]
+       lifecycle = WorkerLifecycle(worker_id)
+       lifecycle.register()
+       # Start heartbeat in background thread
+       thread = threading.Thread(target=lifecycle.heartbeat_loop, daemon=True)
+       thread.start()
+       
+   @signals.worker_shutdown.connect
+   def unregister_worker(sender, **kwargs):
+       """Clean up when worker shuts down"""
+       worker_id = sender.hostname.split('@')[1]
+       # Mark sessions as orphaned
+       # Remove worker key
+   ```
+
+4. **Capability Detection**
+   ```python
+   def _detect_capabilities(self) -> List[str]:
+       """Detect what this worker can do"""
+       capabilities = ["browser"]  # Base capability
+       
+       # Check for GPU
+       if self._has_gpu():
+           capabilities.append("gpu")
+           
+       # Check available browsers
+       if self._has_chrome():
+           capabilities.append("chrome")
+       if self._has_firefox():
+           capabilities.append("firefox")
+           
+       # Check for special features
+       if os.getenv("ENABLE_STEALTH"):
+           capabilities.append("stealth")
+           
+       return capabilities
+   ```
+
+5. **Update Router to Check Worker Health**
+   ```python
+   # In BrowserSessionRouter
+   def _is_worker_healthy(self, worker_id: str) -> bool:
+       """Check if worker is alive based on heartbeat"""
+       worker_key = f"browser:worker:{worker_id}"
+       last_heartbeat = self.redis.hget(worker_key, "last_heartbeat")
+       if not last_heartbeat:
+           return False
+       # Check if heartbeat is recent (within 60s)
+       last_time = datetime.fromisoformat(last_heartbeat)
+       return (datetime.utcnow() - last_time).total_seconds() < 60
+   ```
+
 ## Implementation Plan
 
 ### Phase 1: Core Session Affinity (Current Sprint)
-- [ ] Implement SessionRegistry with Lua scripts for atomicity
-- [ ] Create BrowserSessionRouter with capability-based routing
+- [x] Implement SessionRegistry ~~with Lua scripts for atomicity~~ (basic Redis operations)
+- [x] Create BrowserSessionRouter with ~~capability-based~~ routing
 - [ ] Add worker heartbeat with capability advertisement
-- [ ] Update BrowserTask to register/unregister sessions
-- [ ] Create direct worker queues for session-affined routing
-- [ ] Add integration test for concurrent goto/click operations
+- [x] Update BrowserTask to register/unregister sessions
+- [x] Create direct worker queues for session-affined routing
+- [x] Add integration test for concurrent goto/click operations
 
 ### Phase 2: Observability & Reliability (Next Sprint)
 - [ ] Add session affinity metrics (hit/miss rates)
