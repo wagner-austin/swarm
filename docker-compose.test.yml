@@ -1,7 +1,17 @@
 ---
 # docker-compose.test.yml
+# ==================
 # Test-specific overrides that use only local Redis (no Upstash)
 # This prevents rate limit issues and authentication problems in tests
+#
+# IMPORTANT: This file is for CI/testing ONLY!
+# - Normal development: `make start` uses docker-compose.yml (with Upstash failover)
+# - CI testing: Use `-f docker-compose.yml -f docker-compose.test.yml` explicitly
+#
+# This file overrides Redis URLs to bypass HAProxy and use local Redis directly:
+# - Avoids Upstash rate limits during tests
+# - Ensures consistent test environment
+# - SHOULD NOT be used for normal development (causes config mismatch)
 
 services:
   haproxy-redis:
