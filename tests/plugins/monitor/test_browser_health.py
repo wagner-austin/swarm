@@ -43,7 +43,8 @@ async def test_browser_health_monitor_creation(
 
     assert isinstance(cog, BrowserHealthMonitor)
     assert cog.redis is mock_redis
-    assert cog.check_interval == 15.0
+    # Check interval was increased to reduce Redis command usage
+    assert cog.check_interval == 60.0
     assert cog.min_healthy_workers == 1
 
 
