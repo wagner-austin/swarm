@@ -76,7 +76,7 @@ async def test_task_submission() -> bool:
         from swarm.tasks.browser import start as browser_start
 
         print("   Submitting browser_start task...")
-        result = browser_start.delay(task_id="test-task-123")
+        result = browser_start.delay(session_id="test-task-123", auto_cleanup=True)
         print(f"   Task ID: {result.id}")
 
         # Wait for result (max 10 seconds)

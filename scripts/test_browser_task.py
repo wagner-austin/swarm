@@ -35,15 +35,17 @@ async def main() -> None:
     else:
         print("Task still processing...")
 
-    # Try a screenshot task
+    # Try a screenshot task (with auto-cleanup since it's the last task)
     print("\n\nSubmitting screenshot task...")
     screenshot_result = screenshot.delay(
-        task_id=result.id  # Use the same task ID to share browser session
+        session_id=result.id,  # Use the same session ID to share browser session
+        auto_cleanup=True,  # Last task cleans up the session
     )
 
     print(f"Screenshot task ID: {screenshot_result.id}")
 
     print("\nCheck Grafana/Prometheus for task metrics.")
+    print("(Session will be auto-cleaned after screenshot completes)")
 
 
 if __name__ == "__main__":

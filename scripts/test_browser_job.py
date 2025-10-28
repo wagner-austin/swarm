@@ -30,32 +30,41 @@ async def test_browser_flow() -> bool:
         # Test 1: Start browser
         print("\n1. Starting browser session...")
         await browser.start()
-        print("✅ Browser started successfully")
+        print("PASS: Browser started successfully")
 
         # Test 2: Navigate to URL
         print("\n2. Navigating to example.com...")
         await browser.goto("https://example.com")
-        print("✅ Navigation completed")
+        print("PASS: Navigation completed")
 
         # Test 3: Take screenshot
         print("\n3. Taking screenshot...")
         screenshot_data = await browser.screenshot()
-        print(f"✅ Screenshot taken ({len(screenshot_data)} bytes)")
+        print(f"PASS: Screenshot taken ({len(screenshot_data)} bytes)")
 
         # Test 4: Get status
         print("\n4. Getting browser status...")
         status = await browser.status()
-        print(f"✅ Status retrieved: {status}")
+        print(f"PASS: Status retrieved: {status}")
 
-        print("\n🎉 All browser operations completed successfully!")
+        print("\nAll browser operations completed successfully!")
         return True
 
     except Exception as e:
-        print(f"\n❌ Browser test failed: {e}")
+        print(f"\nFAIL: Browser test failed: {e}")
         import traceback
 
         traceback.print_exc()
         return False
+
+    finally:
+        # Clean up all browser sessions
+        print("\n5. Cleaning up browser sessions...")
+        try:
+            await browser.cleanup_all()
+            print("PASS: Cleanup completed")
+        except Exception as e:
+            print(f"WARNING: Cleanup warning: {e}")
 
 
 async def monitor_queue_depth() -> None:
@@ -89,9 +98,9 @@ async def main() -> None:
         pass
 
     if success:
-        print("\n✅ Browser job test completed successfully!")
+        print("\nBrowser job test completed successfully!")
     else:
-        print("\n❌ Browser job test failed!")
+        print("\nBrowser job test failed!")
         sys.exit(1)
 
 
