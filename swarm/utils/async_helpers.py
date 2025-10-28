@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import functools
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import TypeVar
 
 __all__ = ["run_in_threadpool", "with_retries"]
 
@@ -66,7 +66,7 @@ async def with_retries(
             delay *= backoff
 
 
-def run_in_threadpool(func: Callable[..., T], *args: Any, **kwargs: Any) -> asyncio.Future[T]:
+def run_in_threadpool(func: Callable[..., T], *args: object, **kwargs: object) -> asyncio.Future[T]:
     """Run *func* in the event-loop's default thread-pool executor.
 
     Example

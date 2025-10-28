@@ -6,10 +6,13 @@ Utilities for safe dynamic dispatch in distributed, plugin, or job-based systems
 """
 
 import inspect
-from typing import Any
+from collections.abc import Mapping
+from typing import Callable
 
 
-def filter_kwargs_for_method(method: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+def filter_kwargs_for_method(
+    method: Callable[..., object], kwargs: Mapping[str, object]
+) -> dict[str, object]:
     """
     Return a dict with only those kwargs accepted by the method signature.
     Prevents TypeError from extra job metadata (e.g. session_id, close_session).

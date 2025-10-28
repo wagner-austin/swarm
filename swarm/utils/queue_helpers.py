@@ -10,7 +10,7 @@ repetitive code.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from swarm.core.settings import settings
 from swarm.core.telemetry import update_queue_gauge
@@ -38,13 +38,13 @@ async def get(q: asyncio.Queue[T], name: str) -> T:
     return item
 
 
-def task_done(q: asyncio.Queue[Any], name: str) -> None:  # noqa: ANN401 – Any fine here
+def task_done(q: asyncio.Queue[T], name: str) -> None:
     """Mark one task processed for *q* and refresh its gauge."""
     q.task_done()
     update_queue_gauge(name, q)
 
 
-def new_pair(direction: str = "proxy") -> tuple[asyncio.Queue[Any], asyncio.Queue[Any]]:  # noqa: D401
+def new_pair(direction: str = "proxy") -> tuple[asyncio.Queue[object], asyncio.Queue[object]]:  # noqa: D401
     """Return `(in_q, out_q)` sized per ``settings.queues``.
 
     Parameters
@@ -54,8 +54,8 @@ def new_pair(direction: str = "proxy") -> tuple[asyncio.Queue[Any], asyncio.Queu
         ``direction='proxy'`` will register gauges ``proxy_in`` and
         ``proxy_out``.
     """
-    in_q: asyncio.Queue[Any] = asyncio.Queue(maxsize=settings.queues.inbound)
-    out_q: asyncio.Queue[Any] = asyncio.Queue(maxsize=settings.queues.outbound)
+    in_q: asyncio.Queue[object] = asyncio.Queue(maxsize=settings.queues.inbound)
+    out_q: asyncio.Queue[object] = asyncio.Queue(maxsize=settings.queues.outbound)
 
     # Initialise gauges to 0 so they appear even before the first put().
     update_queue_gauge(f"{direction}_in", in_q)

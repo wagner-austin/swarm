@@ -15,17 +15,23 @@ import logging
 
 def choose(settings: Settings) -> HistoryBackend:
     """
-    Select and instantiate the appropriate HistoryBackend.
-    Prioritizes Redis if enabled and configured, else falls back to in-memory.
+    Select the conversation HistoryBackend with no silent fallbacks.
+
+    - If Redis is enabled, a valid URL is required.
+    - If Redis is disabled, raise to avoid non-persistent history by accident.
     """
     url = getattr(settings.redis, "url", None)
-    if getattr(settings.redis, "enabled", False) and isinstance(url, str) and url:
+    enabled = getattr(settings.redis, "enabled", False)
+    if enabled:
+        if not isinstance(url, str) or not url:
+            raise RuntimeError("[HistoryBackend] REDIS__URL must be set when REDIS__ENABLED=true")
         logging.info(f"[HistoryBackend] Using RedisBackend for conversation history (url={url})")
         return RedisBackend(
             url,
             max_turns=getattr(settings, "conversation_max_turns", 100),
         )
-    logging.info(
-        "[HistoryBackend] Using in-memory backend for conversation history (non-persistent)"
+    # No fallback – fail fast so operators configure persistence explicitly
+    raise RuntimeError(
+        "[HistoryBackend] Redis is required for chat history persistence. "
+        "Set REDIS__ENABLED=true and REDIS__URL in the environment."
     )
-    return MemoryBackend(max_turns=getattr(settings, "conversation_max_turns", 100))

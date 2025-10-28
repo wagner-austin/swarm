@@ -6,7 +6,15 @@ that aren't fully typed in the redis-py library, as well as
 compatibility helpers for different redis-py versions.
 """
 
-from typing import Any
+from typing import (
+    Awaitable,
+    NotRequired,
+    Protocol,
+    TypedDict,
+    TypeGuard,
+    overload,
+    runtime_checkable,
+)
 
 from swarm.types import RedisBytes
 
@@ -16,7 +24,7 @@ async def xack(redis: RedisBytes, stream: str, group: str, *message_ids: str) ->
     return int(await redis.xack(stream, group, *message_ids))
 
 
-async def xpending(redis: RedisBytes, stream: str, group: str) -> list[Any]:
+async def xpending(redis: RedisBytes, stream: str, group: str) -> list[object]:
     """Get pending message information for a consumer group."""
     result = await redis.xpending(stream, group)
     if isinstance(result, list):
@@ -24,24 +32,86 @@ async def xpending(redis: RedisBytes, stream: str, group: str) -> list[Any]:
     return []
 
 
-async def xinfo_groups(redis: RedisBytes, stream: str) -> list[dict[str, Any]]:
+# Use functional TypedDict to allow hyphenated keys from Redis response
+StreamGroupInfo = TypedDict(
+    "StreamGroupInfo",
+    {
+        "name": str | bytes,
+        "consumers": int,
+        "pending": int,
+        "last-delivered-id": str | bytes,
+        "entries_read": int,
+        "lag": int,
+    },
+    total=False,
+)
+
+
+async def xinfo_groups(redis: RedisBytes, stream: str) -> list[StreamGroupInfo]:
     """Get information about consumer groups for a stream."""
     groups = await redis.xinfo_groups(stream)
-    return [dict(group) for group in groups] if groups else []
+    result: list[StreamGroupInfo] = []
+    for g in groups or []:
+        d = dict(g)
+        info: StreamGroupInfo = {
+            "name": d.get("name", b""),
+            "consumers": int(d.get("consumers", 0) or 0),
+            "pending": int(d.get("pending", 0) or 0),
+            "last-delivered-id": d.get("last-delivered-id", b""),
+            "entries_read": int(d.get("entries_read", 0) or 0),
+            "lag": int(d.get("lag", 0) or 0),
+        }
+        result.append(info)
+    return result
 
 
-async def async_close_redis(client: Any) -> None:
+@runtime_checkable
+class HasAClose(Protocol):
+    async def aclose(self) -> None: ...
+
+
+# Backward-compatible alias (previously imported by redis_protocols)
+_HasAClose = HasAClose
+
+
+@runtime_checkable
+class HasClose(Protocol):
+    # May be sync or async; narrowed at runtime with a TypeGuard
+    def close(self) -> object: ...
+
+
+Closeable = HasAClose | HasClose
+
+
+@overload
+async def async_close_redis(client: HasAClose) -> None: ...
+
+
+@overload
+async def async_close_redis(client: HasClose) -> None: ...
+
+
+async def async_close_redis(client: Closeable) -> None:
+    """Close an async Redis client with strict typing and no casts.
+
+    Supported variants (checked in order):
+    - client.aclose() for clients providing an explicit async aclose()
+    - client.close() for clients with either async or sync close() (narrowed at runtime)
     """
-    Close an async redis-py client in a mypy-safe way.
-
-    * redis-py 5.x: prefers `aclose()`
-    * Older versions / stale stubs: only `close()`
-
-    This helper exists because redis-py >= 5.0 offers aclose(), but the type stubs
-    (and therefore mypy) haven't caught up yet. This provides a single, clean
-    compatibility layer instead of scattering type: ignore comments everywhere.
-    """
-    if hasattr(client, "aclose"):  # new API
+    if isinstance(client, HasAClose):
         await client.aclose()
-    else:  # fallback / older stubs
-        await client.close()
+        return
+
+    if isinstance(client, HasClose):
+        result = client.close()
+        if _is_awaitable_none(result):
+            await result
+        return
+
+    # This should be unreachable due to the union type; keep explicit error for safety
+    raise AttributeError(f"Client {type(client).__name__} has neither aclose() nor close()")
+
+
+def _is_awaitable_none(value: object) -> TypeGuard[Awaitable[None]]:
+    """TypeGuard to detect awaitable values that resolve to None."""
+    return hasattr(value, "__await__")

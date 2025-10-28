@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Callable
+from typing import Awaitable, Callable
 
 from swarm.core.service_base import ServiceABC
 from swarm.core.telemetry import record_frame as default_record_frame
@@ -48,9 +48,9 @@ class TankPitEngine(ServiceABC):
         in_queue_name: str = "ws_in",
         out_queue_name: str = "ws_out",
         record_frame_fn: Callable[[str, float], None] = default_record_frame,
-        task_done_fn: Callable[[asyncio.Queue[Any], str], None] = q_task_done,
-        get_fn: Callable[[asyncio.Queue[Any], str], Any] = q_get,
-        put_nowait_fn: Callable[[asyncio.Queue[Any], Any, str], None] = q_put,
+        task_done_fn: Callable[[asyncio.Queue[_DirFrame], str], None] = q_task_done,
+        get_fn: Callable[[asyncio.Queue[_DirFrame], str], Awaitable[_DirFrame]] = q_get,
+        put_nowait_fn: Callable[[asyncio.Queue[bytes], bytes, str], None] = q_put,
     ) -> None:
         self._in = q_in
         self._out = q_out

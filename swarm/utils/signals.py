@@ -14,7 +14,8 @@ import logging
 import os
 import signal
 from collections.abc import Iterable
-from typing import Any, cast
+from types import TracebackType
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,13 @@ __all__ = [
 ]
 
 
+class _HasShutdown(Protocol):
+    async def shutdown(self, *, signal_name: str) -> None: ...
+
+
 def install_handlers(
     loop: asyncio.AbstractEventLoop,
-    manager: asyncio.Future[Any] | object,
+    manager: asyncio.Future[object] | _HasShutdown,
     *,
     signals: Iterable[signal.Signals] | None = None,
 ) -> list[signal.Signals]:
@@ -62,10 +67,13 @@ def install_handlers(
     from collections.abc import Callable
 
     def _make_handler(sig_to_use: signal.Signals) -> Callable[[], None]:
-        def _handler() -> None:  # pragma: no cover – real signal path
+        def _handler() -> None:  # pragma: no cover — real signal path
             logger.info("Received signal %s, initiating graceful shutdown…", sig_to_use.name)
-            # Fire-and-forget – the event loop keeps running until shutdown completes
-            asyncio.create_task(cast(Any, manager).shutdown(signal_name=sig_to_use.name))
+            # Fire-and-forget — the event loop keeps running until shutdown completes
+            if isinstance(manager, asyncio.Future):
+                # If a Future is passed, nothing to call
+                return
+            asyncio.create_task(manager.shutdown(signal_name=sig_to_use.name))
 
         return _handler
 
@@ -87,7 +95,7 @@ class SignalHandlers:
     def __init__(
         self,
         loop: asyncio.AbstractEventLoop,
-        manager: asyncio.Future[Any] | object,
+        manager: asyncio.Future[object] | _HasShutdown,
         *,
         signals: Iterable[signal.Signals] | None = None,
     ) -> None:
@@ -104,7 +112,7 @@ class SignalHandlers:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        tb: Any | None,
+        tb: TracebackType | None,
     ) -> bool:
         for sig in self._installed:
             try:
