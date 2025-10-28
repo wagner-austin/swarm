@@ -21,6 +21,7 @@ from celery.app.base import Celery
 from celery.app.task import Task as CeleryTask
 from kombu import Queue
 
+import swarm.distributed.lifecycle_signals as _lifecycle_signals  # noqa: F401
 from swarm.core.logger_setup import bind_log_context
 from swarm.core.settings import Settings
 from swarm.distributed.browser_router import BrowserSessionRouter
@@ -319,6 +320,9 @@ def register_worker(sender: object, **kwargs: object) -> None:
         logger.info(f"Worker {worker_id} registered and heartbeat started")
     except Exception as e:
         logger.error(f"Failed to register worker {worker_id}: {e}", exc_info=True)
+
+    # Per-worker direct queue is configured via the worker entrypoint (scripts/entrypoint.worker.sh)
+    # to avoid duplication and control-plane races.
 
 
 @signals.worker_shutting_down.connect
