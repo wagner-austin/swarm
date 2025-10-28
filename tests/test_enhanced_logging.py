@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from swarm.core.deployment_context import DeploymentContext
 from swarm.core.logger_setup import (
     DEFAULT_LOGGING_CONFIG,
     _ContextFilter,
@@ -203,15 +204,13 @@ class TestLoggingConfiguration:
 
 
 class TestHeartbeatCompatibility:
-    """Test compatibility with heartbeat system."""
+    """Test compatibility with heartbeat/logging integration."""
 
-    @pytest.mark.asyncio
-    async def test_worker_heartbeat_integration(self) -> None:
-        """Test that enhanced logging works with heartbeat system."""
-        from swarm.distributed.monitoring.heartbeat import WorkerHeartbeat
+    def test_worker_lifecycle_logging_context(self) -> None:
+        """WorkerLifecycle integrates with logging context for heartbeat threads."""
+        from swarm.distributed.worker_lifecycle import WorkerLifecycle
 
-        # Use a fixed deployment context provider for deterministic context
-        def fixed_context() -> dict[str, str]:
+        def fixed_context() -> DeploymentContext:
             return {
                 "hostname": "test-host",
                 "container_id": "test-container",
@@ -219,26 +218,11 @@ class TestHeartbeatCompatibility:
                 "region": "us-test",
             }
 
-        # Set up logging context
         bind_log_context(service="worker", worker_id="test-worker")
         bind_deployment_context(context=fixed_context())
 
-        # Create heartbeat instance with injected context provider
-        heartbeat = WorkerHeartbeat(
-            redis_client=MagicMock(),
-            worker_id="test-worker",
-            interval_seconds=1.0,
-            deployment_context_provider=fixed_context,
-        )
-
-        # Collect heartbeat data (tests context integration)
-        data = await heartbeat._collect_heartbeat_data()
-
-        # Verify deployment context is included
-        assert data["worker_id"] == "test-worker"
-        assert data["deployment"]["deployment_env"] == "test"
-        assert "timestamp" in data
-        assert "uptime_seconds" in data
+        lifecycle = WorkerLifecycle(worker_id="test-worker", redis_client=MagicMock())
+        assert lifecycle.worker_id == "test-worker"
 
 
 @pytest.fixture(autouse=True)

@@ -55,14 +55,15 @@ async def test_stub_provider_runtime_check_and_helpers() -> None:
             return "hi"
 
     # Expose the singleton exactly like real provider modules do
-    mod.provider = StubProvider()  # type: ignore[attr-defined]
+    setattr(mod, "provider", StubProvider())
     sys.modules[mod.__name__] = mod
 
     # Manually register – simulates what swarm.ai.providers.__init__ auto-import does
-    registry._REGISTRY["stub"] = cast(LLMProvider, mod.provider)
+    provider = cast(LLMProvider, getattr(mod, "provider"))
+    registry._REGISTRY["stub"] = provider
 
     # 1. Structural runtime check
-    assert isinstance(mod.provider, LLMProvider)
+    assert isinstance(provider, LLMProvider)
 
     # 2. Helper functions work
     assert registry.get("stub") is mod.provider

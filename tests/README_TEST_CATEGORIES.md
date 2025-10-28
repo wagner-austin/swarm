@@ -62,7 +62,7 @@ pytest
 These tests should have integration variants:
 - `test_scaling_service.py` - Only uses FakeRedisClient
 - `test_backends.py` - Mocks Docker/Kubernetes commands
-- `test_celery_autoscaler.py` - Mocks Flower API
+- `test_celery_autoscaler.py` - Mocks queue depth retrieval (no Flower)
 
 ### Missing Integration Tests
 - No test verifies services connect through HAProxy

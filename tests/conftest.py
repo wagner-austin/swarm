@@ -3,6 +3,7 @@
 # Add the src directory to the Python path for all tests
 
 import os
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -11,10 +12,41 @@ load_dotenv()
 
 password = os.getenv("REDIS_PASSWORD", "")
 auth_part = f"default:{password}@" if password else ""
-# Use HAProxy for consistency with production
+
+
+def _is_localhost_url(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return host in {"localhost", "127.0.0.1", "haproxy-redis"}
+
+
+def _looks_production(url: str) -> bool:
+    lu = url.lower()
+    if "upstash.io" in lu or "production" in lu:
+        return True
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    # Treat any non-local host as production-like for safety
+    return host not in {"", "localhost", "127.0.0.1", "haproxy-redis"}
+
+
+# Use HAProxy for consistency with production, but do not override a pre-set
+# production-like REDIS_URL to allow safety checks to trigger in tests.
 BROKER = f"redis://{auth_part}localhost:6380/0"
 
-os.environ["REDIS_URL"] = BROKER
+pre_set_url = os.getenv("REDIS_URL", "")
+# Respect an explicitly provided test DB (e.g., /15). Do not override to BROKER.
+if not pre_set_url:
+    # IMPORTANT: Use DB 0 via HAProxy so the router can find session affinity keys
+    # that workers store. Router uses Settings().redis.url to connect, workers use
+    # CELERY_BROKER_URLS. Both must point to the same DB for affinity routing to work.
+    os.environ["REDIS_URL"] = BROKER
+
+# Always configure Celery to talk through HAProxy for production parity
 os.environ["CELERY_BROKER_URL"] = BROKER
 os.environ["CELERY_BROKER_URLS"] = BROKER
 
@@ -26,6 +58,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import pytest_asyncio
 
 from swarm.core.logger_setup import setup_logging
 from swarm.core.settings import Settings
@@ -34,17 +67,12 @@ from swarm.core.settings import Settings
 # This ensures all tests have proper authentication from .env file
 password = os.getenv("REDIS_PASSWORD", "")
 if password:
-    # Always use authenticated URLs for tests when password is set
+    # Always use authenticated URLs for Celery broker when password is set
     auth_part = f"default:{password}@"
-    # Use HAProxy for tests to match production behavior
-    redis_url = f"redis://{auth_part}localhost:6380/0"
+    os.environ["CELERY_BROKER_URLS"] = f"redis://{auth_part}localhost:6380/0"
+    os.environ["CELERY_BROKER_URL"] = f"redis://{auth_part}localhost:6380/0"
 
-    # Override any Redis URLs to include authentication
-    os.environ["REDIS_URL"] = redis_url
-    os.environ["CELERY_BROKER_URLS"] = redis_url
-    os.environ["CELERY_BROKER_URL"] = redis_url
-
-    # Also set the password separately for tests that build their own URLs
+    # Also set the password separately for tests building their own URLs
     os.environ["REDIS_PASSWORD"] = password
 
 # Silence noisy third-party deprecations we can’t fix locally.
@@ -74,6 +102,27 @@ Provides a CLI-runner; no DB fixtures remain.
 # Global logging setup                                              +
 # ------------------------------------------------------------------+
 setup_logging({"root": {"level": "WARNING"}})
+
+
+# ------------------------------------------------------------------+
+# Clear cached state between tests                                   +
+# ------------------------------------------------------------------+
+@pytest.fixture(autouse=True)
+def clear_worker_lifecycle_cache() -> Generator[None, None, None]:
+    """Clear WorkerLifecycle cache before each test to prevent cross-contamination.
+
+    WorkerLifecycle has a class-level instance cache that persists across tests.
+    This can cause DB isolation issues when tests use different Redis DBs.
+    """
+    from swarm.distributed.worker_lifecycle import WorkerLifecycle
+
+    # Clear cache before test
+    WorkerLifecycle._instances.clear()
+
+    yield
+
+    # Clear cache after test to prevent leaks
+    WorkerLifecycle._instances.clear()
 
 
 # ------------------------------------------------------------------+
@@ -133,8 +182,12 @@ def mock_settings() -> Settings:
     return settings
 
 
+# Note: Flushdb runtime guard has been extracted to scripts/guard_flushdb_runtime.py
+# and is installed by the Makefile test wrapper before pytest starts.
+
+
 # Type annotated autouse fixture (required by --strict mypy)
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 async def _cleanup_asyncio_tasks() -> AsyncGenerator[None, None]:
     """Ensure no pending tasks survive beyond each test function.
 
