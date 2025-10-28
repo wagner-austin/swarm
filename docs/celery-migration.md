@@ -5,7 +5,7 @@
 We've migrated from custom Redis streams to Celery for distributed task processing. This provides:
 - Built-in retry logic and error handling
 - Automatic failover between Upstash and local Redis
-- Better monitoring via Flower
+- Better monitoring via Prometheus + Celery exporter (Flower removed)
 - Process-level autoscaling within workers
 - Container-level autoscaling based on queue depth
 
@@ -26,11 +26,11 @@ The system supports multiple Redis configurations:
 ## Running with Celery
 
 ```bash
-# Start all services (includes Flower, Redis, autoscaler)
-docker-compose up -d
+# Start all services (includes Redis and autoscaler)
+docker compose up -d
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # The autoscaler automatically manages worker containers
 # To manually create workers, use:
@@ -42,12 +42,10 @@ docker run -d --name browser-worker-1 \
 
 ## Key Services
 
-### Flower (Port 5555)
-Web UI for monitoring Celery tasks and workers
-- View real-time task execution
-- Monitor queue depths
-- See worker status
-- Access at http://localhost:5555
+### Celery Exporter (Port 9808)
+Prometheus exporter for Celery metrics
+- Task metrics without events overhead
+- Scrape http://localhost:9808/metrics
 
 ### Celery Workers
 - **Browser Worker**: Handles web automation tasks
@@ -56,7 +54,7 @@ Web UI for monitoring Celery tasks and workers
   - Container autoscaling: Based on queue depth
 
 ### Autoscaler
-- Monitors Celery queues via Flower API
+- Monitors Celery queues via Redis broker depth (Kombu) and optional Celery Inspect
 - Creates/destroys worker containers based on demand
 - Configurable thresholds in `config.yaml`
 
@@ -72,10 +70,8 @@ Each worker supports these environment variables:
 
 ## Monitoring
 
-1. **Flower Dashboard**: http://localhost:5555
-   - Real-time task monitoring
-   - Queue statistics
-   - Worker health
+1. **Grafana Dashboards**: http://localhost:3000
+   - Import dashboards and panels for Celery exporter / worker metrics
 
 2. **Prometheus Metrics**: http://localhost:9090
    - Worker metrics on ports 9100+
@@ -91,15 +87,15 @@ If you see Redis connection errors:
 1. Check Upstash dashboard for rate limits (500K request limit)
 2. Verify Upstash credentials in `.env`
 3. Enable fallback: Set `REDIS_FALLBACK_ENABLED=true` in `.env`
-4. Ensure local Redis is running: `docker-compose up redis`
+4. Ensure local Redis is running: `docker compose up redis`
 
 ### Worker Not Processing Tasks
-1. Check Flower UI for worker status
+1. Check Grafana/Prometheus for worker status
 2. Verify queue names match between producer and worker
 3. Check worker logs: `docker logs celery-worker-browser`
 
 ### Autoscaler Issues
-1. Ensure Flower is running and accessible
+1. Ensure Prometheus and Grafana are running and accessible
 2. Check autoscaler logs: `docker logs autoscaler`
 3. Verify Docker socket is mounted correctly
 
@@ -111,7 +107,7 @@ If you see Redis connection errors:
 | `worker.py` | `celery_worker.py` | Celery-based worker |
 | Redis streams | Celery queues | Different data structure |
 | `manager.py` | Built into Celery | No separate manager needed |
-| `autoscaler.py` | `celery_autoscaler.py` | Uses Flower API |
+| `autoscaler.py` | `celery_autoscaler.py` | Uses Redis depth via Kombu |
 
 ## Next Steps
 
@@ -119,3 +115,4 @@ If you see Redis connection errors:
 2. **Configure routing**: Route tasks to specific queues based on type
 3. **Set up monitoring**: Import Grafana dashboards and configure alerts
 4. **Production deployment**: Use Kubernetes with KEDA for cloud-native autoscaling
+

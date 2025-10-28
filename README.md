@@ -1,195 +1,124 @@
 # AI Task Execution System
 
-A distributed, AI-powered task execution platform capable of decomposing complex requests into subtasks and orchestrating specialized workers to complete them.
+A distributed, AI-powered task execution platform that decomposes complex requests into subtasks and orchestrates specialized workers (browser automation, LLMs, etc.) to complete them.
 
-## 🎯 What This Is
+## What This Is
 
-An intelligent task assistant that can handle high-level requests like:
+An intelligent assistant that can handle requests like:
 - "Research upcoming environmental bills and prepare talking points"
 - "Analyze and improve the logging system in my codebase"
-- "Do my latest homework assignment"
 - "Monitor this website daily and summarize changes"
 
-The system breaks down these complex tasks into subtasks, routes them to appropriate workers (web browsers, code analyzers, LLMs), and coordinates execution across a distributed infrastructure.
+## Key Features
 
-## 🚀 Key Features
+- Task decomposition into manageable subtasks
+- Distributed workers that scale from 1 to 1000+
+- Multiple frontends (Discord today; more can be added)
+- Capability-based routing and session affinity
+- Strict typing (mypy --strict) and safety guards
 
-- **Task Decomposition**: Automatically breaks complex tasks into manageable subtasks
-- **Distributed Workers**: Scale from 1 to 1000+ specialized workers
-- **Multiple Frontends**: Discord, Telegram, Web API, CLI (Discord is just ONE interface)
-- **Capability-Based Routing**: Workers advertise skills, tasks route to best match
-- **Local LLM Support**: Run private AI models on your GPU for sensitive tasks
-- **Platform Agnostic**: Deploy on local machines, Docker, Kubernetes, or cloud
-
-## 📋 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.11+
 - Poetry
-- Docker (optional, for containerized deployment)
-- NVIDIA GPU with 24GB+ VRAM (optional, for local LLMs)
+- Docker (for containerized deployment)
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone <repository-url>
 cd swarm
-
-# Install dependencies
 poetry install --with dev
-
-# Install browser automation tools
 poetry run playwright install chromium
-
-# Copy environment template
 cp .env.example .env
 ```
 
 ### Configuration
 
-Edit `.env` with your settings:
+Edit `.env` with your settings. For local development, everything connects to Redis through HAProxy (port 6380):
 
 ```ini
-# Redis for task queue (required)
-REDIS_URL=redis://localhost:6379/0
+# App configuration (nested env for pydantic)
+REDIS__URL=redis://default:${REDIS_PASSWORD}@localhost:6380/0
+CELERY_BROKER_URLS=${REDIS__URL}
 
-# Frontend configurations (use any or all)
-DISCORD_TOKEN=your-token-here      # For Discord frontend
-TELEGRAM_TOKEN=your-token-here     # For Telegram frontend
-API_KEY=your-api-key               # For REST API
-
-# Worker configuration
-BROWSER_HEADLESS=true              # Run browsers in background
-WORKER_CONCURRENCY=5               # Tasks per worker
-
-# Optional: AI Models
-OPENAI_API_KEY=your-key           # For GPT-4 tasks
-LOCAL_MODEL_PATH=/models/llama-2-70b.gguf  # For private LLM
+# Frontend configuration
+DISCORD_TOKEN=your-token-here
 ```
 
 ### Running the System
 
-**Development (single machine):**
+Development (single machine):
 ```bash
-# Start all services (Redis, Flower, autoscaler, and swarm)
-docker-compose up -d
-
-# Or run components separately
-make run            # Start main swarm service
-make celery-worker  # Start a Celery worker
-make flower         # Start Flower monitoring UI
-
-# View logs
-docker-compose logs -f swarm
-docker-compose logs -f autoscaler
+docker compose up -d          # Start Redis, HAProxy, autoscaler, observability, and swarm
+docker compose logs -f swarm  # View swarm logs
+docker compose logs -f autoscaler
 ```
 
-**Production (Kubernetes):**
+Production (Kubernetes):
 ```bash
-# Deploy to Kubernetes cluster
 kubectl apply -f k8s/
-
-# Scale workers
 kubectl scale deployment/worker --replicas=50
 ```
 
-## 🏗️ Architecture
+## Architecture
 
-```
-User Request → Frontend (Discord/Telegram/API)
-                ↓
-           Swarm Core → Celery Task Queue (Redis)
-                ↓
-         [Browser Tasks]
-         /      |       \
-   [Navigate] [Click] [Extract]
-      ↓         ↓         ↓
-   Celery    Celery    Celery
-   Worker1   Worker2   Worker3
-      ↓         ↓         ↓
-         Result Backend
-                ↓
-         Response to User
-
-Monitoring: Flower UI (port 5555)
-Autoscaling: Celery Autoscaler
-```
+Monitoring: Celery Exporter (9808), Grafana (3000), Prometheus (9090)
+Autoscaling: Celery Autoscaler (driven by queue depth)
 
 ### Port Configuration
 
-- **9200**: Swarm metrics (Discord frontend)
-- **5555**: Flower (Celery monitoring UI)
-- **9090**: Prometheus
-- **3000**: Grafana
-- **3100**: Loki
-- **6379**: Redis
+- 9200: Swarm metrics
+- 9808: Celery Exporter metrics
+- 9090: Prometheus
+- 3000: Grafana
+- 3100: Loki
+- 6379: Redis (direct)
+- 6380: HAProxy Redis (failover surface)
 
-## 🔧 Development
+## Development
 
-### Running Tests
 ```bash
-make test      # Run all tests
-make lint      # Lint and format code
-make check     # Type checking with mypy
+make test      # Run all tests (safety guard enables/validates safe Redis use)
+make lint      # Ruff fix/format + mypy strict + repo guards
+make check     # Full pipeline (lint + tests + docker status)
+
+# Cleanup targets
+make clean     # Project-scoped: compose down --volumes/--rmi all, then rebuild
+make clean-all # DANGEROUS: system-wide Docker wipe (containers/images/volumes/networks) then rebuild
 ```
 
-### Project Structure
-```
-project/
-├── swarm/                  # Core system
-│   ├── distributed/       # Task queue and worker management
-│   ├── browser/          # Browser automation workers
-│   ├── plugins/          # Frontend adapters
-│   └── tasks/            # Task decomposition logic
-├── frontends/            # Multi-platform interfaces
-├── workers/              # Specialized worker types
-└── k8s/                  # Kubernetes manifests
-```
+## Documentation
 
-## 📚 Documentation
+- docs/plan.md – Implementation roadmap
+- docs/claude.md – Collaboration guidelines and architecture notes
+- docs/scaling-architecture.md – Distributed system design
 
-- [PLAN.md](PLAN.md) - Detailed implementation roadmap
-- [CLAUDE.md](CLAUDE.md) - AI collaboration guidelines and architecture notes
-- [docs/SCALING_ARCHITECTURE.md](docs/SCALING_ARCHITECTURE.md) - Distributed system design
+## Current Status & Roadmap
 
-## 🎯 Current Status & Roadmap
+✅ Celery migration complete
+- Celery broker and typed browser runtime
+- Session affinity via Redis + router
+- Autoscaler-driven worker creation
 
-**Phase 1 (Current)**: Fixing critical issues
-- Job acknowledgment bugs
-- Queue metrics integration
-- Removing Discord-centric assumptions
-
-**Phase 2**: Migrate to Celery
-- Replace custom job queue
-- Add task persistence
-- Implement retry logic
-
-**Phase 3**: Local LLM Integration
-- Add GPU-accelerated workers
-- Private model support
-- Capability-based routing
-
-**Phase 4**: Multi-Frontend Support
-- Abstract interface layer
-- Telegram frontend
-- REST API
-- Web UI
-
-## 🤝 Contributing
+## Contributing
 
 This project uses production-grade standards:
-- All code must have type annotations
-- Integration tests over mocks
+- Strict typing everywhere (mypy --strict)
+- Integration tests prioritized over mocks
 - Clear documentation for decisions
-- Consider existing tools before building custom solutions
 
-See [CLAUDE.md](CLAUDE.md) for detailed collaboration guidelines.
-
-## 📜 License
+## License
 
 [Your license here]
 
 ---
 
-**Note**: This project is under active development. The vision is to create an AI-powered workforce that can tackle complex real-world problems at scale.
+## Contracts
+
+Authoritative contract for health, routing, typing, and testing (see `docs/contracts.md`).
+- Health derives exclusively from Redis heartbeats using a freshness rule; no control-plane calls in decision loops.
+- Session affinity is stored as a Redis hash with `worker_id`, `direct_queue`, and `timestamp`; consumers never derive queue names.
+- Strict typing is enforced via Protocols and TypedDicts; casts are avoided by using typed boundary wrappers.
+

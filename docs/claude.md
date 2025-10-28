@@ -21,7 +21,7 @@ Discord is merely ONE frontend interface. The system is designed to be platform-
 - **Add Task Planning**: Need intelligent task decomposition and planning capabilities
 - **Worker Capabilities**: Workers should advertise what they can do, not be hardcoded types
 - **Session Management**: ~~Sessions should be task-scoped, not channel-scoped~~ - IN PROGRESS with browser session affinity design
-- ✅ ~~**Job Visibility**: Need better monitoring~~ - DONE with celery-exporter and structured logging
+- âœ… ~~**Job Visibility**: Need better monitoring~~ - DONE with celery-exporter and structured logging
 
 ## Collaboration Guidelines for Claude
 
@@ -48,7 +48,7 @@ Discord is merely ONE frontend interface. The system is designed to be platform-
 - **Lint & format**: `make lint` (runs ruff fix, ruff format, mypy strict, yamllint)
 - **Run swarm locally**: `make run` or `poetry run python -m swarm.core`
 - **Run Celery worker**: `make celery-worker` (starts a browser worker)
-- **Run Flower monitoring**: `make flower` (starts on port 5555)
+- [removed] Flower monitoring (use Prometheus/Grafana)
 - **Docker compose**: `make compose-up`, `make compose-down`
 - **Deploy to Fly.io**: `make deploy`
 - **Build swarm**: `make swarm-build`
@@ -59,7 +59,7 @@ Discord is merely ONE frontend interface. The system is designed to be platform-
 Swarm uses several ports for different services:
 - **9200**: Swarm metrics (main Discord frontend)
 - **9100**: Worker metrics (default, configurable via WORKER_METRICS_PORT)
-- **5555**: Flower (Celery monitoring UI)
+- **9808**: Celery Exporter metrics (Prometheus)
 - **9808**: Celery-exporter (Prometheus metrics for Celery)
 - **9090**: Prometheus
 - **3000**: Grafana
@@ -91,17 +91,17 @@ Successfully implemented three scaling backends:
    - Uses Docker API directly for proper container lifecycle management
    - Auto-detects network and application paths
    - Configurable worker metrics port
-   - Status: ✅ Replaced DockerComposeBackend due to orphaned container issues
+   - Status: âœ… Replaced DockerComposeBackend due to orphaned container issues
    
 2. **FlyIOBackend** (`fly_io.py`):
    - Uses fly CLI for Fly.io deployments
    - Manages machine counts in regions
-   - Status: ✅ Complete with type safety (assert statements for runtime checks)
+   - Status: âœ… Complete with type safety (assert statements for runtime checks)
    
 3. **KubernetesBackend** (`kubernetes.py`):
    - Uses kubectl for Kubernetes deployments
    - Scales deployment replicas
-   - Status: ✅ Complete with type safety
+   - Status: âœ… Complete with type safety
 
 ### Key Architectural Patterns Established
 1. **Dynamic Dispatch Safety**: Always filter kwargs using `filter_kwargs_for_method` before calling dynamically dispatched methods
@@ -198,11 +198,11 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
    - Create direct worker queues for session-affined routing
    - Add integration test for concurrent goto/click operations
 
-2. **Clean up orphaned code**: ✅ COMPLETE
-   - ✅ Remove ScalingService from containers.py and its file (DONE)
-   - ✅ Remove QueueMetricsService (DONE)
-   - ✅ ScalingBackend protocol already in `swarm/distributed/protocols.py` (DONE)
-   - ✅ All imports already use correct path (DONE)
+2. **Clean up orphaned code**: âœ… COMPLETE
+   - âœ… Remove ScalingService from containers.py and its file (DONE)
+   - âœ… Remove QueueMetricsService (DONE)
+   - âœ… ScalingBackend protocol already in `swarm/distributed/protocols.py` (DONE)
+   - âœ… All imports already use correct path (DONE)
 
 3. **Organize services**:
    - Create `swarm/services/` directory structure
@@ -259,13 +259,13 @@ The `test_backends.py` currently uses AsyncMock and patches for subprocess testi
 #### Example Task-Scoped Session Flow:
 ```
 Task: "Research and summarize competitor analysis"
-├─ Create: Session Pool (5 browsers, 1 database connection)
-├─ Subtask: Analyze competitor A → uses browser 1
-├─ Subtask: Analyze competitor B → uses browser 2 (parallel)
-├─ Subtask: Analyze competitor C → uses browser 3 (parallel)
-├─ Subtask: Store results → uses database connection
-├─ Subtask: Generate report → uses browsers 1-3 for screenshots
-└─ Cleanup: All resources destroyed
+â”œâ”€ Create: Session Pool (5 browsers, 1 database connection)
+â”œâ”€ Subtask: Analyze competitor A â†’ uses browser 1
+â”œâ”€ Subtask: Analyze competitor B â†’ uses browser 2 (parallel)
+â”œâ”€ Subtask: Analyze competitor C â†’ uses browser 3 (parallel)
+â”œâ”€ Subtask: Store results â†’ uses database connection
+â”œâ”€ Subtask: Generate report â†’ uses browsers 1-3 for screenshots
+â””â”€ Cleanup: All resources destroyed
 
 Benefits:
 - Workers remain stateless (just execute with provided resources)
@@ -275,7 +275,7 @@ Benefits:
 ```
 
 ### 5. Technology Stack (Implemented)
-1. **Queue System**: ✅ COMPLETED - Migrated to **Celery** with Redis backend
+1. **Queue System**: âœ… COMPLETED - Migrated to **Celery** with Redis backend
    - Reduced codebase complexity significantly
    - Handles retries, routing, monitoring automatically  
    - Scales from 1 to 10,000 workers without code changes
@@ -302,18 +302,18 @@ Benefits:
     - [x] Updated entrypoint.worker.sh for Celery
     - [x] Support for different queue types (browser, tankpit, llm)
     - [x] Proper SSL configuration for Upstash Redis
-- [x] Add Flower monitoring integration
-- [x] Implement Celery autoscaler using Flower API
+- [x] Remove Flower from default stack
+- [x] Implement Celery autoscaler using Redis depth (Kombu)
 - [x] Update all tests to work with Celery
 - [ ] Add multi-frontend support (Discord, Telegram, web, SMS, etc.)
     - [ ] Separate out logic from frontend specific code in swarm/plugins/commands/
 - [ ] Add worker capability advertisement/heartbeat (IN PROGRESS - session affinity design complete)
 - [x] Refactor queue naming in ProxyService/engines for generic MITM support
-- [x] Add docker-compose example for swarm and workers
+- [x] Add docker compose example for swarm and workers
 
 ### Observability
 - [x] Add HTTP server for /health and /metrics endpoints
-- [x] Flower UI for real-time Celery task monitoring (port 5555)
+- [x] Celery exporter metrics (port 9808)
 - [x] Add celery-exporter for Prometheus metrics (port 9808)
 - [x] Integrate Prometheus metrics for workers
 - [x] Centralize logs with Loki and Alloy
@@ -323,7 +323,7 @@ Benefits:
 ### Operational Excellence
 - [x] Docker Compose/Fly.io/Kubernetes configs for orchestrator + scalable workers + Redis
 - [x] Healthchecks and graceful shutdown for all services
-- [x] HAProxy for Redis failover (Upstash ↔ local Redis)
+- [x] HAProxy for Redis failover (Upstash â†” local Redis)
 - [ ] Document scaling, rolling upgrades, and zero-downtime deploys
 - [ ] Document security model (network, secrets, etc.)
 - [ ] Add Redis Sentinel for production HA
@@ -331,7 +331,8 @@ Benefits:
 ### Advanced Features
 - [ ] Streaming results/logs via Redis Pub/Sub
 - [ ] Smart job routing based on worker capabilities
-- [x] Autoscaling workers based on queue depth via Flower API
+- [x] Autoscaling workers based on queue depth via Redis broker
 - [x] Task retries and dead letter queue via Celery
 - [ ] Task decomposition and dependency management
 - [ ] Progress tracking for complex multi-step tasks
+

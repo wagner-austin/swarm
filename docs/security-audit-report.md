@@ -1,24 +1,195 @@
 # Security Audit Report: Swarm Web Commands & Infrastructure
 **Date:** 2025-10-24
-**Scope:** `/web status` command, input validation, database queries, rate limiting, authorization
-**Auditor:** Code inspection (no changes made)
+**Scope:** `/web` commands, URL validation, Redis usage, error handling, authorization
+**Auditor:** Code inspection (no code changes)
 
 ---
 
 ## Executive Summary
 
-This audit identified **multiple critical security gaps** in the Swarm application, particularly around:
-1. Missing input validation and sanitization on session identifiers
-2. Lack of rate limiting at multiple levels
-3. Inconsistent authorization controls
-4. Redis key injection vulnerabilities (theoretical, low practical risk)
-5. Display formatting issue in `/web status` command (UX bug, not security critical)
+This document corrects and updates the prior audit against the actual codebase. Key risks are:
 
-**Risk Level: MEDIUM** (Discord's platform-level controls mitigate some risks, but application-level vulnerabilities exist)
+- Critical
+  - file:// navigation allowed for all users can expose local files via screenshots
+    - Evidence: `swarm/utils/urls.py:26`, `swarm/plugins/commands/web.py:145`
+  - Redis credentials leakage in logs (full URL logged by SessionRegistry)
+    - Evidence: `swarm/distributed/session_registry.py:55`
+- Medium
+  - User-facing error messages disclose raw exception details
+    - Evidence: `swarm/plugins/commands/web.py:137`, `swarm/plugins/commands/web.py:190`, `swarm/plugins/commands/web.py:267`, `swarm/plugins/commands/web.py:312`
+  - Inconsistent authorization posture across cogs; `/web` commands are open to all channel members
+  - Screenshots are posted non-ephemerally (channel-visible) by default
+    - Evidence: `swarm/plugins/commands/web.py:211`
+- Low
+  - `/web status` displays raw Python structures (UX only)
+    - Evidence: `swarm/plugins/commands/web.py:284`
+  - Session ID content not validated; currently not user-controlled for `/web` entry points
+  - Redis key manipulation (theoretical) due to string interpolation; not user-reachable today
+  - Windows-incompatible `:` used in temp file name (reliability)
+    - Evidence: `swarm/tasks/browser.py:380`
+
+Out of scope (accepted risk per stakeholder): application-level rate limiting.
 
 ---
 
-## 1. Display Formatting Issue (`/web status`)
+## 1. URL Validation & Navigation
+
+### 1.1 Centralized HTTP(S) Validation
+
+- Strengths
+  - Centralized validator `validate_and_normalise_web_url()` enforces scheme/host rules
+    - Evidence: `swarm/utils/urls.py:13`, `swarm/utils/urls.py:30-43`
+  - Used by `/web start` and `/web open`
+    - Evidence: `swarm/plugins/commands/web.py:91`, `swarm/plugins/commands/web.py:149`
+
+### 1.2 file:// Allowed For Everyone (Critical)
+
+- Code permits `file://` (and `about:`) URLs without restriction
+  - Evidence: `swarm/utils/urls.py:26`
+- Combined with `/web open` and `/web screenshot`, this enables local file exposure in screenshots by any channel member using `/web`
+  - Evidence of usage path: `swarm/plugins/commands/web.py:145` (open), `swarm/plugins/commands/web.py:199` (screenshot)
+- Severity: CRITICAL
+- Recommendation: Disable `file://` for general users or gate it behind strict roles/config; if retained, ensure screenshots are ephemeral and scope tightly.
+
+---
+
+## 2. Screenshot Saving and Filenames
+
+- Prior reportâ€™s path traversal concern on user-supplied `filename` is not applicable.
+  - The Discord `filename` parameter is used only as the attachment filename in the reply; it is not used to write server-side files.
+  - Worker writes screenshots to a temp path derived from `session_id` and `pid`, not from the user-supplied name:
+    - Evidence: `swarm/tasks/browser.py:380`
+- Non-security reliability note: `session_id` contains `:`, which is invalid in Windows paths; consider sanitizing in temp filenames.
+
+---
+
+## 3. Session ID Handling & Redis Keys
+
+- Current `/web` commands derive session ids from Discord interaction context and do not accept arbitrary session id input from users.
+  - Evidence: `swarm/plugins/commands/web.py:54`
+- Tasks accept optional `session_id`, but the commands do not expose this to users; default resolves to Celery request id/UUID when not provided.
+  - Evidence: `swarm/tasks/_base.py:35`
+- Redis keys interpolate `session_id`:
+  - Evidence: `swarm/tasks/browser.py:248`, `swarm/tasks/browser.py:420`, `swarm/tasks/browser.py:214`
+- Risk today: low (not user-supplied). Future risk: higher if APIs accept user-provided session ids.
+- Recommendation: If future endpoints expose `session_id`, add a validation utility and centralized sanitizer before key construction.
+
+---
+
+## 4. Authorization & Access Control
+
+- Patterns observed
+  - Owner-only check: `swarm/plugins/commands/shutdown.py:55`
+  - Admin-only via default permissions: `swarm/plugins/commands/persona_admin.py: @app_commands.default_permissions(administrator=True)`
+  - `/web` commands (`start`, `open`, `screenshot`, `status`) are open to channel members; session id is tied to the current channel, not user.
+- The earlier claim that â€œany channelâ€™s session can be accessed arbitrarilyâ€ is not accurate; commands do not accept cross-channel session ids.
+- However, because `/web open` is public, file:// risk (Section 1.2) applies to any channel where the bot is present.
+- Recommendation: Define a consistent policy for `/web` usage (e.g., restrict to admins, specific roles, or dedicated channels) and/or gate risky schemes.
+
+---
+
+## 5. Error Handling & Information Disclosure
+
+- Fallback error handlers send raw exception messages to users:
+  - Evidence: `swarm/plugins/commands/web.py:137`, `swarm/plugins/commands/web.py:190`, `swarm/plugins/commands/web.py:267`, `swarm/plugins/commands/web.py:312`
+- Severity: MEDIUM (ephemeral in many places, but content may reveal internals)
+- Recommendation: Log full details server-side, return a generic user message.
+
+---
+
+## 6. Logging & Secrets
+
+- SessionRegistry logs the full Redis URL (likely containing credentials)
+  - Evidence: `swarm/distributed/session_registry.py:55`
+- Severity: CRITICAL
+- Recommendation: Mask credentials in logs or log only non-sensitive host/endpoint info.
+
+---
+
+## 7. `/web status` Formatting (UX)
+
+- Displays raw Python structures via `str(v)` for nested data
+  - Evidence: `swarm/plugins/commands/web.py:284`
+- Severity: LOW (usability)
+- Recommendation: Format nested fields (e.g., iterate sessions and present key fields per session).
+
+---
+
+## 8. Input Length Limits (Nice to Have)
+
+- No explicit length checks for URL/filename inputs in `/web`; Discord caps inputs but explicit checks improve robustness.
+- Severity: LOW
+
+---
+
+## 9. Accepted Risk / Out of Scope
+
+- Application-level rate limiting (per-user/per-guild/command) is not required at this time per stakeholder direction. No changes recommended in this area in this report.
+
+---
+
+## 10. Summary of Findings
+
+| # | Finding | Severity | Location | Status |
+|---|---------|----------|----------|--------|
+| 1 | file:// navigation allowed for all users enables local file exposure via screenshots | CRITICAL | `swarm/utils/urls.py:26`, `swarm/plugins/commands/web.py:145`, `swarm/plugins/commands/web.py:199` | Needs fix |
+| 2 | Redis URL (credentials) logged by SessionRegistry | CRITICAL | `swarm/distributed/session_registry.py:55` | Needs fix |
+| 3 | Raw exception details returned to users | MEDIUM | `swarm/plugins/commands/web.py:137,190,267,312` | Needs fix |
+| 4 | Screenshots posted non-ephemerally (channel-visible) | MEDIUM | `swarm/plugins/commands/web.py:211` | Consider change |
+| 5 | Inconsistent authorization posture | MEDIUM | `shutdown.py:55`, `persona_admin.py` (admin-only), `/web` (public) | Define policy |
+| 6 | `/web status` shows raw structures (UX) | LOW | `swarm/plugins/commands/web.py:284` | Improvement |
+| 7 | Session id content not validated (future risk) | LOW | `swarm/plugins/commands/web.py:54`, `swarm/tasks/_base.py:35` | Monitor |
+| 8 | Redis key manipulation theoretical (not user-controlled today) | LOW | `swarm/tasks/browser.py:248,420,214` | Monitor |
+| 9 | Windows-incompatible `:` in temp filename (reliability) | LOW | `swarm/tasks/browser.py:380` | Improvement |
+
+---
+
+## 11. Recommended Fixes (Prioritized)
+
+### Priority 1 (Critical)
+
+- Restrict file:// navigation
+  - Option A (simple): Remove `file://` allowance for general users in `validate_and_normalise_web_url()`.
+  - Option B (policy-based): Gate `file://` behind admin-only/role checks or a per-guild config flag.
+
+- Sanitize logging for Redis URL
+  - Modify SessionRegistry to avoid logging credentials; log host or masked URL only.
+
+### Priority 2 (High/Medium)
+
+- Replace user-facing `{exc}` with generic messages; keep detailed logs server-side
+  - Affects fallback branches in `/web start`, `/web open`, `/web screenshot`, `/web status`.
+
+- Consider making `/web screenshot` ephemeral by default
+  - Evidence of current behavior: `swarm/plugins/commands/web.py:211`.
+  - If public screenshots are desired, document this clearly and consider a config/flag.
+
+### Priority 3 (Medium/Low)
+
+- Improve `/web status` formatting for nested structures
+  - Present session list with key fields per session.
+
+- Add TTL to session metadata keys (optional)
+  - Affinity entries already use expiry; extending to metadata prevents stale keys.
+
+- Input length checks (optional hardening)
+  - E.g., URL max length ~2048; filename length caps.
+
+- Windows-safe temp filenames (reliability)
+  - Replace `:` with `_` when composing temp filenames from `session_id` in workers.
+
+### Monitoring / Future Considerations
+
+- If future APIs accept user-supplied `session_id` values, add a centralized validator (allow-list of characters, length limits, colon count, etc.) before using in Redis keys or file paths.
+
+---
+
+## 12. Notes On Prior Report Changes
+
+- Removed the path traversal finding on screenshot filenames (not applicable: server writes do not use user-supplied names).
+- Corrected claim about cross-channel session access: `/web` commands are tied to the current channel; no parameter to target arbitrary channels.
+- Redis key â€œinjectionâ€ remains theoretical for current `/web` entry points; severity lowered to Low with a future risk note.
+- Rate limiting is explicitly marked out-of-scope per stakeholder direction.
 
 ### Issue Location
 `swarm/plugins/commands/web.py:284-285`
@@ -55,7 +226,7 @@ Direct string conversion of complex data structures without proper formatting.
 
 ## 2. Input Validation & Sanitization
 
-### 2.1 URL Validation ✅ GOOD
+### 2.1 URL Validation âœ… GOOD
 **Location:** `swarm/utils/urls.py:13-52`
 
 **Strengths:**
@@ -81,7 +252,7 @@ def validate_and_normalise_web_url(raw: str, *, allowed_hosts: Iterable[str] | N
 
 ---
 
-### 2.2 Session ID Validation ❌ CRITICAL GAP
+### 2.2 Session ID Validation âŒ CRITICAL GAP
 
 **Location:** Multiple files (`web.py`, `tasks/browser.py`, `tasks/_base.py`)
 
@@ -131,7 +302,7 @@ If `session_id` could be manipulated to contain `:` characters or be set to a di
 
 ---
 
-### 2.3 Filename Validation ⚠️ MODERATE RISK
+### 2.3 Filename Validation âš ï¸ MODERATE RISK
 
 **Location:** `web.py:199-209`
 
@@ -174,9 +345,9 @@ Unlike SQL, Redis doesn't have traditional injection, but key manipulation is po
 - Wildcards (`*`, `?`) - if used in key scanning operations
 
 **Current Safety:**
-✅ Session IDs from Discord are safe (integers)
-✅ Worker hostnames are from system, not user input
-❌ No validation layer prevents unsafe strings
+âœ… Session IDs from Discord are safe (integers)
+âœ… Worker hostnames are from system, not user input
+âŒ No validation layer prevents unsafe strings
 
 ---
 
@@ -188,7 +359,7 @@ Unlike SQL, Redis doesn't have traditional injection, but key manipulation is po
 - `redis.delete()` - Safe (parameterized)
 - `redis.hget()` - Safe (parameterized)
 
-**No Lua eval()** - ✅ GOOD (checked, none found in production code)
+**No Lua eval()** - âœ… GOOD (checked, none found in production code)
 
 **Severity: MEDIUM**
 - Current implementation is safe
@@ -199,7 +370,7 @@ Unlike SQL, Redis doesn't have traditional injection, but key manipulation is po
 
 ## 4. Rate Limiting Analysis
 
-### 4.1 Command-Level Rate Limiting ❌ MISSING
+### 4.1 Command-Level Rate Limiting âŒ MISSING
 
 **Discord Commands Analyzed:**
 - `/web start` - No rate limit
@@ -236,15 +407,15 @@ Result: 60 browser screenshot operations, potential resource exhaustion
    - **NOT used for limiting users**
 
 **What's Missing:**
-1. ❌ Per-user rate limiting
-2. ❌ Per-IP rate limiting (N/A for Discord, but critical for future HTTP API)
-3. ❌ Per-endpoint rate limiting
-4. ❌ Concurrent operation limiting (e.g., max 5 browser sessions per user)
-5. ❌ Resource quotas (e.g., max 100 screenshots per day)
+1. âŒ Per-user rate limiting
+2. âŒ Per-IP rate limiting (N/A for Discord, but critical for future HTTP API)
+3. âŒ Per-endpoint rate limiting
+4. âŒ Concurrent operation limiting (e.g., max 5 browser sessions per user)
+5. âŒ Resource quotas (e.g., max 100 screenshots per day)
 
 ---
 
-### 4.3 Celery Task Rate Limiting ⚠️ PARTIAL
+### 4.3 Celery Task Rate Limiting âš ï¸ PARTIAL
 
 **Celery Queue Configuration:**
 - Tasks queued to `"browser"` queue
@@ -268,10 +439,10 @@ Single user can flood the task queue, causing DoS for other users.
 # swarm/plugins/commands/shutdown.py:55-57
 owner = await self.get_owner(self.discord_bot)
 if interaction.user.id != owner.id:
-    await self.safe_send(interaction, "❌ Owner only.", ephemeral=True)
+    await self.safe_send(interaction, "âŒ Owner only.", ephemeral=True)
     return
 ```
-✅ **Used in:** `/shutdown`
+âœ… **Used in:** `/shutdown`
 
 #### Pattern 2: Decorator-Based Permissions
 ```python
@@ -279,7 +450,7 @@ if interaction.user.id != owner.id:
 @app_commands.command(name="list", description="Show all personas")
 @app_commands.default_permissions(administrator=True)
 ```
-✅ **Used in:** `/persona` commands
+âœ… **Used in:** `/persona` commands
 
 #### Pattern 3: No Authorization (Public)
 ```python
@@ -288,7 +459,7 @@ if interaction.user.id != owner.id:
 async def start(self, interaction: discord.Interaction, url: str | None = None) -> None:
     # Anyone can use this
 ```
-❌ **Used in:** `/web start`, `/web open`, `/web screenshot`, `/web status`
+âŒ **Used in:** `/web start`, `/web open`, `/web screenshot`, `/web status`
 
 ---
 
@@ -347,7 +518,7 @@ session_id = f"discord:{guild_id}:{channel_id}"
 
 ## 6. Type Safety & Strong Typing
 
-### ✅ Strengths
+### âœ… Strengths
 
 1. **MyPy Strict Mode** - `make check` runs mypy
 2. **Type annotations everywhere** - Functions, parameters, returns
@@ -361,7 +532,7 @@ async def status(
 ) -> dict[str, Any]:
 ```
 
-### ⚠️ Limitations
+### âš ï¸ Limitations
 
 1. **Runtime validation missing**
    - MyPy checks types, not values
@@ -379,7 +550,7 @@ async def status(
 
 ## 7. Prepared Statements (N/A - No SQL)
 
-✅ **GOOD NEWS:** No SQL database in use.
+âœ… **GOOD NEWS:** No SQL database in use.
 
 **Current Database:**
 - Redis only (key-value store)
@@ -396,20 +567,20 @@ If SQL is added later, ensure:
 
 ## 8. Error Handling & Information Disclosure
 
-### 8.1 Comprehensive Error Handling ✅
+### 8.1 Comprehensive Error Handling âœ…
 
 **Example from `web.py:113-139`:**
 ```python
 except ValueError as e:
-    await self.safe_send(interaction, f"❌ Invalid URL: {e}. ...", ephemeral=True)
+    await self.safe_send(interaction, f"âŒ Invalid URL: {e}. ...", ephemeral=True)
 except WorkerUnavailableError:
-    await self.safe_send(interaction, "⚠️ Browser workers temporarily unavailable...", ephemeral=True)
+    await self.safe_send(interaction, "âš ï¸ Browser workers temporarily unavailable...", ephemeral=True)
 except OperationTimeoutError:
-    await self.safe_send(interaction, "⏱️ Browser startup timed out...", ephemeral=True)
+    await self.safe_send(interaction, "â±ï¸ Browser startup timed out...", ephemeral=True)
 except BrowserError:
-    await self.safe_send(interaction, "🌐 Browser error occurred...", ephemeral=True)
+    await self.safe_send(interaction, "ðŸŒ Browser error occurred...", ephemeral=True)
 else:
-    await self.safe_send(interaction, f"❌ Failed to start browser: {exc}", ephemeral=True)
+    await self.safe_send(interaction, f"âŒ Failed to start browser: {exc}", ephemeral=True)
 ```
 
 **Strengths:**
@@ -417,11 +588,11 @@ else:
 - User-friendly error messages
 - Logging for debugging
 
-### ⚠️ Information Disclosure Risk
+### âš ï¸ Information Disclosure Risk
 
 **Line 137:**
 ```python
-await self.safe_send(interaction, f"❌ Failed to start browser: {exc}", ephemeral=True)
+await self.safe_send(interaction, f"âŒ Failed to start browser: {exc}", ephemeral=True)
 ```
 
 **Issue:** Fallback handler leaks raw exception message to user
@@ -459,7 +630,7 @@ await self.safe_send(interaction, f"❌ Failed to start browser: {exc}", ephemer
 
 ---
 
-### 9.3 Secrets Management ✅ GOOD
+### 9.3 Secrets Management âœ… GOOD
 
 **From `alert_pump.py` and `celery_app.py`:**
 - Uses environment variables for secrets
@@ -554,7 +725,7 @@ async def start(self, interaction: discord.Interaction, url: str | None = None):
     if not await rate_limiter.check(interaction.user.id):
         await self.safe_send(
             interaction,
-            "⏱️ Rate limit exceeded. Please wait before using this command again.",
+            "â±ï¸ Rate limit exceeded. Please wait before using this command again.",
             ephemeral=True
         )
         return
@@ -624,12 +795,12 @@ def require_permission(permission: str = "user"):
             if permission == "owner":
                 owner = await get_owner(self.discord_bot)
                 if interaction.user.id != owner.id:
-                    await safe_send(interaction, "❌ Owner only.", ephemeral=True)
+                    await safe_send(interaction, "âŒ Owner only.", ephemeral=True)
                     return
 
             elif permission == "admin":
                 if not interaction.user.guild_permissions.administrator:
-                    await safe_send(interaction, "❌ Administrator only.", ephemeral=True)
+                    await safe_send(interaction, "âŒ Administrator only.", ephemeral=True)
                     return
 
             # permission == "user" allows everyone
@@ -681,7 +852,7 @@ except Exception as exc:
     # Send generic error to user
     await self.safe_send(
         interaction,
-        "❌ An unexpected error occurred. Please try again later.",
+        "âŒ An unexpected error occurred. Please try again later.",
         ephemeral=True
     )
 ```
@@ -692,7 +863,7 @@ except Exception as exc:
 @app_commands.describe(url="URL (max 2048 chars)")
 async def open(self, interaction: discord.Interaction, url: str) -> None:
     if len(url) > 2048:
-        await self.safe_send(interaction, "❌ URL too long (max 2048 chars)", ephemeral=True)
+        await self.safe_send(interaction, "âŒ URL too long (max 2048 chars)", ephemeral=True)
         return
     # ... rest of command
 ```
@@ -798,15 +969,15 @@ def test_filename_sanitization():
 
 | Standard | Requirement | Status | Gap |
 |----------|-------------|--------|-----|
-| OWASP Top 10 | Input validation | ⚠️ Partial | Session IDs not validated |
-| OWASP Top 10 | Authentication | ✅ Good | Discord handles auth |
-| OWASP Top 10 | Authorization | ❌ Poor | Inconsistent, no RBAC |
-| OWASP Top 10 | Rate limiting | ❌ Missing | No application-level limits |
-| OWASP Top 10 | Error handling | ⚠️ Partial | Some info disclosure |
+| OWASP Top 10 | Input validation | âš ï¸ Partial | Session IDs not validated |
+| OWASP Top 10 | Authentication | âœ… Good | Discord handles auth |
+| OWASP Top 10 | Authorization | âŒ Poor | Inconsistent, no RBAC |
+| OWASP Top 10 | Rate limiting | âŒ Missing | No application-level limits |
+| OWASP Top 10 | Error handling | âš ï¸ Partial | Some info disclosure |
 | CWE-89 | SQL Injection | N/A | No SQL database |
 | CWE-79 | XSS | N/A | No web UI (yet) |
-| CWE-22 | Path Traversal | ⚠️ Risk | Filename sanitization weak |
-| CWE-862 | Missing Auth | ❌ Found | `/web` commands public |
+| CWE-22 | Path Traversal | âš ï¸ Risk | Filename sanitization weak |
+| CWE-862 | Missing Auth | âŒ Found | `/web` commands public |
 
 ---
 

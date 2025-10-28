@@ -19,19 +19,19 @@ Building an AI-powered task execution system capable of handling complex, real-w
 6. **Observable**: Full visibility into task progress, worker status, and system health
 
 ## Current Implementation Status (2025-08-03)
-- ✅ Migrated from custom broker to Celery distributed task queue
-- ✅ Fixed job lifecycle with proper retry/timeout handling via Celery
-- ✅ Autoscaler now uses Flower API for accurate queue monitoring
-- ✅ Workers can be scaled from zero (no chicken-and-egg problem)
-- ✅ Implemented HAProxy for automatic Redis failover (Upstash ↔ local Redis)
-- ✅ All services now use HAProxy endpoint (port 6380) for resilience
-- ✅ Created test-specific Docker profile to avoid Upstash rate limits
-- ✅ Designed production-grade browser session affinity solution
-- ✅ Enhanced monitoring with celery-exporter and structured logging
-- ⏳ System is still Discord-channel-centric instead of task-centric
-- ⏳ No task planning or decomposition logic yet
-- ⏳ Workers are type-based (browser, tankpit) instead of capability-based
-- ⏳ Browser session affinity implementation in progress
+- âœ… Migrated from custom broker to Celery distributed task queue
+- âœ… Fixed job lifecycle with proper retry/timeout handling via Celery
+- âœ… Autoscaler now uses Redis broker depth (Kombu) for accurate queue monitoring
+- âœ… Workers can be scaled from zero (no chicken-and-egg problem)
+- âœ… Implemented HAProxy for automatic Redis failover (Upstash â†” local Redis)
+- âœ… All services now use HAProxy endpoint (port 6380) for resilience
+- âœ… Created test-specific Docker profile to avoid Upstash rate limits
+- âœ… Designed production-grade browser session affinity solution
+- âœ… Enhanced monitoring with celery-exporter and structured logging
+- â³ System is still Discord-channel-centric instead of task-centric
+- â³ No task planning or decomposition logic yet
+- â³ Workers are type-based (browser, tankpit) instead of capability-based
+- â³ Browser session affinity implementation in progress
 
 ## Implementation History & Lessons Learned
 ### Key Architectural Patterns Established
@@ -43,9 +43,9 @@ Building an AI-powered task execution system capable of handling complex, real-w
 
 ## Priority Task List
 
-### Phase 1: Fix Critical Issues ✅ MOSTLY COMPLETE
+### Phase 1: Fix Critical Issues âœ… MOSTLY COMPLETE
 - [x] **Fix job acknowledgment** - Celery handles this automatically
-- [x] **Complete QueueMetrics integration** - Autoscaler uses Flower API
+- [x] **Complete QueueMetrics integration** - Autoscaler uses Redis depth via Kombu
 - [x] **Implement dead letter queue** - Celery handles with max_retries
 - [ ] **Implement browser session affinity** (In Progress)
   - SessionRegistry with Lua scripts for atomicity
@@ -57,21 +57,21 @@ Building an AI-powered task execution system capable of handling complex, real-w
   - Remove channel_id from session management
   - Create abstract Context interface
 
-### Phase 2: Celery Migration & Task Architecture ✅ MIGRATION COMPLETE
+### Phase 2: Celery Migration & Task Architecture âœ… MIGRATION COMPLETE
 - [x] **Migrate to Celery** 
   - Installed celery[redis]
   - Created celery_app.py with Redis broker config
   - Converted browser jobs to Celery tasks
   - Replaced Broker class with Celery
   - Set up Celery routing for different queues
-- [x] **Add Flower monitoring** - Running on port 5555
-- [x] **Update autoscaler** - Uses Flower API for queue stats
+- [x] **Remove Flower monitoring** from default stack
+- [x] **Update autoscaler** - uses Redis depth via Kombu for queue stats
 - [ ] **Implement Task Model** (Week 3)
   - Create Task, Subtask, Job hierarchy in models/
   - Task has: id, description, status, subtasks[]
   - Subtask has: capability_required, job_id, depends_on[]
 - [ ] **Add Task Decomposer** (Week 4)
-  - Simple rule engine first (if "research" in task → create search subtasks)
+  - Simple rule engine first (if "research" in task â†’ create search subtasks)
   - Map high-level requests to capability requirements
   - Create execution plan with dependencies
 
@@ -82,10 +82,10 @@ Building an AI-powered task execution system capable of handling complex, real-w
   - Create LLMWorker class with load_model(), generate()
   - Add to Celery as new worker type
 - [ ] **Create LLM Capabilities** (Week 2)
-  - analyze_document(text) → insights
-  - summarize(text, max_length) → summary
-  - extract_entities(text) → {people, orgs, locations}
-  - answer_questions(context, questions[]) → answers
+  - analyze_document(text) â†’ insights
+  - summarize(text, max_length) â†’ summary
+  - extract_entities(text) â†’ {people, orgs, locations}
+  - answer_questions(context, questions[]) â†’ answers
 - [ ] **Integrate with Task System** (Week 3-4)
   - Route analysis tasks to LLM workers
   - Add prompt templates for different domains
@@ -107,8 +107,8 @@ Building an AI-powered task execution system capable of handling complex, real-w
 - [x] Distributed worker architecture with Celery
 - [x] Scaling backends for Docker API, Kubernetes, Fly.io
 - [x] Celery task queue with Redis backend
-- [x] Flower monitoring UI integration
-- [x] Worker autoscaling via Flower API
+- [x] Remove Flower
+- [x] Worker autoscaling via Redis depth
 - [x] SSL support for Upstash Redis
 - [x] Zero-worker bootstrap capability
 
@@ -122,18 +122,18 @@ Building an AI-powered task execution system capable of handling complex, real-w
     - [x] Updated entrypoint.worker.sh for Celery
     - [x] Support for different queue types (browser, tankpit, llm)
     - [x] Proper SSL configuration for Upstash Redis
-- [x] Add Flower monitoring integration
-- [x] Implement Celery autoscaler using Flower API
+- [x] Remove Flower from stack
+- [x] Implement Celery autoscaler using Redis depth (Kombu)
 - [x] Update all tests to work with Celery
 - [ ] Add multi-frontend support (Discord, Telegram, web, SMS, etc.)
     - [ ] Separate out logic from frontend specific code in swarm/plugins/commands/
 - [ ] Add worker capability advertisement/heartbeat
 - [x] Refactor queue naming in ProxyService/engines for generic MITM support
-- [x] Add docker-compose example for swarm and workers
+- [x] Add docker compose example for swarm and workers
 
 ### Observability
 - [x] Add HTTP server for /health and /metrics endpoints
-- [x] Flower UI for real-time Celery task monitoring (port 5555)
+- [x] Celery exporter metrics (port 9808)
 - [ ] Integrate Prometheus metrics for orchestrator and workers
 - [ ] Centralize logs with Loki (and label by worker, job, etc.)
 - [ ] Add Grafana dashboards for job queue, worker health, and resource usage
@@ -147,7 +147,7 @@ Building an AI-powered task execution system capable of handling complex, real-w
 ### Advanced Features
 - [ ] Streaming results/logs via Redis Pub/Sub
 - [ ] Smart job routing based on worker capabilities
-- [x] Autoscaling workers based on queue depth via Flower API
+- [x] Autoscaling workers based on queue depth via Redis broker
 - [x] Task retries and dead letter queue via Celery
 
 ## Key Architectural Decisions
@@ -180,13 +180,13 @@ Building an AI-powered task execution system capable of handling complex, real-w
 #### Example Task-Scoped Session Flow:
 ```
 Task: "Research and summarize competitor analysis"
-├─ Create: Session Pool (5 browsers, 1 database connection)
-├─ Subtask: Analyze competitor A → uses browser 1
-├─ Subtask: Analyze competitor B → uses browser 2 (parallel)
-├─ Subtask: Analyze competitor C → uses browser 3 (parallel)
-├─ Subtask: Store results → uses database connection
-├─ Subtask: Generate report → uses browsers 1-3 for screenshots
-└─ Cleanup: All resources destroyed
+â”œâ”€ Create: Session Pool (5 browsers, 1 database connection)
+â”œâ”€ Subtask: Analyze competitor A â†’ uses browser 1
+â”œâ”€ Subtask: Analyze competitor B â†’ uses browser 2 (parallel)
+â”œâ”€ Subtask: Analyze competitor C â†’ uses browser 3 (parallel)
+â”œâ”€ Subtask: Store results â†’ uses database connection
+â”œâ”€ Subtask: Generate report â†’ uses browsers 1-3 for screenshots
+â””â”€ Cleanup: All resources destroyed
 
 Benefits:
 - Workers remain stateless (just execute with provided resources)
@@ -212,7 +212,7 @@ Benefits:
 - **Health/Metrics**: HTTP endpoints for monitoring
 
 ### Celery Migration Success (2025-07-17)
-1. **Accurate Queue Monitoring**: Autoscaler uses Flower API for real queue depths
+1. **Accurate Queue Monitoring**: Autoscaler uses Redis depth (via Kombu) for real queue depths
 2. **Proper Task Lifecycle**: Celery handles retries, timeouts, and failures automatically
 3. **Smart Worker Scaling**: Only creates workers for truly pending tasks
 4. **Zero-Worker Bootstrap**: Can start from no workers without deadlock
@@ -220,7 +220,7 @@ Benefits:
 ## Handoff Notes for Next Session
 ### Celery Migration Complete
 - All browser tasks now use Celery instead of custom broker
-- Autoscaler uses Flower API for accurate monitoring
+- Autoscaler uses Redis depth via Kombu for accurate monitoring
 - Workers can scale from zero
 - Type safety maintained throughout
 
@@ -236,3 +236,14 @@ This is an AI task execution system, not a Discord-only system. Focus on:
 - Capability-based worker routing  
 - Platform-agnostic frontends
 - Massive scalability for complex tasks
+
+
+
+
+
+
+
+
+
+
+
