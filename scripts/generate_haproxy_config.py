@@ -22,10 +22,7 @@ import os
 import sys
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
+# Note: No need for dotenv in Docker - environment variables are set by docker-compose
 
 
 # Use print for logging since we're in a minimal container

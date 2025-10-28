@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 """
-Celery-aware Autoscaler using Flower API
-========================================
+Celery-aware Autoscaler (Flower-free)
+====================================
 
-This autoscaler monitors Celery queues via Flower's REST API and manages
-worker containers. It replaces the Redis streams-based autoscaler.
+This autoscaler monitors Celery queues without Flower, using:
+- Celery Control/Inspect for topology when needed
+- Direct Redis queue depth checks via the configured broker URL
 
-Key differences from the old autoscaler:
-1. Uses Flower API for queue metrics (more accurate than Redis XLEN)
-2. Monitors actual Celery queue depths, not Redis streams
-3. Can see reserved vs waiting tasks
-4. Works with Celery's built-in autoscaling
-
-Usage:
-    python -m scripts.celery_autoscaler --flower-url http://localhost:5555
+It scales container counts via a pluggable backend (docker-api, k8s, fly).
 """
 
 import argparse
@@ -23,61 +17,76 @@ import os
 import random
 import signal
 import sys
-from contextlib import nullcontext
-from typing import Any, Dict
+from typing import Callable, Protocol, TypedDict, TypeGuard
 
 # Add project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import aiohttp
-import async_timeout
+from kombu.connection import Connection
+from prometheus_client import Gauge, start_http_server
 
-from swarm.core.logger_setup import setup_logging
+from swarm.core.logger_setup import bootstrap_logging
 from swarm.distributed.backends import DockerApiBackend, FlyIOBackend, KubernetesBackend
-from swarm.distributed.core.config import DistributedConfig
+from swarm.distributed.core.config import DistributedConfig, WorkerTypeConfig
 from swarm.distributed.protocols import ScalingBackend, ScalingDecision
 
 __all__ = ["CeleryAutoscaler"]
 
-# Use centralized JSON logging
-setup_logging()
+# Logger instance (configured in main via bootstrap)
 logger = logging.getLogger(__name__)
+
+# Prometheus metrics
+AS_QUEUE_DEPTH = Gauge(
+    "autoscaler_queue_depth",
+    "Aggregated queue depth (base + direct.*) used by autoscaler",
+    ["queue"],
+)
+AS_DECISION = Gauge(
+    "autoscaler_decision",
+    "Autoscaler decision code (1=up, 0=none, -1=down)",
+    ["worker_type"],
+)
+AS_TARGET = Gauge(
+    "autoscaler_target",
+    "Autoscaler target worker count",
+    ["worker_type"],
+)
 
 
 class CeleryAutoscaler:
     """
-    Autoscaler that monitors Celery queues via Flower API.
+    Autoscaler that monitors Celery queues without Flower.
 
-    This maintains the container-level scaling while Celery handles
+    Maintains container-level scaling while Celery handles
     process-level scaling within each container.
     """
 
     def __init__(
         self,
-        flower_url: str = "http://localhost:5555",
         orchestrator: str = "docker-api",
         check_interval: int = 30,
-        flower_username: str | None = None,
-        flower_password: str | None = None,
     ):
-        self.flower_url = flower_url.rstrip("/")
         self.orchestrator = orchestrator
         self.check_interval = check_interval
-        self.flower_username = flower_username
-        self.flower_password = flower_password
         self.backend: ScalingBackend | None = None
         self.config: DistributedConfig | None = None
         self._shutdown_event = asyncio.Event()
-        self._session: aiohttp.ClientSession | None = None
-        self._auth: aiohttp.BasicAuth | None = None
+        self._conn: Connection | None = None
+        self.priority_steps: tuple[int, ...] = (0,)
 
     async def setup(self) -> None:
         """Set up the autoscaler."""
+        # Ensure logging has contextual fields when used programmatically (e.g. tests)
+        try:
+            bootstrap_logging(service="celery-autoscaler")
+        except Exception:
+            # Logging may already be configured; proceed regardless
+            pass
+
         logger.info("Celery Autoscaler starting up")
-        logger.info(f"Flower URL: {self.flower_url}")
         logger.info(f"Orchestrator: {self.orchestrator}")
         logger.info(f"Check interval: {self.check_interval}s")
-        logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
+        logger.info(f"Environment: {os.getenv('DEPLOYMENT_ENV', 'local')}")
 
         # Load configuration
         self.config = DistributedConfig.load()
@@ -85,13 +94,28 @@ class CeleryAutoscaler:
             f"Loaded config with {len(self.config.worker_types)} worker types: {list(self.config.worker_types.keys())}"
         )
 
-        # Create HTTP session for Flower API
-        self._session = aiohttp.ClientSession()
+        # Eagerly initialize broker connection via Celery (fail fast on misconfig)
+        try:
+            from swarm.celery_app import app as celery_app
 
-        # Set up auth if provided
-        if self.flower_username and self.flower_password:
-            self._auth = aiohttp.BasicAuth(self.flower_username, self.flower_password)
-            logger.info("Flower authentication configured")
+            conn: Connection = celery_app.connection()
+            conn.ensure_connection(max_retries=3)
+            self._conn = conn
+            # Capture priority steps for Redis transport accounting
+            opts = celery_app.conf.get("broker_transport_options", {})
+            steps_cfg = opts.get("priority_steps", [0])
+            # Normalize to a validated tuple[int, ...]
+            steps: list[int] = []
+            for val in steps_cfg:
+                try:
+                    steps.append(int(val))
+                except Exception:
+                    continue
+            self.priority_steps = tuple(steps) if steps else (0,)
+            logger.info("Autoscaler connected to Celery broker")
+        except Exception as e:
+            logger.error(f"Failed to connect to Celery broker: {e}", exc_info=True)
+            raise SystemExit(2)
 
         # Select backend
         if self.orchestrator == "docker" or self.orchestrator == "docker-api":
@@ -112,101 +136,159 @@ class CeleryAutoscaler:
         else:
             raise ValueError(f"Unknown orchestrator: {self.orchestrator}")
 
-        logger.info(f"Using {self.orchestrator} backend with Flower at {self.flower_url}")
+        logger.info(f"Using {self.orchestrator} backend for scaling")
 
         # Install signal handlers
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
-                loop.add_signal_handler(
-                    sig,
-                    lambda s=sig: asyncio.create_task(self._on_signal(s)),  # type: ignore[misc]
-                )
+                loop.add_signal_handler(sig, self._make_signal_handler(sig))
             except NotImplementedError:
                 pass
+
+    def _make_signal_handler(self, sig: signal.Signals) -> "Callable[[], None]":
+        """Return a zero-arg callback that schedules async shutdown for `sig`."""
+
+        def _handler() -> None:
+            # Schedule the async shutdown task and return immediately
+            asyncio.create_task(self._on_signal(sig))
+
+        return _handler
+
+        # Optional Prometheus metrics endpoint for autoscaler
+        port_str = os.getenv("AUTOSCALER_METRICS_PORT")
+        if port_str:
+            try:
+                port = int(port_str)
+                start_http_server(port, addr="0.0.0.0")
+                logger.info(f"Autoscaler metrics server started on :{port}")
+            except Exception as e:
+                logger.warning(f"Failed to start autoscaler metrics endpoint: {e}")
 
     async def _on_signal(self, sig: signal.Signals) -> None:
         """Handle shutdown signals."""
         logger.info(f"Received signal {sig.name} - shutting down")
         self._shutdown_event.set()
 
-    async def get_queue_stats(self) -> dict[str, dict[str, int]]:
-        """Get queue statistics from Flower API."""
-        if not self._session:
+    class QueueStatEntry(TypedDict):
+        depth: int
+
+    class _RedisClient(Protocol):
+        def llen(self, name: str) -> int: ...
+
+    class _RedisChannel(Protocol):
+        client: "CeleryAutoscaler._RedisClient"
+
+        def _q_for_pri(self, name: str, pri: int) -> str: ...
+
+    @staticmethod
+    def _is_redis_channel(obj: object) -> TypeGuard["CeleryAutoscaler._RedisChannel"]:
+        return hasattr(obj, "client") and hasattr(obj, "_q_for_pri")
+
+    async def get_queue_stats(self) -> dict[str, "CeleryAutoscaler.QueueStatEntry"]:
+        """Get queue depths using Kombu SimpleQueue.qsize() per queue."""
+        if not self.config:
             return {}
 
+        if self._conn is None:
+            logger.error("Broker connection not initialized")
+            return {}
+
+        stats: dict[str, CeleryAutoscaler.QueueStatEntry] = {}
+
+        # For each enabled worker type, aggregate base + direct queues
+        for _, cfg in self.config.worker_types.items():
+            if not getattr(cfg, "enabled", False):
+                continue
+            base = str(getattr(cfg, "job_queue", "")).split(":")[0]
+            if not base:
+                continue
+
+            queue_names = self.discover_queues(base)
+            if not queue_names:
+                queue_names = {base}
+
+            total_depth = 0
+            for name in sorted(queue_names):
+                try:
+                    depth = await asyncio.to_thread(self.queue_depth, name)
+                    total_depth += int(depth)
+                except Exception as e:
+                    logger.warning(f"Failed to read depth for queue {name}: {e}")
+                    continue
+
+            stats[base] = {"depth": int(total_depth)}
+            # Update metrics for this base queue
+            try:
+                AS_QUEUE_DEPTH.labels(queue=base).set(int(total_depth))
+            except Exception:
+                pass
+
+        return stats
+
+    def discover_queues(self, base_prefix: str) -> set[str]:
+        """Return a set of queue names to consider for scaling.
+
+        Includes the base queue and any per-worker direct queues matching
+        "<base_prefix>.direct.*" discovered via Celery Inspect.
+        """
         try:
-            # Get queue length from Flower with timeout
-            async with async_timeout.timeout(10):
-                # Support both real aiohttp response and mock responses
-                resp = await self._session.get(
-                    f"{self.flower_url}/api/queues/length", auth=self._auth
-                )
-                async with resp if hasattr(resp, "__aenter__") else nullcontext(resp):
-                    if hasattr(resp, "status") and resp.status != 200:
-                        logger.error(f"Flower API returned status {resp.status}")
-                        return {}
+            from swarm.celery_app import app as celery_app
 
-                    data = await resp.json()
-                    queue_stats: dict[str, dict[str, int]] = {}
-
-                    # Process active queues
-                    active_queues = data.get("active_queues", [])
-                    for queue in active_queues:
-                        name = queue.get("name", "")
-                        if name:
-                            ready = queue.get("messages_ready", 0)
-                            unacked = queue.get("messages_unacknowledged", 0)
-                            queue_stats[name] = {
-                                "depth": ready + unacked,  # Total queue depth
-                                "messages_ready": ready,
-                                "messages_unacknowledged": unacked,
-                            }
-
-                    return queue_stats
-
-        except TimeoutError:
-            logger.error("Timeout getting queue stats from Flower")
-            return {}
+            inspector = celery_app.control.inspect()
+            active_queues = inspector.active_queues() or {}
+            names: set[str] = set()
+            direct_prefix = base_prefix + ".direct."
+            for queues in active_queues.values():
+                if not queues:
+                    continue
+                for q in queues:
+                    name = q.get("name")
+                    if not name:
+                        continue
+                    if name == base_prefix or name.startswith(direct_prefix):
+                        names.add(name)
+            return names
         except Exception as e:
-            logger.error(f"Failed to get queue stats from Flower: {e}")
-            return {}
+            logger.debug(f"discover_queues failed: {e}")
+            return set()
+
+    def queue_depth(self, name: str) -> int:
+        """Return current ready depth for a queue name on Redis broker.
+
+        This implementation requires the Kombu Redis transport and computes
+        depth by summing per-priority Redis list lengths for the queue.
+        """
+        if self._conn is None:
+            raise RuntimeError("Broker connection not initialized")
+
+        ch = self._conn.default_channel
+        if not CeleryAutoscaler._is_redis_channel(ch):
+            raise RuntimeError("Redis broker/transport is required for autoscaler queue depth")
+
+        total = 0
+        for pri in self.priority_steps:
+            key = ch._q_for_pri(name, pri)
+            total += int(ch.client.llen(key))
+
+        return int(total)
 
     async def get_worker_stats(self) -> dict[str, int]:
-        """Get worker statistics from Flower API."""
-        if not self._session:
-            return {}
-
+        """Get worker statistics via Celery Inspect (optional)."""
         try:
-            # Get worker stats with timeout
-            async with async_timeout.timeout(10):
-                # Support both real aiohttp response and mock responses
-                resp = await self._session.get(f"{self.flower_url}/api/workers", auth=self._auth)
-                async with resp if hasattr(resp, "__aenter__") else nullcontext(resp):
-                    if hasattr(resp, "status") and resp.status != 200:
-                        return {}
+            from swarm.celery_app import app as celery_app
 
-                    data = await resp.json()
-
-                    # Count workers per queue
-                    workers_per_queue: dict[str, int] = {}
-                    for worker_name, worker_info in data.items():
-                        # Get active queues for this worker
-                        active_queues = worker_info.get("active_queues", [])
-                        for queue in active_queues:
-                            queue_name = queue.get("name", "")
-                            if queue_name:
-                                workers_per_queue[queue_name] = (
-                                    workers_per_queue.get(queue_name, 0) + 1
-                                )
-
-                    return workers_per_queue
-
-        except TimeoutError:
-            logger.error("Timeout getting worker stats from Flower")
-            return {}
+            inspector = celery_app.control.inspect()
+            active_queues = inspector.active_queues() or {}
+            workers_per_queue: dict[str, int] = {}
+            for _, queues in active_queues.items():
+                for q in queues or []:
+                    name = q.get("name")
+                    if name:
+                        workers_per_queue[name] = workers_per_queue.get(name, 0) + 1
+            return workers_per_queue
         except Exception as e:
-            logger.error(f"Failed to get worker stats from Flower: {e}")
+            logger.warning(f"Celery Inspect failed: {e}")
             return {}
 
     def make_scaling_decision(
@@ -214,7 +296,7 @@ class CeleryAutoscaler:
         queue_name: str,
         queue_depth: int,
         current_workers: int,
-        config: Any,
+        config: WorkerTypeConfig,
     ) -> tuple[ScalingDecision, int]:
         """Make scaling decision for a queue."""
         scaling = config.scaling
@@ -241,7 +323,7 @@ class CeleryAutoscaler:
         if not self.config or not self.backend:
             return
 
-        # Get queue and worker stats from Flower
+        # Get queue depths from broker (and optionally worker stats via Inspect)
         queue_stats = await self.get_queue_stats()
         # Note: worker_stats not currently used, but kept for future queue routing
         # worker_stats = await self.get_worker_stats()
@@ -255,8 +337,8 @@ class CeleryAutoscaler:
             queue_name = config.job_queue.split(":")[0]
 
             # Get queue depth (use pre-calculated depth)
-            queue_info = queue_stats.get(queue_name, {})
-            queue_depth = queue_info.get("depth", 0)
+            queue_info: CeleryAutoscaler.QueueStatEntry = queue_stats.get(queue_name, {"depth": 0})
+            queue_depth = int(queue_info.get("depth", 0))
 
             # Get current workers from backend (container count)
             current_workers = await self.backend.get_current_count(worker_type)
@@ -274,12 +356,21 @@ class CeleryAutoscaler:
                 )
                 await self.backend.scale_to(worker_type, target)
 
+            # Update autoscaler decision/target metrics
+            try:
+                code = (
+                    1
+                    if decision == ScalingDecision.SCALE_UP
+                    else (-1 if decision == ScalingDecision.SCALE_DOWN else 0)
+                )
+                AS_DECISION.labels(worker_type=worker_type).set(code)
+                AS_TARGET.labels(worker_type=worker_type).set(target)
+            except Exception:
+                pass
+
     async def run(self) -> None:
         """Run the autoscaler loop."""
         logger.info(f"Starting Celery autoscaler with {self.check_interval}s interval")
-
-        # Wait for Flower to be ready
-        await asyncio.sleep(5)
 
         while not self._shutdown_event.is_set():
             try:
@@ -299,9 +390,11 @@ class CeleryAutoscaler:
     async def cleanup(self) -> None:
         """Clean up resources."""
         logger.info("Starting cleanup process...")
-
-        if self._session:
-            await self._session.close()
+        try:
+            if self._conn is not None:
+                self._conn.close()
+        except Exception:
+            pass
 
         # Clean up worker containers if using Docker
         if self.backend and hasattr(self.backend, "cleanup_all_workers"):
@@ -319,13 +412,7 @@ class CeleryAutoscaler:
 
 async def main() -> None:
     """Run the autoscaler main loop."""
-    parser = argparse.ArgumentParser(description="Celery-aware Worker Autoscaler")
-    parser.add_argument(
-        "--flower-url",
-        type=str,
-        default=os.environ.get("FLOWER_URL", "http://localhost:5555"),
-        help="Flower API URL",
-    )
+    parser = argparse.ArgumentParser(description="Celery-aware Worker Autoscaler (Flower-free)")
     parser.add_argument(
         "--orchestrator",
         type=str,
@@ -339,27 +426,16 @@ async def main() -> None:
         default=int(os.environ.get("CHECK_INTERVAL", "30")),
         help="Seconds between checks",
     )
-    parser.add_argument(
-        "--username",
-        type=str,
-        default=os.environ.get("FLOWER_USERNAME"),
-        help="Flower basic auth username",
-    )
-    parser.add_argument(
-        "--password",
-        type=str,
-        default=os.environ.get("FLOWER_PASSWORD"),
-        help="Flower basic auth password",
-    )
+    # No Flower authentication/options
 
     args = parser.parse_args()
 
+    # Configure logging and bind deployment/service context
+    bootstrap_logging(service="celery-autoscaler")
+
     autoscaler = CeleryAutoscaler(
-        flower_url=args.flower_url,
         orchestrator=args.orchestrator,
         check_interval=args.check_interval,
-        flower_username=args.username,
-        flower_password=args.password,
     )
 
     try:

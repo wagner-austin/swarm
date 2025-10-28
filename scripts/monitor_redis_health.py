@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
-from typing import Any, Optional
+from typing import NotRequired, Optional, TypedDict
 
 import redis
 import requests
@@ -37,13 +37,30 @@ from redis.exceptions import AuthenticationError, ConnectionError as RedisConnec
 load_dotenv()
 
 
-def check_haproxy_stats() -> dict[str, Any]:
+class HaproxyBackendInfo(TypedDict):
+    status: str
+    check_status: str
+
+
+class HaproxyStats(TypedDict, total=False):
+    haproxy_up: bool
+    stats_url: str
+    upstash_status: str
+    local_status: str
+    failover_active: bool
+    active_backend: str
+    redis_0: HaproxyBackendInfo
+    redis_1: HaproxyBackendInfo
+    error: str
+
+
+def check_haproxy_stats() -> HaproxyStats:
     """Check HAProxy stats endpoint for backend health."""
     try:
         # Get CSV stats from HAProxy
         response = requests.get("http://localhost:8080/stats;csv", timeout=2)
 
-        stats = {
+        stats: HaproxyStats = {
             "haproxy_up": response.status_code == 200,
             "stats_url": "http://localhost:8080/stats",
         }
@@ -109,13 +126,26 @@ def check_haproxy_stats() -> dict[str, Any]:
 
         return stats
 
-    except Exception as e:
-        return {"haproxy_up": False, "error": str(e)}
+    except Exception:
+        return HaproxyStats(haproxy_up=False)
 
 
-def check_redis_auth() -> dict[str, Any]:
+class AuthError(TypedDict, total=False):
+    container: str
+    pattern: str
+    count: int
+    sample: str | None
+    error: str
+
+
+class AuthIssues(TypedDict):
+    auth_errors: list[AuthError]
+    connection_errors: list[AuthError]
+
+
+def check_redis_auth() -> AuthIssues:
     """Check for Redis authentication failures."""
-    auth_issues: dict[str, list[dict[str, Any]]] = {"auth_errors": [], "connection_errors": []}
+    auth_issues: AuthIssues = {"auth_errors": [], "connection_errors": []}
 
     # Check application logs for auth failures
     containers = ["swarm", "swarm_browser_1", "haproxy-redis"]
@@ -178,20 +208,25 @@ def check_redis_auth() -> dict[str, Any]:
     return auth_issues
 
 
-def test_redis_connections() -> dict[str, Any]:
+class RedisConnResults(TypedDict, total=False):
+    haproxy_connection: str
+    active_backend: str
+
+
+def test_redis_connections() -> RedisConnResults:
     """Test actual Redis connections through HAProxy."""
-    results: dict[str, Any] = {}
+    results: RedisConnResults = {}
 
     # Test connection through HAProxy
     haproxy_url = "redis://default:{}@localhost:6380/0".format(os.getenv("REDIS_PASSWORD", ""))
 
     try:
-        client: redis.Redis[Any] = redis.from_url(haproxy_url, socket_connect_timeout=2)
+        client: redis.Redis = redis.from_url(haproxy_url, socket_connect_timeout=2)
         if client.ping():
             results["haproxy_connection"] = "[OK]"
 
             # Try to determine which backend responded
-            info = client.info("server")  # type: ignore[attr-defined]
+            info = client.info("server")
             if "upstash" in str(info).lower():
                 results["active_backend"] = "Upstash"
             else:

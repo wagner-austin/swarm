@@ -66,26 +66,10 @@ async def monitor_queue_depth() -> None:
     print("QUEUE MONITORING")
     print("=" * 60)
 
-    async with aiohttp.ClientSession() as session:
-        for i in range(5):
-            try:
-                async with session.get("http://flower:5555/api/queues/length") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        queues = data.get("active_queues", [])
-
-                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Queue status:")
-                        for queue in queues:
-                            name = queue.get("name", "unknown")
-                            ready = queue.get("messages_ready", 0)
-                            unacked = queue.get("messages_unacknowledged", 0)
-                            print(f"  {name}: {ready} ready, {unacked} unacked")
-                    else:
-                        print(f"Failed to get queue stats: {resp.status}")
-            except Exception as e:
-                print(f"Queue monitoring error: {e}")
-
-            await asyncio.sleep(2)
+    # Flower-free: skip queue monitoring; keep a small heartbeat instead
+    for _ in range(5):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Queue monitoring skipped (Flower-free)")
+        await asyncio.sleep(2)
 
 
 async def main() -> None:

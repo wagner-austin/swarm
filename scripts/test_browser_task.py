@@ -43,7 +43,7 @@ async def main() -> None:
 
     print(f"Screenshot task ID: {screenshot_result.id}")
 
-    print("\nCheck Flower UI at http://localhost:5555 to see tasks!")
+    print("\nCheck Grafana/Prometheus for task metrics.")
 
 
 if __name__ == "__main__":

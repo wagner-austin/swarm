@@ -1,18 +1,17 @@
 # ruff_no_direct_discord_response.py
 """
-Custom Ruff plugin: Forbids direct use of interaction.response.send_message, interaction.response.defer, and interaction.followup.send.
-Allows these only inside swarm/utils/discord_interactions.py.
+Guard: Forbid direct use of Discord interaction response send/defer.
 
-Usage:
-    ruff check --extend-select X999
-
-Add to pyproject.toml:
-    [tool.ruff.lint.per-file-ignores]
-    "swarm/utils/discord_interactions.py" = ["X999"]
+Forbids calls like interaction.response.send_message, interaction.response.defer,
+and interaction.followup.send outside the dedicated adapter module.
 """
 
+from __future__ import annotations
+
 import ast
-from typing import Any
+import sys
+from pathlib import Path
+from typing import Iterable
 
 FORBIDDEN = {
     ("response", "send_message"),
@@ -26,45 +25,39 @@ class NoDirectDiscordResponse(ast.NodeVisitor):
         self.errors: list[tuple[int, int]] = []
         self.filename = filename
 
-    def visit_Attribute(self, node: ast.Attribute) -> Any:
+    def visit_Attribute(self, node: ast.Attribute) -> None:
         # Check for interaction.response.send_message, etc.
         if isinstance(node.value, ast.Attribute):
             if (node.value.attr, node.attr) in FORBIDDEN:
-                # Only allow in discord_interactions.py
+                # Only allow in discord_interactions.py adapter
                 if not self.filename.replace("\\", "/").endswith("discord_interactions.py"):
                     self.errors.append((node.lineno, node.col_offset))
         self.generic_visit(node)
 
 
 def check_file(filename: str) -> int:
-    with open(filename, encoding="utf-8") as f:
-        tree = ast.parse(f.read(), filename=filename)
+    text = Path(filename).read_text(encoding="utf-8")
+    tree = ast.parse(text, filename=filename)
     checker = NoDirectDiscordResponse(filename)
     checker.visit(tree)
     for lineno, col in checker.errors:
         print(
-            f"{filename}:{lineno}:{col}: X999 Direct Discord interaction response forbidden; use safe_send/safe_defer"
+            f"{filename}:{lineno}:{col}: X999 Direct Discord response forbidden; use adapter helpers"
         )
     return len(checker.errors)
 
 
+def iter_py_files(path: str) -> Iterable[str]:
+    p = Path(path)
+    if p.is_dir():
+        for f in p.rglob("*.py"):
+            yield str(f)
+    else:
+        yield path
+
+
 if __name__ == "__main__":
-    import sys
-
     n = 0
-    import os
-    from pathlib import Path
-    from typing import Iterable
-
-    def iter_py_files(path: str) -> Iterable[str]:
-        """Yield .py file paths under a directory or a single file path."""
-        p = Path(path)
-        if p.is_dir():
-            for f in p.rglob("*.py"):
-                yield str(f)
-        else:
-            yield path
-
     for arg in sys.argv[1:]:
         for fname in iter_py_files(arg):
             rel = fname.replace("\\", "/").lower()
@@ -72,5 +65,5 @@ if __name__ == "__main__":
                 continue
             if rel.endswith("mocks.py") or "/_mocks/" in rel:
                 continue
-                n += check_file(fname)
+            n += check_file(fname)
     sys.exit(1 if n else 0)

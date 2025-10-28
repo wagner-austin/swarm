@@ -70,7 +70,7 @@ async def main() -> int:
         ("Grafana", "http://localhost:3000/api/health"),
         ("Loki", "http://localhost:3100/ready"),
         ("Celery Exporter", "http://localhost:9808/health"),
-        ("Flower", "http://localhost:5555/healthcheck"),
+        # Flower removed from default stack
     ]
 
     async with aiohttp.ClientSession() as session:
@@ -114,7 +114,7 @@ async def main() -> int:
         print("\n🔗 Dashboard Links:")
         print("  • Grafana: http://localhost:3000 (admin/admin)")
         print("  • Prometheus: http://localhost:9090")
-        print("  • Flower: http://localhost:5555")
+        # Flower removed
 
         print("\n📚 Next Steps:")
         if all_healthy:
