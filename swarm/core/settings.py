@@ -2,7 +2,7 @@
 Settings for the DiscordBot. All browser flags live in Settings.browser (see BrowserConfig).
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings
@@ -47,7 +47,7 @@ class QueueConfig(BaseModel):
 class Settings(BaseSettings):
     if TYPE_CHECKING:  # pragma: no cover
 
-        def __init__(self, **data: Any) -> None: ...
+        def __init__(self, **data: object) -> None: ...
 
     """
     Settings for the DiscordBot.
@@ -103,7 +103,7 @@ class Settings(BaseSettings):
 
     @field_validator("allowed_hosts", mode="before")
     @classmethod
-    def _split_csv(cls, v: Any) -> list[str]:  # noqa: D401
+    def _split_csv(cls, v: object) -> list[str]:  # noqa: D401
         """
         Allow simple comma‑separated strings in .env:
 

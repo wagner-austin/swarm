@@ -104,11 +104,40 @@ class SwarmLifecycle:
         finally:
             await self.shutdown()
 
+    async def _await_redis_ready(self, timeout: float = 20.0, interval: float = 0.5) -> None:
+        """Block until Redis is reachable via DI client or until timeout.
+
+        This is a targeted readiness gate for components that depend on Redis
+        (e.g., BrowserHealthMonitor), complementing Compose health gating.
+        """
+        if not self._container:
+            return
+        import asyncio
+
+        deadline = asyncio.get_event_loop().time() + timeout
+        last_err: Exception | None = None
+        while asyncio.get_event_loop().time() < deadline:
+            client = None
+            try:
+                client = self._container.redis_client()
+            except Exception as e:  # provider construction failure
+                last_err = e
+            if client is not None:
+                try:
+                    ok = await client.ping()
+                    if ok:
+                        return
+                except Exception as e:
+                    last_err = e
+            await asyncio.sleep(interval)
+        if last_err:
+            logger.warning(f"Redis readiness wait timed out: {last_err}")
+
     async def _initialize_services_and_bot(self) -> None:
         self._set_state(LifecycleState.INITIALIZING_SERVICES)
         logger.info("Initializing services and bot instance...")
 
-        # 📈  Start Prometheus exporter before other services spin up
+        # Start Prometheus exporter before other services spin up
         telemetry.start_exporter(self._settings.metrics_port)
 
         self._container = initialize_and_wire_container(
@@ -168,13 +197,15 @@ class SwarmLifecycle:
         # Shutdown (DI-managed)
         shutdown_cog = self._container.shutdown_cog(discord_bot=self._bot, lifecycle=self)
         await self._bot.add_cog(shutdown_cog)
-        # BrowserHealthMonitor (DI-managed)
+        # BrowserHealthMonitor (DI-managed) - wait for Redis before adding to avoid startup blips
+        if getattr(self._settings, "redis_enabled", True):
+            await self._await_redis_ready()
         browser_health_monitor_cog = self._container.browser_health_monitor_cog(
             discord_bot=self._bot
         )
         await self._bot.add_cog(browser_health_monitor_cog)
         logger.info(
-            "📈 DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Web, Shutdown, BrowserHealthMonitor."
+            "DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Web, Shutdown, BrowserHealthMonitor."
         )
 
         # --- Standard Cogs --- #
@@ -216,20 +247,19 @@ class SwarmLifecycle:
                 loaded.append(ext_name.rsplit(".", 1)[-1])
             except commands.ExtensionNotFound:
                 failed.append(ext_name.rsplit(".", 1)[-1])
-                logger.error(f"❌ Extension {ext_name} not found")
+                logger.error(f"Extension {ext_name} not found")
             except commands.NoEntryPointError:
                 failed.append(ext_name.rsplit(".", 1)[-1])
-                logger.error(f"❌ Extension {ext_name} has no setup() function.")
+                logger.error(f"Extension {ext_name} has no setup() function.")
             except commands.ExtensionFailed as e:
                 failed.append(ext_name.rsplit(".", 1)[-1])
-                logger.error(f"❌ Extension {ext_name} failed: {e.original}")
+                logger.error(f"Extension {ext_name} failed: {e.original}")
             except Exception as e:
                 failed.append(ext_name.rsplit(".", 1)[-1])
-                logger.error(f"❌ Unexpected error loading {ext_name}: {e}")
-        logger.info(
-            f"🧩 Cogs loaded: {', '.join(sorted(loaded)) or '—'}"
-            + (f" | ❌ failed: {', '.join(failed)}" if failed else "")
-        )
+                logger.error(f"Unexpected error loading {ext_name}: {e}")
+        summary_loaded = ", ".join(sorted(loaded)) if loaded else "<none>"
+        summary_failed = f" | failed: {', '.join(failed)}" if failed else ""
+        logger.info(f"Cogs loaded: {summary_loaded}{summary_failed}")
 
     def _register_event_handlers(self) -> None:
         if not self._bot:

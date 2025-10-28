@@ -8,21 +8,42 @@ from __future__ import annotations
 
 import os
 import time
-from types import ModuleType  # Added ModuleType
-from typing import Any
+from types import ModuleType
+from typing import Protocol
 
 # Prometheus counters for observability – imported lazily to avoid heavy deps
 from swarm.core.telemetry import DISCORD_MSG_TOTAL, SWARM_LATENCY, SWARM_MSG_TOTAL
 
 # psutil is optional – the code degrades gracefully if it's absent
 psutil: ModuleType | None = None
-_PROC: Any | None = None  # Using Any for _PROC if psutil.Process is not available
+
+
+class _MemInfo(Protocol):
+    @property
+    def rss(self) -> int: ...
+
+
+class _PsutilProcessProto(Protocol):
+    def memory_full_info(self) -> _MemInfo: ...
+
+
+_PROC: _PsutilProcessProto | None = None  # Process handle or None if psutil unavailable
 
 try:
-    import psutil as _imported_psutil
+    import psutil as _ps
 
-    psutil = _imported_psutil
-    _PROC = _imported_psutil.Process(os.getpid())
+    psutil = _ps
+
+    class _ProcessAdapter:
+        """Minimal adapter to satisfy _PsutilProcessProto without casts/ignores."""
+
+        def __init__(self, pid: int) -> None:
+            self._proc = _ps.Process(pid)
+
+        def memory_full_info(self) -> _MemInfo:
+            return self._proc.memory_full_info()
+
+    _PROC = _ProcessAdapter(os.getpid())
 except ModuleNotFoundError:  # pragma: no cover
     pass  # psutil remains None, _PROC remains None
 

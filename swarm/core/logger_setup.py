@@ -13,9 +13,12 @@ import os
 import platform
 import socket
 import warnings
-from typing import Any
+from collections.abc import Mapping
+from typing import TypedDict
 
 from pythonjsonlogger import json as jsonlogger
+
+from swarm.core.deployment_context import DeploymentContext
 
 # ----------  New section: contextual metadata  ----------
 # Core service context
@@ -50,7 +53,7 @@ def bind_deployment_context(
     container_id: str | None = None,
     deployment_env: str | None = None,
     region: str | None = None,
-    context: dict[str, str] | None = None,
+    context: DeploymentContext | dict[str, str] | None = None,
 ) -> None:
     """Bind deployment/infrastructure metadata to logging context.
 
@@ -133,7 +136,7 @@ class _ContextFilter(logging.Filter):
         return True
 
 
-def merge_dicts(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+def merge_dicts(base: dict[str, object], overrides: dict[str, object]) -> dict[str, object]:
     """
     Recursively merge *overrides* into *base*.
 
@@ -145,20 +148,24 @@ def merge_dicts(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, An
     `cfg = merge_dicts(cfg, overrides)`.
     """
     for key, value in overrides.items():
-        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-            merge_dicts(base[key], value)
+        current = base.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            # Perform a typed recursive merge by first normalising child dicts to str keys
+            child_base: dict[str, object] = {str(k): v for k, v in current.items()}
+            child_override: dict[str, object] = {str(k): v for k, v in value.items()}
+            base[key] = merge_dicts(child_base, child_override)
         else:
-            if key in base and not isinstance(base[key], type(value)):
+            if key in base and current is not None and not isinstance(current, type(value)):
                 warnings.warn(
                     f"Type mismatch for key '{key}': "
-                    f"{type(base[key]).__name__} vs {type(value).__name__}. "
+                    f"{type(current).__name__} vs {type(value).__name__}. "
                     "Using override value."
                 )
             base[key] = value
     return base
 
 
-DEFAULT_LOGGING_CONFIG: dict[str, Any] = {
+DEFAULT_LOGGING_CONFIG: dict[str, object] = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
@@ -220,7 +227,7 @@ class _DuplicateFilter(logging.Filter):
 _CONFIGURED: bool = False
 
 
-def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
+def setup_logging(config_overrides: dict[str, object] | None = None) -> None:
     """
     setup_logging - Configures logging using a centralized configuration.
 
@@ -233,14 +240,19 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
     """
     global _CONFIGURED
     if _CONFIGURED:
-        return  # already configured – avoid duplicate handlers
+        return
 
-    config = copy.deepcopy(DEFAULT_LOGGING_CONFIG)
+    config: dict[str, object] = copy.deepcopy(DEFAULT_LOGGING_CONFIG)
 
     # Honour LOG_LEVEL env variable (e.g. DEBUG, INFO, WARNING)
     env_level = os.getenv("LOG_LEVEL")
     if env_level:
-        config.setdefault("root", {})["level"] = env_level.upper()
+        # Ensure nested dict exists and is typed
+        root = config.get("root")
+        if not isinstance(root, dict):
+            root = {}
+            config["root"] = root
+        root["level"] = env_level.upper()
     config["force"] = True
     if config_overrides:
         merge_dicts(config, config_overrides)
@@ -248,7 +260,11 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
     # Override default handler set selected via LOG_FORMAT/LOG_TO_FILE flags.
     log_format = os.getenv("LOG_FORMAT", "json").lower()
     if log_format == "pretty":
-        config["root"]["handlers"] = ["rich"]
+        root = config.get("root")
+        if not isinstance(root, dict):
+            root = {}
+            config["root"] = root
+        root["handlers"] = ["rich"]
     if os.getenv("LOG_TO_FILE", "").lower() in ("true", "1", "yes", "on"):
         # Dynamically create file handler when requested
         log_file = os.getenv("LOG_FILE_PATH", "logs/swarm.log")
@@ -265,7 +281,11 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
 
         # Add file handler configuration dynamically
         if add_file_handler:
-            config["handlers"]["file"] = {
+            handlers = config.get("handlers")
+            if not isinstance(handlers, dict):
+                handlers = {}
+                config["handlers"] = handlers
+            handlers["file"] = {
                 "class": "logging.handlers.RotatingFileHandler",
                 "filename": log_file,
                 "maxBytes": 20_000_000,
@@ -273,14 +293,21 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
                 "formatter": "json",
                 "filters": ["dedupe", "context"],
             }
-            config["root"]["handlers"].append("file")
+            root = config.get("root")
+            if not isinstance(root, dict):
+                root = {}
+                config["root"] = root
+            handlers_list = root.get("handlers")
+            if not isinstance(handlers_list, list):
+                handlers_list = []
+            handlers_list.append("file")
+            root["handlers"] = handlers_list
 
     # Check for empty or missing handlers in overall config or in the root logger.
-    if (
-        not config.get("handlers")
-        or not config["handlers"]
-        or not config.get("root", {}).get("handlers")
-    ):
+    handlers = config.get("handlers")
+    root = config.get("root") if isinstance(config.get("root"), dict) else {}
+    root_handlers = root.get("handlers") if isinstance(root, dict) else None
+    if (not isinstance(handlers, dict)) or (not handlers) or (not isinstance(root_handlers, list)):
         warnings.warn("Logging configuration missing handlers; using fallback console handler.")
         config["handlers"] = {
             "console": {
@@ -288,11 +315,34 @@ def setup_logging(config_overrides: dict[str, Any] | None = None) -> None:
                 "formatter": "default",
             },
         }
-        if "root" in config:
-            config["root"]["handlers"] = ["console"]
+        r = config.get("root")
+        if not isinstance(r, dict):
+            r = {}
+            config["root"] = r
+        r["handlers"] = ["console"]
 
     logging.config.dictConfig(config)
     _CONFIGURED = True
 
 
 # End of core/logger_setup.py
+
+
+def bootstrap_logging(service: str | None = None) -> dict[str, str]:
+    """Configure logging and bind deployment/service context once per process.
+
+    Returns the detected deployment context for optional use by callers.
+    """
+    setup_logging()
+    context = auto_detect_deployment_context()
+    bind_deployment_context(context=context)
+    if service is not None:
+        bind_log_context(service=service)
+        # Bind a non-unknown worker_id for non-worker services using the detected hostname
+        try:
+            host = context.get("hostname", "")
+            if host:
+                bind_log_context(worker_id=host)
+        except Exception:
+            pass
+    return context

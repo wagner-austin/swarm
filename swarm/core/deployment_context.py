@@ -7,10 +7,18 @@ Injectable for tests and extensibility.
 
 import os
 import platform
-from typing import Callable, Dict
+from typing import Callable, TypedDict
 
 
-def default_deployment_context_provider() -> dict[str, str]:
+class DeploymentContext(TypedDict):
+    hostname: str
+    container_id: str
+    deployment_env: str
+    region: str
+
+
+def default_deployment_context_provider() -> DeploymentContext:
+    # Return a plain dict literal that matches the DeploymentContext shape
     return {
         "hostname": platform.node(),
         "container_id": os.getenv("HOSTNAME", "-"),
@@ -20,4 +28,4 @@ def default_deployment_context_provider() -> dict[str, str]:
 
 
 # Type alias for injection
-DeploymentContextProvider = Callable[[], dict[str, str]]
+DeploymentContextProvider = Callable[[], DeploymentContext]

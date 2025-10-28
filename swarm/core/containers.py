@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import redis.asyncio as redis_asyncio
 from dependency_injector import containers, providers
@@ -13,7 +13,6 @@ from swarm.distributed.core.config import DistributedConfig
 from swarm.frontends.discord.discord_interactions import safe_send
 from swarm.history.backends import HistoryBackend
 from swarm.history.factory import choose as history_backend_factory
-from swarm.infra.redis_factory import create_redis_client
 from swarm.infra.tankpit import engine_factory as tankpit_engine_factory
 from swarm.plugins.commands.status import Status
 from swarm.types import RedisBytes
@@ -23,12 +22,20 @@ from swarm.types import RedisBytes
 
 
 def _create_redis_client(settings: Settings | None = None) -> RedisBytes:
-    """Create Redis client synchronously for DI container."""
-    if settings is None:
-        settings = Settings()
-    if settings.redis.url is None:
+    """Create Redis client synchronously for DI container.
+
+    Use URL from provided settings if present; otherwise, fall back to a fresh
+    Settings() instance to pick up environment variables (e.g., REDIS_URL) so
+    tests that override only a subset of Settings still work.
+    """
+    effective_url: str | None
+    if settings is not None and settings.redis.url:
+        effective_url = settings.redis.url
+    else:
+        effective_url = Settings().redis.url
+    if not effective_url:
         raise ValueError("Redis URL must be configured")
-    return redis_asyncio.from_url(settings.redis.url)
+    return redis_asyncio.from_url(effective_url)
 
 
 class Container(containers.DeclarativeContainer):
@@ -138,7 +145,7 @@ class Container(containers.DeclarativeContainer):
 
     browser_health_monitor_cog = providers.Factory(
         BrowserHealthMonitor,
-        redis_client=redis_client,
+        redis=redis_client,
     )
 
     # NOTE: BrowserRuntime (local) has been removed. All browser commands are routed via distributed workers.

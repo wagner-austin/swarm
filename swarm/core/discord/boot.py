@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from discord.ext import commands
 
@@ -17,18 +17,11 @@ if TYPE_CHECKING:
 
 
 class MyBot(commands.Bot):
-    # Attrs added at runtime, but mypy needs to know for strict type checking.
-    container: Container
+    # Attrs assigned by wiring after construction.
+    container: Container | None = None
     lifecycle: SwarmLifecycle
-    settings: Settings
-
-    def __init__(self, *args: Any, **kwargs: Any):
-        # Extract our custom parameters before passing to parent
-        self.container = kwargs.pop("container", None)
-        self.settings = kwargs.pop("settings", None)
-
-        super().__init__(*args, **kwargs)
-        self.proxy_service = None
+    settings: Settings | None = None
+    proxy_service: object | None = None
 
 
 # _discover_extensions is obsolete – DI wiring now walks bot.plugins automatically.

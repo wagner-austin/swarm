@@ -19,7 +19,7 @@ import asyncio
 import logging
 import os
 from errno import EADDRINUSE
-from typing import Any
+from typing import Protocol
 
 from prometheus_client import (
     CollectorRegistry,
@@ -36,6 +36,9 @@ __all__ = [
     "record_frame",
     "update_queue_gauge",
     "start_exporter",
+    "BROWSER_HEALTHY_WORKERS",
+    "BROWSER_DEGRADED",
+    "BROWSER_HEALTH_LAST_CHECK_SECONDS",
 ]
 
 _log = logging.getLogger(__name__)
@@ -115,6 +118,23 @@ SWARM_MSG_TOTAL = Counter(
     registry=REGISTRY,
 ).labels(_SHARD_ID)
 
+# --- Browser health gauges (aggregated via heartbeats) -----------------------
+BROWSER_HEALTHY_WORKERS = Gauge(
+    "swarm_browser_healthy_workers",
+    "Number of healthy browser workers",
+    registry=REGISTRY,
+)
+BROWSER_DEGRADED = Gauge(
+    "swarm_browser_degraded",
+    "1 when browser pool is degraded, else 0",
+    registry=REGISTRY,
+)
+BROWSER_HEALTH_LAST_CHECK_SECONDS = Gauge(
+    "swarm_browser_health_last_check_seconds",
+    "Unix timestamp of last browser health check",
+    registry=REGISTRY,
+)
+
 # ---------------------------------------------------------------------------+
 #  Public helpers                                                            +
 # ---------------------------------------------------------------------------+
@@ -132,7 +152,11 @@ def record_frame(direction: str, duration_s: float) -> None:
     FRAME_LATENCY.observe(duration_s)
 
 
-def update_queue_gauge(name: str, q: asyncio.Queue[Any]) -> None:
+class _HasQsize(Protocol):
+    def qsize(self) -> int: ...
+
+
+def update_queue_gauge(name: str, q: _HasQsize) -> None:
     """Export instantaneous fill level of an ``asyncio.Queue``."""
     QUEUE_SIZE.labels(name).set(q.qsize())
 

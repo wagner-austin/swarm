@@ -62,9 +62,9 @@ def cli(argv: list[str] | None = None) -> None:  # noqa: D401
     _build_parser().parse_known_args(argv)  # exits on -h/-V automatically
 
     # 2️⃣ Configure logging (idempotent) & launch the real swarm.
-    from swarm.core.logger_setup import setup_logging
+    from swarm.core.logger_setup import bootstrap_logging
 
-    setup_logging()
+    bootstrap_logging(service="bot")
     from swarm.core.main import main  # delayed import keeps --help fast
 
     asyncio.run(main())
