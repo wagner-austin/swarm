@@ -5,10 +5,11 @@ import concurrent.futures
 import datetime
 import logging
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Literal, TypeVar
+from typing import Awaitable, Callable, Literal, TypeVar
 
 from playwright.async_api import (
     Browser,
@@ -18,11 +19,9 @@ from playwright.async_api import (
     async_playwright,
 )
 
+from swarm.browser.types import BrowserEngineStatus
 from swarm.browser.ws_logger import WSLogger, jsonl_sink
-from swarm.core.logger_setup import bind_log_context
 from swarm.core.service_base import ServiceABC
-
-bind_log_context(service="browser")
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +94,13 @@ class BrowserEngine(ServiceABC):
         self._last_url: str | None = None  # ← track last navigation
         self._worker_id: str = str(uuid.uuid4())  # Unique identifier for this browser instance
         self._started_at: float = time.time()  # Track when the browser was created
+        self._ws_logger: WSLogger | None = None
 
-        # Store the event loop this engine belongs to (will be set in start())
+        # Dedicated background event loop (initialized in start())
         self._loop: asyncio.AbstractEventLoop | None = None
-        # Async-native RW-lock for concurrent reads and exclusive writes (created in start())
+        self._loop_thread: threading.Thread | None = None
+        self._loop_ready: threading.Event = threading.Event()
+        # Async-native RW-lock for concurrent reads and exclusive writes (created on engine loop)
         self._rwlock: AsyncRWLock | None = None
 
     # ------------------------------------------------------------------+
@@ -107,8 +109,7 @@ class BrowserEngine(ServiceABC):
     async def _run_on_engine_loop(self, coro: Awaitable[T]) -> T:
         """Execute coro in the engine's home loop, regardless of caller thread."""
         if self._loop is None:
-            # Not initialized yet, run directly (will be same loop after start())
-            return await coro
+            raise RuntimeError("BrowserEngine loop not initialized; call start() first")
 
         current_loop = asyncio.get_running_loop()
         if current_loop is self._loop:
@@ -129,6 +130,28 @@ class BrowserEngine(ServiceABC):
             )
             # Wait for result in caller's loop
             return await asyncio.wrap_future(future)
+
+    def _engine_loop_main(self) -> None:
+        """Background thread target: create and run the engine's event loop forever."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._loop = loop
+        self._loop_ready.set()
+        try:
+            loop.run_forever()
+        finally:
+            try:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if hasattr(loop, "shutdown_asyncgens"):
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception as exc:
+                logger.debug(f"Error during engine loop shutdown: {exc}")
+            try:
+                loop.close()
+            except Exception as exc:
+                logger.debug(f"Error closing engine loop: {exc}")
 
     async def _read_inner(self, fn: Callable[[], Awaitable[T]]) -> T:
         """Acquire a read lock and run the function."""
@@ -164,15 +187,20 @@ class BrowserEngine(ServiceABC):
             return await self._read_inner(fn)
 
         # Different loop - need to proxy the entire operation including lock acquisition
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            logger.error("Engine loop is not running for run_read; refusing to proxy")
+            raise RuntimeError("BrowserEngine loop not running")
+
         async def _on_engine_loop() -> T:
             return await self._read_inner(fn)
 
         # Create the coroutine on the calling loop, then schedule on engine loop
         future: concurrent.futures.Future[T] = asyncio.run_coroutine_threadsafe(
-            _on_engine_loop(), self._loop
+            _on_engine_loop(), loop
         )
-        # Wait for result in caller's loop
-        return await asyncio.wrap_future(future)
+        # Wait for result in caller's loop with a timeout guard
+        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=30.0)
 
     async def run_write(self, fn: Callable[[], Awaitable[T]]) -> T:
         """Run *fn* with exclusive access (no other readers or writers).
@@ -192,23 +220,47 @@ class BrowserEngine(ServiceABC):
             return await self._write_inner(fn)
 
         # Different loop - need to proxy the entire operation including lock acquisition
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            logger.error("Engine loop is not running for run_write; refusing to proxy")
+            raise RuntimeError("BrowserEngine loop not running")
+
         async def _on_engine_loop() -> T:
             return await self._write_inner(fn)
 
         # Create the coroutine on the calling loop, then schedule on engine loop
         future: concurrent.futures.Future[T] = asyncio.run_coroutine_threadsafe(
-            _on_engine_loop(), self._loop
+            _on_engine_loop(), loop
         )
-        # Wait for result in caller's loop
-        return await asyncio.wrap_future(future)
+        # Wait for result in caller's loop with a timeout guard
+        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=30.0)
 
     # ------------------------------------------------------------------+
     # Lifecycle                                                        #
     # ------------------------------------------------------------------+
     async def start(self) -> None:
-        # Initialize loop and lock on first start
-        if self._loop is None:
-            self._loop = asyncio.get_running_loop()
+        """Start the engine with a dedicated background event loop thread.
+
+        Idempotent: safe to call multiple times.
+        """
+        # Start loop thread if needed
+        if self._loop_thread is None or self._loop is None or not self._loop_ready.is_set():
+            self._loop_ready.clear()
+            self._loop_thread = threading.Thread(
+                target=self._engine_loop_main,
+                name=f"BrowserEngineLoop-{self._worker_id}",
+                daemon=True,
+            )
+            self._loop_thread.start()
+            if not self._loop_ready.wait(timeout=5.0):
+                raise RuntimeError("Timed out waiting for BrowserEngine loop thread to start")
+
+        # Initialize browser on the engine loop (idempotent)
+        await self._run_on_engine_loop(self._start_browser())
+
+    async def _start_browser(self) -> None:
+        # Initialize lock on first start (engine loop already set by loop thread)
+        if self._rwlock is None:
             self._rwlock = AsyncRWLock()
 
         # Already initialised by WebRunner? → bail out early.
@@ -357,38 +409,81 @@ class BrowserEngine(ServiceABC):
         return "running" if self.is_running() else "stopped"
 
     async def close(self) -> None:
-        # --- WSLogger shutdown ---
-        if getattr(self, "_ws_logger", None) is not None:
-            await self._ws_logger.close()
-        if self._page:
-            await self._page.close()  # Ensure page is closed before context
-        if self._context:
-            await self._context.close()  # Ensure context is closed before browser
-        if self._browser:
-            await self._browser.close()
-        if self._playwright:
-            await self._playwright.stop()
+        async def _close_inner() -> None:
+            # --- WSLogger shutdown ---
+            ws_logger = self._ws_logger
+            if ws_logger is not None:
+                try:
+                    await ws_logger.close()
+                except Exception as exc:
+                    logger.warning(f"Error closing WSLogger: {exc}")
+                self._ws_logger = None
+            if self._page:
+                try:
+                    await self._page.close()
+                except Exception as exc:
+                    logger.warning(f"Error closing page: {exc}")
+                self._page = None
+            if self._context:
+                try:
+                    await self._context.close()
+                except Exception as exc:
+                    logger.warning(f"Error closing context: {exc}")
+                self._context = None
+            if self._browser:
+                try:
+                    await self._browser.close()
+                except Exception as exc:
+                    logger.warning(f"Error closing browser: {exc}")
+                self._browser = None
+            if self._playwright:
+                try:
+                    await self._playwright.stop()
+                except Exception as exc:
+                    logger.warning(f"Error stopping Playwright: {exc}")
+                self._playwright = None
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if self._loop is not None and current_loop is not self._loop:
+            await self._run_on_engine_loop(_close_inner())
+        else:
+            await _close_inner()
+
+        if self._loop is not None:
+            try:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            except Exception as exc:
+                logger.debug(f"Error submitting loop.stop(): {exc}")
+        if self._loop_thread is not None and threading.current_thread() is not self._loop_thread:
+            try:
+                self._loop_thread.join(timeout=5.0)
+            except Exception as exc:
+                logger.debug(f"Error joining loop thread: {exc}")
+        self._loop_thread = None
+        self._loop = None
+        self._loop_ready.clear()
 
     # ------------------------------------------------------------------+
     # RPA primitives                                                    #
     # ------------------------------------------------------------------+
     async def goto(self, url: str) -> None:
-        await self._ensure_page()
-        page = self._page
-        assert page is not None  # type narrowing
-
         async def _navigate() -> None:
+            await self._ensure_page()
+            page = self._page
+            assert page is not None  # type narrowing
             await page.goto(url, wait_until="load", timeout=self._timeout_ms)
             self._last_url = url
 
         await self.run_write(_navigate)
 
     async def click(self, selector: str, *, no_wait_after: bool = False) -> None:
-        await self._ensure_page()
-        page = self._page
-        assert page is not None  # type narrowing
-
         async def _click() -> None:
+            await self._ensure_page()
+            page = self._page
+            assert page is not None  # type narrowing
             # When clicking links that navigate off-site, Playwright will wait for navigation
             # unless no_wait_after=True is specified. Expose this to callers to avoid
             # environment-dependent delays (e.g., CI egress slowness).
@@ -399,21 +494,19 @@ class BrowserEngine(ServiceABC):
         await self.run_write(_click)
 
     async def fill(self, selector: str, text: str) -> None:
-        await self._ensure_page()
-        page = self._page
-        assert page is not None  # type narrowing
-
         async def _fill() -> None:
+            await self._ensure_page()
+            page = self._page
+            assert page is not None  # type narrowing
             await page.locator(selector).fill(text, timeout=self._timeout_ms)
 
         await self.run_write(_fill)
 
     async def upload(self, selector: str, file_path: Path) -> None:
-        await self._ensure_page()
-        page = self._page
-        assert page is not None  # type narrowing
-
         async def _upload() -> None:
+            await self._ensure_page()
+            page = self._page
+            assert page is not None  # type narrowing
             await page.locator(selector).set_input_files(str(file_path))
 
         await self.run_write(_upload)
@@ -423,25 +516,51 @@ class BrowserEngine(ServiceABC):
         selector: str,
         state: Literal["visible", "hidden", "attached", "detached"] = "visible",
     ) -> None:
-        await self._ensure_page()
-        page = self._page
-        assert page is not None  # type narrowing
-
         async def _wait() -> None:
+            await self._ensure_page()
+            page = self._page
+            assert page is not None  # type narrowing
             await page.locator(selector).wait_for(state=state, timeout=self._timeout_ms)
 
         await self.run_write(_wait)
 
     async def screenshot(self, path: str) -> str:
         """Take a screenshot of the current page and save to the specified path."""
-        await self._ensure_page()
+        import time as time_module
+
+        start_time = time_module.time()
+        logger.debug(f"screenshot() called for path={path}")
+
+        # Ensure the page exists (writer path) before taking a read-only screenshot
+        async def _ensure() -> None:
+            ensure_start = time_module.time()
+            logger.debug("screenshot: calling _ensure_page()")
+            await self._ensure_page()
+            ensure_elapsed = time_module.time() - ensure_start
+            logger.debug(f"screenshot: _ensure_page() took {ensure_elapsed:.2f}s")
+
+        write_start = time_module.time()
+        await self.run_write(_ensure)
+        write_elapsed = time_module.time() - write_start
+        logger.debug(f"screenshot: run_write(_ensure) took {write_elapsed:.2f}s")
+
         page = self._page
         assert page is not None  # type narrowing
 
         async def _take_screenshot() -> None:
+            shot_start = time_module.time()
+            logger.debug("screenshot: calling page.screenshot()")
             await page.screenshot(path=path)
+            shot_elapsed = time_module.time() - shot_start
+            logger.debug(f"screenshot: page.screenshot() took {shot_elapsed:.2f}s")
 
+        read_start = time_module.time()
         await self.run_read(_take_screenshot)
+        read_elapsed = time_module.time() - read_start
+        logger.debug(f"screenshot: run_read(_take_screenshot) took {read_elapsed:.2f}s")
+
+        total_elapsed = time_module.time() - start_time
+        logger.debug(f"screenshot() completed in {total_elapsed:.2f}s")
         return path
 
     async def health_check(self) -> bool:
@@ -456,7 +575,7 @@ class BrowserEngine(ServiceABC):
 
         return await self.run_write(_check)
 
-    async def status(self) -> dict[str, Any]:
+    async def status(self) -> BrowserEngineStatus:
         """Get the current status of the browser engine.
 
         Returns a dictionary with browser state information.
@@ -466,7 +585,7 @@ class BrowserEngine(ServiceABC):
             # Perform health check first
             is_healthy = await self.health_check()
 
-            async def _get_status() -> dict[str, Any]:
+            async def _get_status() -> BrowserEngineStatus:
                 return {
                     "worker_id": self._worker_id,
                     "status": "healthy" if is_healthy else "unhealthy",
@@ -487,4 +606,6 @@ class BrowserEngine(ServiceABC):
                 "browser_active": False,
                 "page_active": False,
                 "sessions": 0,
+                "url": None,
+                "uptime": 0.0,
             }

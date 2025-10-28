@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import json
@@ -7,36 +9,32 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from types import TracebackType
-from typing import Any, Awaitable, Callable, Dict, Literal, Optional, Union
+from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Protocol, TypedDict, TypeGuard
 
-try:
+if TYPE_CHECKING:  # Only for type-checkers; avoid hard runtime dependency
     from playwright.async_api import Page, WebSocket
-except ImportError:
-    Page = None  # type: ignore
-    WebSocket = None  # type: ignore
 
 __all__ = ["WSFrameLog", "WSLogger", "jsonl_sink", "InMemorySink"]
+
+
+class WSParsedPayload(TypedDict, total=False):
+    """Structured interpretation of a WebSocket frame payload.
+
+    Optional fields allow protocol-specific decoders to fill what they know
+    without enforcing a single schema.
+    """
+
+    kind: Literal["text", "binary", "json"]
+    text: str
+    json: object
+    size: int
+    opcode: int
 
 
 @dataclass
 class WSFrameLog:
     """
     A single WebSocket frame log entry for AI/ML replay and analytics.
-
-    Fields:
-        - timestamp: Absolute wall-clock time (UTC seconds)
-        - rel_ts: Time since episode start (seconds, float)
-        - direction: "RX" (from server), "TX" (to server), or None for events
-        - payload: Raw binary payload (base64-encoded in JSONL)
-        - browser_id: A unique ID for the browser instance.
-        - session_id, episode_id: UUIDs for grouping
-        - websocket_id: A unique ID for the WebSocket connection.
-        - websocket_url: The URL of the WebSocket connection.
-        - parsed: Optionally filled by protocol decoders (None if not parsed).
-        - protocol_version: Version of the protocol decoder (e.g., git commit).
-        - experiment_id: A user-specified ID for large-scale experiments.
-        - event: Special event marker (e.g., "end_of_episode").
-        - extra: Dict for future extensibility.
     """
 
     timestamp: float
@@ -48,11 +46,11 @@ class WSFrameLog:
     episode_id: str
     websocket_id: str | None = None
     websocket_url: str | None = None
-    parsed: dict[str, Any] | None = None
+    parsed: WSParsedPayload | None = None
     protocol_version: str | None = None
     experiment_id: str | None = None
     event: str | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, object] = field(default_factory=dict)
 
     def to_json(self) -> str:
         d = asdict(self)
@@ -60,21 +58,28 @@ class WSFrameLog:
         return json.dumps(d, separators=(",", ":"), ensure_ascii=False)
 
 
-class WSLogger:
-    """
-    Robust, async WebSocket frame logger for gameplay, AI, and analytics.
+class _HasBody(Protocol):
+    body: object
 
-    Usage:
-        async with WSLogger(session_id="...", episode_id="...", sink=await jsonl_sink(...)) as logger:
-            await logger.log_frame(...)
-            ...
-        # Or, manually call close()
+
+class _Gettable(Protocol):
+    def get(self, key: str, default: object) -> object: ...
+
+
+def _has_body(obj: object) -> TypeGuard[_HasBody]:
+    return hasattr(obj, "body")
+
+
+def _has_get(obj: object) -> TypeGuard[_Gettable]:
+    return hasattr(obj, "get")
+
+
+class WSLogger:
+    """Async WebSocket frame logger with JSONL sinks.
 
     - Attach to Playwright Page via `await logger.attach(page)`
     - Use log_frame() for manual RX/TX logging
-    - Sink is any async callable: `Callable[[WSFrameLog], Awaitable[None]]` with a `close()` method (async, even if no-op)
-    - The `parsed` field is for protocol decoders: fill it with structured state/action dicts as available; otherwise leave None.
-    - For future high-throughput ML, consider swapping out base64/JSONL for binary/Parquet (see TODOs).
+    - Sink is any async callable: `Callable[[WSFrameLog], Awaitable[None]]`
     """
 
     def __init__(
@@ -96,9 +101,9 @@ class WSLogger:
         self._lock = asyncio.Lock()
         self._start_ts = time.time()
         self._websocket_ids: dict[str, str] = {}
+        self._errors: list[tuple[float, Exception, WSFrameLog]] = []
 
-    async def __aenter__(self) -> "WSLogger":
-        # Log experiment_start synchronously when entering context
+    async def __aenter__(self) -> WSLogger:  # noqa: D401
         await self.log_event("experiment_start")
         return self
 
@@ -116,9 +121,9 @@ class WSLogger:
         payload: bytes,
         websocket_id: str | None = None,
         websocket_url: str | None = None,
-        parsed: dict[str, Any] | None = None,
+        parsed: WSParsedPayload | None = None,
         event: str | None = None,
-        extra: dict[str, Any] | None = None,
+        extra: dict[str, object] | None = None,
     ) -> None:
         if self._closed:
             return
@@ -144,11 +149,7 @@ class WSLogger:
             try:
                 await self._sink(entry)
             except Exception as exc:
-                import logging
-
-                logging.error(f"WSLogger sink error: {exc}")
-                if not hasattr(self, "_errors"):
-                    self._errors = []
+                logging.error("WSLogger sink error: %r", exc)
                 self._errors.append((now, exc, entry))
 
     async def log_event(
@@ -156,10 +157,9 @@ class WSLogger:
         event: str,
         websocket_id: str | None = None,
         websocket_url: str | None = None,
-        extra: dict[str, Any] | None = None,
+        extra: dict[str, object] | None = None,
         direction: Literal["RX", "TX"] | None = None,
     ) -> None:
-        # Always set payload=b"" for event records (no frame data)
         await self.log_frame(
             direction=direction,
             payload=b"",
@@ -170,14 +170,6 @@ class WSLogger:
         )
 
     async def attach(self, page: Page) -> None:
-        """
-        Attach the logger to a Playwright Page to automatically log WebSocket frames.
-        """
-        if Page is None:
-            import logging
-
-            logging.warning("Playwright is not installed; WSLogger.attach() will not function.")
-            return
         if not hasattr(page, "on"):
             raise RuntimeError(
                 "Page object does not support event hooks (is it a Playwright Page?)"
@@ -188,10 +180,25 @@ class WSLogger:
             websocket_url = ws.url
             self._websocket_ids[websocket_id] = websocket_url
 
-            async def on_frame(direction: Literal["RX", "TX"], frame: Any) -> None:
+            async def on_frame(direction: Literal["RX", "TX"], frame: object) -> None:
+                if _has_body(frame):
+                    payload_obj = frame.body
+                elif _has_get(frame):
+                    try:
+                        payload_obj = frame.get("payload", b"")
+                    except Exception:
+                        payload_obj = b""
+                else:
+                    payload_obj = b""
+                if isinstance(payload_obj, bytes | bytearray):
+                    payload = bytes(payload_obj)
+                elif isinstance(payload_obj, str):
+                    payload = payload_obj.encode("utf-8")
+                else:
+                    payload = b""
                 await self.log_frame(
                     direction=direction,
-                    payload=frame.body,
+                    payload=payload,
                     websocket_id=websocket_id,
                     websocket_url=websocket_url,
                 )
@@ -210,28 +217,17 @@ class WSLogger:
 
         page.on("websocket", _on_ws)
 
-    async def _on_ws_frame(self, direction: Literal["RX", "TX"], frame: Any) -> None:
-        payload = frame.get("payload", b"")
-        if isinstance(payload, str):
-            payload = payload.encode("utf-8")
-        await self.log_frame(direction=direction, payload=payload)
-
     async def close(self) -> None:
         if not self._closed:
             await self.log_event("experiment_stop")
             self._closed = True
             if self._sink is not None and hasattr(self._sink, "close"):
-                # The sink's close is dynamically attached, so we can call it.
                 await self._sink.close()
-
-
-# --- Sinks ---
 
 
 async def jsonl_sink(
     filepath: str, gzip_compress: bool = False
 ) -> Callable[[WSFrameLog], Awaitable[None]]:
-    # Ensure the directory exists before trying to open the file
     path = pathlib.Path(filepath)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -251,7 +247,6 @@ async def jsonl_sink(
     async def close() -> None:
         await asyncio.to_thread(f.close)
 
-    # Dynamically attach the close method to the sink function
     setattr(sink, "close", close)
     return sink
 
@@ -267,10 +262,3 @@ class InMemorySink:
 
     async def close(self) -> None:
         pass
-
-
-# --- Example usage in tests or scripts ---
-# async def example():
-#     logger = WSLogger(sink=await jsonl_sink("session.jsonl"))
-#     await logger.log_frame(direction="RX", payload=b"...", parsed=None)
-#     await logger.close()
