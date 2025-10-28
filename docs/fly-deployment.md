@@ -13,9 +13,11 @@ This guide covers deploying the Swarm distributed system to Fly.io with Celery w
 Before deploying, set these secrets using `fly secrets set`:
 
 ```bash
-# Redis connection (Upstash or other Redis provider)
-fly secrets set REDIS__URL="redis://default:your-password@your-redis-host:6379/0"
-fly secrets set CELERY_BROKER_URLS="redis://default:your-password@your-redis-host:6379/0"
+# Redis connection (via HAProxy proxy app). See haproxy-deployment.md
+# Point application to the proxy's internal address on port 6380
+fly secrets set REDIS__URL="redis://default:your-password@swarm-redis-proxy.internal:6380/0"
+# Celery can use the same surface (or omit to fall back to REDIS__URL)
+fly secrets set CELERY_BROKER_URLS="redis://default:your-password@swarm-redis-proxy.internal:6380/0"
 
 # Discord bot token
 fly secrets set DISCORD_TOKEN="your-discord-bot-token"
@@ -38,7 +40,7 @@ fly secrets set AUTHORIZED_USERS='["user1", "user2"]'
 2. **Scale processes:**
    ```bash
    # Set initial process counts
-   fly scale count swarm=1 worker=2 flower=1 autoscaler=1
+   fly scale count swarm=1 worker=2 autoscaler=1
    
    # Or scale specific processes
    fly scale count worker=5  # Scale workers based on load
@@ -54,13 +56,13 @@ fly secrets set AUTHORIZED_USERS='["user1", "user2"]'
 
 - **swarm**: Main Discord bot process (1 instance)
 - **worker**: Celery workers for browser automation (scale as needed)
-- **flower**: Celery monitoring UI (optional, 1 instance)
+- [removed] Flower (Celery monitoring UI)
 - **autoscaler**: Automatically scales workers based on queue depth (1 instance)
 
 ## Monitoring
 
 1. **Metrics**: Available at internal endpoint on port 9200
-2. **Flower UI**: If enabled, access via `fly proxy 5555`
+2. [removed] Flower UI
 3. **Logs**: Stream with `fly logs` or view in Fly dashboard
 
 ## Troubleshooting
@@ -71,6 +73,6 @@ fly secrets set AUTHORIZED_USERS='["user1", "user2"]'
 
 ## Cost Optimization
 
-- Disable Flower in production to save resources (comment out in fly.toml)
+- Flower is removed from fly.toml in the default configuration
 - Use shared-cpu-1x for light workloads
 - Scale workers down during off-peak hours

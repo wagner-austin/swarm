@@ -112,7 +112,7 @@ from swarm.distributed.protocols import ScalingBackend, ScalingDecision
 2. **Check DI usage**: `grep -r "scaling_service" swarm/`
 3. **Run tests**: `make test`
 4. **Check metrics**: `curl localhost:9200/metrics`
-5. **Verify autoscaler**: `docker-compose logs autoscaler`
+5. **Verify autoscaler**: `docker compose logs autoscaler`
 
 ## Benefits After Cleanup
 

@@ -31,7 +31,7 @@ This guide helps you set up comprehensive monitoring for Swarm's Celery workers 
 
 ```bash
 # Check that all monitoring services are up
-docker-compose ps
+docker compose ps
 
 # You should see:
 # - celery-exporter (port 9808)
@@ -154,23 +154,23 @@ groups:
 ## Troubleshooting
 
 ### No metrics showing up?
-1. Check celery-exporter logs: `docker-compose logs celery-exporter`
+1. Check celery-exporter logs: `docker compose logs celery-exporter`
 2. Verify Prometheus can reach exporter: http://localhost:9090/targets
-3. Check Redis connection: `docker-compose logs celery-exporter | grep redis`
+3. Check Redis connection: `docker compose logs celery-exporter | grep redis`
 
 ### Workers not visible?
 - Celery workers register when they process tasks
 - Send a test task to make them appear
-- Check Flower UI (if still running): http://localhost:5555
+- Check Grafana dashboards and Prometheus metrics; Flower is no longer part of the default stack.
 
 ### Logs not appearing in Loki?
-1. Check Alloy is running: `docker-compose logs alloy`
-2. Verify JSON logging: `docker-compose logs swarm | head`
+1. Check Alloy is running: `docker compose logs alloy`
+2. Verify JSON logging: `docker compose logs swarm | Select-Object -First 10`
 3. Check Loki data source in Grafana settings
 
 ## Best Practices
 
-1. **Keep Flower for Development**
+1. [removed] Flower has been removed from the default deployment; use Grafana/Prometheus or logs for monitoring.
    - Great for debugging task chains
    - Disable in production (memory/performance issues)
 

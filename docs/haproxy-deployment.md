@@ -27,7 +27,7 @@ The swarm project uses a separate HAProxy Fly app (`swarm-redis-proxy`) to handl
 fly launch --name swarm-redis-proxy --no-deploy --config fly.redis-proxy.toml
 
 # Set the Redis URLs secret
-fly secrets set CELERY_BROKER_URLS="redis://default:pass@upstash.io:6379;redis://default:pass@backup.redis.com:6379" -a swarm-redis-proxy
+fly secrets set CELERY_BROKER_URLS="rediss://default:pass@upstash-host.upstash.io:6379;redis://default:pass@backup.redis.com:6379" -a swarm-redis-proxy
 ```
 
 ### 2. Deploy HAProxy (Must be done BEFORE main app)
@@ -43,7 +43,7 @@ fly deploy -a swarm-redis-proxy -c fly.redis-proxy.toml
 # Set Redis connection to point to the proxy
 fly secrets set \
   REDIS__URL="redis://default:yourpassword@swarm-redis-proxy.internal:6380/0" \
-  CELERY_BROKER_URL="redis://default:yourpassword@swarm-redis-proxy.internal:6380/0" \
+  CELERY_BROKER_URLS="redis://default:yourpassword@swarm-redis-proxy.internal:6380/0" \
   -a corvis-ai
 ```
 

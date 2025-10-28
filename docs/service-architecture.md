@@ -32,7 +32,7 @@ These are started when the main Swarm application launches.
 | **Grafana** | `grafana/grafana` | 3000 | Metrics visualization |
 | **Loki** | `grafana/loki` | 3100 | Log aggregation |
 | **Alloy** | `grafana/alloy` | 12345 | Log collection from Docker |
-| **Flower** | `mher/flower:2.0` | 5555 | Celery task monitoring |
+| [removed] Flower |  |  |  |
 | **Celery-Exporter** | `danihodovic/celery-exporter` | 9808 | Celery metrics for Prometheus |
 | **Autoscaler** | Custom image | - | Scales workers based on queue depth |
 
@@ -48,7 +48,7 @@ These are started when the main Swarm application launches.
 
 ```mermaid
 graph TD
-    A[docker-compose up] --> B[Infrastructure Services]
+    A[docker compose up] --> B[Infrastructure Services]
     B --> B1[Redis]
     B --> B2[HAProxy]
     B --> B3[Prometheus]
@@ -64,7 +64,7 @@ graph TD
     C3 --> C6[Load Cogs]
     
     A --> D[Autoscaler]
-    D --> D1[Monitor Flower API]
+    D --> D1[Prometheus/Grafana]
     D --> D2[Create Workers]
     
     D2 --> E[Worker Containers]
@@ -106,7 +106,7 @@ Located in `swarm/core/containers.py`:
 ### Message Patterns
 1. **Redis Pub/Sub**: Not currently used
 2. **Celery Tasks**: Primary async communication
-3. **HTTP APIs**: Metrics endpoints, Flower API
+3. **HTTP APIs**: Metrics endpoints
 4. **Discord Events**: User interactions
 
 ### Data Stores
@@ -123,7 +123,7 @@ Located in `swarm/core/containers.py`:
 ### Health Check Endpoints
 - Swarm main: `http://localhost:9200/metrics`
 - Workers: `http://localhost:9100/metrics`
-- Flower: `http://localhost:5555/healthcheck`
+- Celery Exporter: `http://localhost:9808/health`
 - Celery-Exporter: `http://localhost:9808/health`
 - Prometheus: `http://localhost:9090/-/ready`
 - Loki: `http://localhost:3100/ready`
