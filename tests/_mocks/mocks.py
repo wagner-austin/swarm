@@ -17,11 +17,11 @@ class MockMessage:
     def __init__(self, content: str | None = None, **kwargs: Any):
         self.content = content
         self.kwargs = kwargs  # Store original send kwargs
-        self.edit_history: list[dict[str, Any]] = []  # To track edits, if needed for assertions
+        self.edit_history: list[dict[str, object]] = []  # To track edits, if needed for assertions
 
     async def edit(self, content: str | None = None, **kwargs: Any) -> "MockMessage":
         """Mock the edit method of a discord.Message."""
-        edit_details = {}
+        edit_details: dict[str, object] = {}
         if content is not None:
             self.content = content
             edit_details["content"] = content

@@ -72,8 +72,8 @@ class FakeInteractionResponse:
     def __init__(self) -> None:
         self.deferred = False
         self.sent = False
-        self.defer_calls: list[dict[str, Any]] = []
-        self.send_message_calls: list[dict[str, Any]] = []
+        self.defer_calls: list[dict[str, object]] = []
+        self.send_message_calls: list[dict[str, object]] = []
 
     async def defer(self, ephemeral: bool = False, thinking: bool = False) -> None:
         """Simulate deferring the response."""
@@ -100,7 +100,7 @@ class FakeFollowup:
     """Fake Discord Followup for testing."""
 
     def __init__(self) -> None:
-        self.send_calls: list[dict[str, Any]] = []
+        self.send_calls: list[dict[str, object]] = []
 
     async def send(
         self,
@@ -158,7 +158,7 @@ class FakeInteraction:
         self.followup = FakeFollowup()
 
         # Track calls
-        self.call_history: list[tuple[str, dict[str, Any]]] = []
+        self.call_history: list[tuple[str, dict[str, object]]] = []
 
     @property
     def created_at(self) -> float:
@@ -197,7 +197,7 @@ class FakeInteraction:
             + len(self.followup.send_calls)
         )
 
-    def get_last_response(self) -> dict[str, Any] | None:
+    def get_last_response(self) -> dict[str, object] | None:
         """Get the last response sent (from any method)."""
         all_responses = []
 

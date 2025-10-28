@@ -30,7 +30,7 @@ class TestScalingBackendProtocol:
         ],
     )
     def test_backend_implements_protocol(
-        self, backend_class: type[ScalingBackend], kwargs: dict[str, Any]
+        self, backend_class: type[ScalingBackend], kwargs: dict[str, object]
     ) -> None:
         """Test that backend classes implement the protocol."""
         backend = backend_class(**kwargs)

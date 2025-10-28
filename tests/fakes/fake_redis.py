@@ -9,7 +9,14 @@ actual Redis infrastructure, enabling fast and reliable unit tests.
 import asyncio
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, TypedDict, cast
+
+from swarm.infra.redis_stream_utils import StreamGroupInfo
+
+
+class StreamEntry(TypedDict):
+    id: str
+    fields: dict[str, object]
 
 
 class FakeRedisClient:
@@ -23,14 +30,19 @@ class FakeRedisClient:
     ) -> None:
         self.should_fail = should_fail
         self.fail_message = fail_message
-        self.data: dict[str, Any] = {}
+        self.data: dict[str, object] = {}
         self.hashes: dict[str, dict[bytes, bytes]] = defaultdict(dict)
         self.sets: dict[str, set[bytes]] = defaultdict(set)
-        self.streams: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+        class StreamEntry(TypedDict):
+            id: str
+            fields: dict[str, object]
+
+        self.streams: dict[str, list[StreamEntry]] = defaultdict(list)
         self.stream_groups: dict[str, set[str]] = defaultdict(set)
         self.lists: dict[str, list[str]] = defaultdict(list)
         self.expiry: dict[str, float] = {}
-        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, object]]] = []
 
     def _record_call(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         """Record method calls for test verification."""
@@ -68,10 +80,9 @@ class FakeRedisClient:
             import fnmatch
 
             all_keys = []
-            for storage in [self.data, self.hashes, self.sets]:
-                for key in storage.keys():
-                    if fnmatch.fnmatch(key, pattern):
-                        all_keys.append(key)
+            for key in list(self.data.keys()) + list(self.hashes.keys()) + list(self.sets.keys()):
+                if fnmatch.fnmatch(key, pattern):
+                    all_keys.append(key)
 
         # Filter out expired keys and convert to bytes
         result = []
@@ -91,8 +102,10 @@ class FakeRedisClient:
 
         # Get all keys
         all_keys: list[str] = []
-        for storage in [self.data, self.hashes, self.sets, self.streams]:
-            all_keys.extend(storage.keys())
+        all_keys += list(self.data.keys())
+        all_keys += list(self.hashes.keys())
+        all_keys += list(self.sets.keys())
+        all_keys += list(self.streams.keys())
 
         # Apply pattern matching
         if match != "*":
@@ -196,7 +209,7 @@ class FakeRedisClient:
             self.streams[stream] = []
 
     async def xadd(
-        self, stream: str, fields: dict[str, Any], id: str = "*", maxlen: int | None = None
+        self, stream: str, fields: dict[str, object], id: str = "*", maxlen: int | None = None
     ) -> str:
         """Simulate Redis XADD command."""
         self._record_call("xadd", stream, fields, id=id)
@@ -209,7 +222,7 @@ class FakeRedisClient:
         if id == "*":
             id = f"{int(time.time() * 1000)}-0"
 
-        self.streams[stream].append({"id": id, "fields": fields})
+        self.streams[stream].append(cast("StreamEntry", {"id": id, "fields": fields}))
 
         # Trim stream if maxlen is specified
         if maxlen is not None and len(self.streams[stream]) > maxlen:
@@ -256,9 +269,10 @@ class FakeRedisClient:
             return []
 
         # Return all entries as tuples of (id, fields)
-        result = []
+        result: list[tuple[str, dict[str, str]]] = []
         for entry in self.streams[stream]:
-            fields_as_str = {k: str(v) for k, v in entry["fields"].items()}
+            fields = entry["fields"]
+            fields_as_str = {k: str(v) for k, v in fields.items()}
             result.append((entry["id"], fields_as_str))
         return result
 
@@ -310,7 +324,7 @@ class FakeRedisClient:
         """Check if a method was called during testing."""
         return any(call[0] == method_name for call in self.call_history)
 
-    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, Any]] | None:
+    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, object]] | None:
         """Get the arguments from the last call to a method."""
         for call in reversed(self.call_history):
             if call[0] == method_name:
@@ -340,7 +354,7 @@ class FakeRedisClient:
         # Return empty pending info for now
         return [0, None, None, []]
 
-    async def xinfo_groups(self, stream: str) -> list[dict[str, Any]]:
+    async def xinfo_groups(self, stream: str) -> list[StreamGroupInfo]:
         """Simulate Redis XINFO GROUPS command."""
         self._record_call("xinfo_groups", stream)
         if self.should_fail:
@@ -348,7 +362,12 @@ class FakeRedisClient:
         # Return basic group info
         if stream in self.stream_groups:
             return [
-                {"name": group, "consumers": 0, "pending": 0, "last-delivered-id": "0-0"}
+                {
+                    "name": group,
+                    "consumers": 0,
+                    "pending": 0,
+                    "last-delivered-id": "0-0",
+                }
                 for group in self.stream_groups[stream]
             ]
         return []

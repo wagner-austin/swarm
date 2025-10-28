@@ -2,18 +2,39 @@
 Shared utilities for integration tests.
 
 Provides consistent service availability checking and skip messages.
+Also centralizes selectors to avoid string drift across tests.
 """
 
 import asyncio
 import os
 import subprocess
-from typing import Any
+import time
+from collections.abc import Callable
+from typing import Any, Final, NotRequired, TypedDict, TypeVar
+from urllib.parse import urlparse
 
 import aiohttp
 import pytest
 import redis.asyncio as redis
 
 from swarm.infra import async_close_redis
+
+
+def _get_env_redis_password() -> str | None:
+    """Resolve Redis password from REDIS_PASSWORD or embedded in REDIS_URL."""
+    pw = os.getenv("REDIS_PASSWORD")
+    if pw:
+        return pw
+    url = os.getenv("REDIS_URL")
+    if url:
+        try:
+            parsed = urlparse(url)
+            # urlparse exposes .username/.password for URLs with creds
+            if parsed.password:
+                return parsed.password
+        except Exception:
+            pass
+    return None
 
 
 async def check_haproxy_redis_connection(host: str, port: int, password: str | None = None) -> bool:
@@ -23,9 +44,10 @@ async def check_haproxy_redis_connection(host: str, port: int, password: str | N
         print(f"[DEBUG] Checking HAProxy Redis at {host}:{port}")
 
         # Build URL with ACL credentials so AUTH is sent in the first packet
+        effective_pw = password or _get_env_redis_password()
         url = (
-            f"redis://default:{password}@{host}:{port}/0"
-            if password
+            f"redis://default:{effective_pw}@{host}:{port}/0"
+            if effective_pw
             else f"redis://{host}:{port}/0"
         )
         client = redis.from_url(url, decode_responses=True, socket_connect_timeout=2)
@@ -46,8 +68,9 @@ async def check_redis_connection(host: str, port: int, password: str | None = No
     """Check if Redis is accessible."""
     try:
         # Build the URL with proper authentication format
-        if password:
-            url = f"redis://default:{password}@{host}:{port}/0"
+        effective_pw = password or _get_env_redis_password()
+        if effective_pw:
+            url = f"redis://default:{effective_pw}@{host}:{port}/0"
         else:
             url = f"redis://{host}:{port}/0"
 
@@ -68,9 +91,28 @@ async def check_redis_connection(host: str, port: int, password: str | None = No
         return False
 
 
-async def check_haproxy_stats(host: str = "localhost", port: int = 8080) -> dict[str, Any]:
+class HaproxyBackendInfo(TypedDict):
+    status: str
+    check_status: str
+
+
+class HaproxyStats(TypedDict, total=False):
+    haproxy_up: bool
+    stats_url: str
+    upstash_status: str
+    local_status: str
+    failover_active: bool
+    active_backend: str
+    # dynamic backends like redis_0/redis_1
+    redis_0: HaproxyBackendInfo
+    redis_1: HaproxyBackendInfo
+
+
+async def check_haproxy_stats(
+    host: str = "localhost", port: int = 8080
+) -> dict[str, HaproxyBackendInfo]:
     """Check HAProxy stats to see backend status."""
-    stats: dict[str, Any] = {}
+    stats: dict[str, HaproxyBackendInfo] = {}
     try:
         print(f"[DEBUG] Checking HAProxy stats at {host}:{port}")
         async with aiohttp.ClientSession() as session:
@@ -113,22 +155,7 @@ async def check_haproxy_stats(host: str = "localhost", port: int = 8080) -> dict
     return stats
 
 
-async def check_flower_api(host: str = "localhost", port: int = 5555) -> bool:
-    """Check if Flower API is responsive."""
-    try:
-        print(f"[DEBUG] Checking Flower API at {host}:{port}")
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"http://{host}:{port}/api/workers") as resp:
-                if resp.status == 200:
-                    await resp.json()
-                    print("[DEBUG] [OK] Flower API is responsive")
-                    return True
-                else:
-                    print(f"[DEBUG] [FAIL] Flower API returned status {resp.status}")
-    except Exception as e:
-        print(f"[DEBUG] [FAIL] Failed to connect to Flower API: {e}")
-
-    return False
+# Flower removed from required checks; keep function out to avoid hard dependency
 
 
 def is_running_in_docker() -> bool:
@@ -165,7 +192,6 @@ async def check_docker_services_running() -> tuple[bool, str]:
         "Local Redis (6379)": await check_redis_connection("localhost", 6379, redis_password),
         "HAProxy Redis (6380)": haproxy_ok,
         "HAProxy Stats (8080)": bool(await check_haproxy_stats()),
-        "Flower API (5555)": await check_flower_api(),
     }
 
     all_running = all(checks.values())
@@ -192,3 +218,64 @@ def skip_if_no_docker_daemon(reason: str | None = None) -> pytest.MarkDecorator:
     if reason is None:
         reason = "Docker daemon not available"
     return pytest.mark.skipif(not check_docker_daemon(), reason=reason)
+
+
+# Centralized selectors for example.com to avoid drift
+EXAMPLE_LINK_SELECTOR: Final[str] = 'a[href*="iana"]'
+
+# Generic polling utilities with strict typing
+_T = TypeVar("_T")
+
+
+def poll_until(
+    condition: Callable[[], _T | None],
+    *,
+    timeout: float = 5.0,
+    interval: float = 0.1,
+    description: str = "condition",
+) -> _T:
+    """Poll until condition returns non-None value or timeout.
+
+    Raises TimeoutError with a descriptive message on timeout.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = condition()
+        if result is not None:
+            return result
+        time.sleep(interval)
+    raise TimeoutError(f"Timeout waiting for {description} after {timeout}s.")
+
+
+def poll_until_true(
+    condition: Callable[[], bool],
+    *,
+    timeout: float = 5.0,
+    interval: float = 0.1,
+    description: str = "condition",
+) -> None:
+    """Poll until condition returns True or timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if condition():
+            return
+        time.sleep(interval)
+    raise TimeoutError(f"Timeout waiting for {description} after {timeout}s.")
+
+
+def poll_until_count(
+    get_count: Callable[[], int],
+    *,
+    expected: int,
+    timeout: float = 5.0,
+    interval: float = 0.1,
+    description: str = "count",
+) -> int:
+    """Poll until count reaches expected value or timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        count = get_count()
+        if count == expected:
+            return count
+        time.sleep(interval)
+    raise TimeoutError(f"Timeout waiting for {description}={expected} after {timeout}s.")

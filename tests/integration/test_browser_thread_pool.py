@@ -8,14 +8,15 @@ NOTE: This test requires Docker services to be running:
 """
 
 import asyncio
+import os
 import time
 from typing import Any
 
 import pytest
+import redis
 from celery.app.base import Celery
-from celery.app.control import Inspect
 
-from tests.integration.utils import check_docker_services_running
+from tests.integration.utils import EXAMPLE_LINK_SELECTOR, check_docker_services_running
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -32,29 +33,39 @@ def verify_docker_services() -> None:
 
 
 def _wait_for_browser_worker(timeout: float = 20.0) -> None:
-    """Block until at least one browser worker is ready to accept tasks."""
-    from swarm.celery_app import app as celery_app
-
+    """Block until at least one browser worker is ready via heartbeat in DB 0."""
     deadline = time.time() + timeout
+    pw = os.getenv("REDIS_PASSWORD", "")
+    redis_url = f"redis://default:{pw}@localhost:6380/0" if pw else "redis://localhost:6380/0"
+    client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2)
 
-    while time.time() < deadline:
-        try:
-            # Use Celery's typed Inspect helper instead of Flower
-            inspector = Inspect(destination=None, app=celery_app)
-            active_queues = inspector.active_queues()
-            if active_queues:
-                # Check if any worker is handling browser queue
-                for worker_name, queues in active_queues.items():
-                    if any(q.get("name") == "browser" for q in queues):
-                        print(f"Found browser worker: {worker_name}")
-                        # Give it a moment to fully initialize
-                        time.sleep(2.0)
+    try:
+        while time.time() < deadline:
+            try:
+                now = time.time()
+                fresh_seconds = 90.0
+                for key in client.scan_iter(match="worker:heartbeat:browser:*"):
+                    data = client.hgetall(key)
+                    ts_str = data.get("timestamp")
+                    if not ts_str:
+                        continue
+                    try:
+                        ts = float(ts_str)
+                    except Exception:
+                        continue
+                    if (now - ts) <= fresh_seconds:
+                        wid = data.get("worker_id") or key.rsplit(":", 1)[-1]
+                        print(f"Found browser worker (heartbeat): {wid}")
+                        time.sleep(1.0)
                         return
-        except Exception as e:
-            # Workers might not be ready yet, continue waiting
-            print(f"Waiting for workers: {e}")
+            except Exception as e:
+                print(f"Waiting for heartbeat worker: {e}")
+            time.sleep(1.0)
+    finally:
+        try:
+            client.close()
+        except Exception:
             pass
-        time.sleep(1.0)
     raise RuntimeError("No browser worker became available within timeout")
 
 
@@ -140,15 +151,15 @@ def test_browser_click_thread_pool() -> None:
         # Click on the "More information..." link that exists on example.com
         # Using text selector for reliability
         # Wait for the element to be visible to reduce CI timing flakes
-        wait_for.delay(session_id=session_id, selector='a:has-text("More information")').get(timeout=60)
+        wait_for.delay(session_id=session_id, selector=EXAMPLE_LINK_SELECTOR).get(timeout=60)
         click_res = click.delay(
             session_id=session_id,
-            selector='a:has-text("More information")',
+            selector=EXAMPLE_LINK_SELECTOR,
             no_wait_after=True,
         ).get(timeout=30)
 
         assert click_res["success"] is True
-        assert click_res["selector"] == 'a:has-text("More information")'
+        assert click_res["selector"] == EXAMPLE_LINK_SELECTOR
     finally:
         # Always cleanup the browser engine to prevent resource leaks
         cleanup.delay(session_id=session_id).get(timeout=10)

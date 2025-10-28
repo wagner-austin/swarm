@@ -60,9 +60,6 @@ def test_crud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     importlib.reload(adm)
 
-    # Patch internal _CUSTOM_DIR used by adm helper (for safety)
-    adm._CUSTOM_DIR = tmp_path  # type: ignore[attr-defined]
-
     # Simulate `/persona add` via helper
     adm._write_yaml("foo", {"prompt": "bar", "allowed_users": None})
 

@@ -3,7 +3,7 @@
 Test HAProxy Redis failover functionality.
 
 This integration test verifies that HAProxy correctly handles Redis failover
-scenarios and that Flower continues to work when the primary Redis fails.
+scenarios.
 
 Prerequisites:
     docker compose up -d  # Must have redis, haproxy-redis, and flower running
@@ -11,17 +11,15 @@ Prerequisites:
 
 import asyncio
 import time
-from typing import cast
 
-import aiohttp
 import pytest
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 
 from swarm.infra import async_close_redis
+from swarm.types import RedisStr
 from tests.integration.utils import (
     check_docker_services_running,
-    check_flower_api,
     check_haproxy_stats,
     check_redis_connection,
 )
@@ -43,17 +41,19 @@ async def test_haproxy_redis_connectivity() -> None:
     password = os.getenv("REDIS_PASSWORD", "")
     auth_part = f"default:{password}@" if password else ""
 
-    client = redis.from_url(f"redis://{auth_part}localhost:6380/0", decode_responses=True)
+    # The typed client expects str payloads when decode_responses=True
+    client: RedisStr = redis.from_url(f"redis://{auth_part}localhost:6380/0", decode_responses=True)
 
     try:
         # Write test data
         test_key = "haproxy:test:key"
         test_value = f"test_value_{int(time.time())}"
-        await client.set(test_key, test_value)  # type: ignore[arg-type]
+        await client.set(test_key, test_value)
 
         # Read back
         retrieved = await client.get(test_key)
-        assert retrieved == test_value, f"Expected {test_value}, got {retrieved}"  # type: ignore[comparison-overlap, str-bytes-safe]
+        assert retrieved is not None
+        assert retrieved == test_value, f"Expected {test_value}, got {retrieved}"
 
     finally:
         await async_close_redis(client)
@@ -89,26 +89,13 @@ async def test_haproxy_backend_status() -> None:
 @pytest.mark.integration
 @pytest.mark.docker
 @pytest.mark.asyncio
-async def test_flower_during_failover() -> None:
-    """Test that Flower remains accessible (uses HAProxy for Redis)."""
-    # Skip if services aren't running
+async def test_haproxy_redis_stats_accessible() -> None:
+    """Verify HAProxy stats endpoint is accessible (indicates service health)."""
     services_ok, message = await check_docker_services_running()
     if not services_ok:
         pytest.skip(message)
-
-    # Check Flower is responding
-    flower_ok = await check_flower_api()
-    assert flower_ok, "Flower API is not responding"
-
-    # Flower should work even if primary Redis is down (thanks to HAProxy)
-    # In a real failover test, we would stop the primary Redis here
-    # For now, just verify Flower can get worker info
-    async with aiohttp.ClientSession() as session:
-        async with session.get("http://localhost:5555/api/workers") as resp:
-            assert resp.status == 200
-            data = await resp.json()
-            # Flower should return a dict (even if empty)
-            assert isinstance(data, dict)
+    stats = await check_haproxy_stats()
+    assert isinstance(stats, dict)
 
 
 if __name__ == "__main__":

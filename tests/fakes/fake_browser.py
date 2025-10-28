@@ -9,6 +9,7 @@ actual Celery workers, enabling fast and reliable unit tests.
 import asyncio
 from typing import Any, Awaitable, Callable, TypeVar
 
+from swarm.browser.types import BrowserEngineStatus
 from swarm.distributed.celery_browser import CeleryBrowserRuntime
 
 T = TypeVar("T")
@@ -23,7 +24,7 @@ class FakeBrowserRuntime:
     def __init__(self, should_fail: bool = False, fail_message: str = "Simulated failure") -> None:
         self.should_fail = should_fail
         self.fail_message = fail_message
-        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, object]]] = []
 
     def _record_call(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         """Record method calls for test verification."""
@@ -56,14 +57,24 @@ class FakeBrowserRuntime:
         # Return minimal valid PNG header
         return b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x00\x00\x00\x01\x00\x01U\xaa\x00\x05\x00\x00\x00\x00IEND\xaeB`\x82"
 
-    async def status(self, *, worker_hint: str | None = None) -> dict[str, Any]:
+    async def status(self, *, worker_hint: str | None = None) -> BrowserEngineStatus:
         """Simulate getting browser status."""
         self._record_call("status", worker_hint=worker_hint)
         if self.should_fail:
             raise RuntimeError(self.fail_message)
 
         await asyncio.sleep(0.01)
-        return {"worker_id": "fake-worker", "status": "healthy", "sessions": 0, "uptime": 100.0}
+        return {
+            "worker_id": "fake-worker",
+            "status": "healthy",
+            "browser_active": True,
+            "page_active": False,
+            "url": None,
+            "sessions": 0,
+            "uptime": 100.0,
+            "error": None,
+            "session_id": "fake-session",
+        }
 
     async def close_channel(self, channel_id: int, *, worker_hint: str | None = None) -> None:
         """Simulate closing a channel's browser session."""
@@ -83,7 +94,7 @@ class FakeBrowserRuntime:
         """Check if a method was called during testing."""
         return any(call[0] == method_name for call in self.call_history)
 
-    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, Any]] | None:
+    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, object]] | None:
         """Get the arguments from the last call to a method."""
         for call in reversed(self.call_history):
             if call[0] == method_name:

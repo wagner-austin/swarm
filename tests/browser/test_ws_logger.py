@@ -25,7 +25,7 @@ async def test_wslogger_basic_usage() -> None:
             payload=b"hello",
             websocket_id="ws-1",
             websocket_url="wss://example.com/ws",
-            parsed={"msg": "hi"},
+            parsed={"text": "hi"},
             event=None,
         )
         # Log TX frame
@@ -49,7 +49,7 @@ async def test_wslogger_basic_usage() -> None:
     # Check frame fields and base64 encoding
     rx = next(e for e in sink.entries if e.direction == "RX")
     assert rx.payload == b"hello"
-    assert rx.parsed == {"msg": "hi"}
+    assert rx.parsed == {"text": "hi"}
     assert rx.browser_id == "browser-test"
     assert rx.session_id == "session-test"
     assert rx.episode_id == "episode-test"

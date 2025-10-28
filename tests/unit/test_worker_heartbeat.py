@@ -106,10 +106,7 @@ class RedisLike(Protocol):
 
     def delete(self, name: str) -> int: ...
 
-    # String operations
-    def set(self, name: str, value: str) -> bool: ...
-
-    def get(self, name: str) -> str | None: ...
+    # String operations (legacy usage removed)
 
     # Set operations
     def smembers(self, name: str) -> _bt.set[str]: ...
@@ -136,7 +133,7 @@ class TestWorkerLifecycle:
     @pytest.fixture
     def worker_lifecycle(self, redis_client: RedisLike) -> WorkerLifecycle:
         """Create a worker lifecycle instance with test Redis."""
-        return WorkerLifecycle("test-worker-001", redis_client=redis_client)
+        return WorkerLifecycle("test-worker-001", redis_client=cast(Any, redis_client))
 
     def test_worker_registration(
         self, worker_lifecycle: WorkerLifecycle, redis_client: RedisLike
@@ -205,11 +202,26 @@ class TestWorkerLifecycle:
         worker_lifecycle.register()
 
         with running_heartbeat(worker_lifecycle):
-            # Add sessions with proper ownership format
+            # Add sessions with proper ownership format (contract hash)
             worker_lifecycle.add_session("session-001")
             worker_lifecycle.add_session("session-002")
-            redis_client.set("browser:affinity:session-001", "swarm_test-worker-001")
-            redis_client.set("browser:affinity:session-002", "swarm_test-worker-001")
+            now = time.time()
+            redis_client.hset(
+                "browser:affinity:session-001",
+                mapping={
+                    "worker_id": "test-worker-001",
+                    "direct_queue": "browser.direct.test-worker-001",
+                    "timestamp": str(now),
+                },
+            )
+            redis_client.hset(
+                "browser:affinity:session-002",
+                mapping={
+                    "worker_id": "test-worker-001",
+                    "direct_queue": "browser.direct.test-worker-001",
+                    "timestamp": str(now),
+                },
+            )
 
             # Pre-checks - verify setup worked
             assert redis_client.smembers("browser:worker_sessions:test-worker-001") == {
@@ -298,7 +310,7 @@ class TestWorkerRegistry:
     @pytest.fixture
     def registry(self, redis_client: RedisLike) -> WorkerRegistry:
         """Create a worker registry instance."""
-        return WorkerRegistry(redis_client=redis_client)
+        return WorkerRegistry(redis_client=cast(Any, redis_client))
 
     @pytest.fixture
     def setup_workers(self, redis_client: RedisLike) -> None:
@@ -339,7 +351,7 @@ class TestWorkerRegistry:
         redis_client.expire("browser:worker:worker-002", 60)
         # No session set for worker-002 (testing empty case)
 
-        # Worker 3: Dead (no TTL/expired - simulated by deleting later)
+        # Worker 3: Dead (no heartbeat - simulated later)
         redis_client.hset(
             "browser:worker:worker-003",
             mapping={
@@ -360,8 +372,24 @@ class TestWorkerRegistry:
         self, registry: WorkerRegistry, redis_client: RedisLike, setup_workers: None
     ) -> None:
         """Test retrieving only healthy workers."""
-        # Simulate worker-003 expiry
-        redis_client.delete("browser:worker:worker-003")
+        # Provide heartbeats for worker-001/002 and simulate worker-003 missing
+        redis_client.hset(
+            "worker:heartbeat:browser:worker-001",
+            mapping={
+                "timestamp": str(time.time()),
+                "worker_type": "browser",
+                "worker_id": "worker-001",
+            },
+        )
+        redis_client.hset(
+            "worker:heartbeat:browser:worker-002",
+            mapping={
+                "timestamp": str(time.time()),
+                "worker_type": "browser",
+                "worker_id": "worker-002",
+            },
+        )
+        # No heartbeat for worker-003 => considered dead by registry
 
         workers = registry.get_healthy_workers()
         assert len(workers) == 2
@@ -373,7 +401,7 @@ class TestWorkerRegistry:
         self, registry: WorkerRegistry, redis_client: RedisLike, setup_workers: None
     ) -> None:
         """Test finding the worker with lowest load."""
-        redis_client.delete("browser:worker:worker-003")
+        # Heartbeats present for 001/002; 003 has none
 
         least_loaded = registry.find_least_loaded_worker()
         assert least_loaded == "worker-001"  # 20% load vs 80% load
@@ -382,14 +410,35 @@ class TestWorkerRegistry:
         self, registry: WorkerRegistry, redis_client: RedisLike, setup_workers: None
     ) -> None:
         """Test finding sessions whose workers are dead with proper owner format."""
-        # Set up session affinities with proper swarm_ prefix
-        redis_client.set("browser:affinity:session-001", "swarm_worker-001")
-        redis_client.set("browser:affinity:session-002", "swarm_worker-001")
-        redis_client.set("browser:affinity:session-003", "swarm_worker-003")
-        redis_client.set("browser:affinity:session-004", "swarm_worker-003")
+        # Set up session affinities with contract hash format
+        now = time.time()
+        for sid, wid in (
+            ("session-001", "worker-001"),
+            ("session-002", "worker-001"),
+            ("session-003", "worker-003"),
+            ("session-004", "worker-003"),
+        ):
+            redis_client.hset(
+                f"browser:affinity:{sid}",
+                mapping={
+                    "worker_id": wid,
+                    "direct_queue": f"browser.direct.{wid}",
+                    "timestamp": str(now),
+                },
+            )
 
-        # Simulate worker-003 death
-        redis_client.delete("browser:worker:worker-003")
+        # Establish liveness for worker-001 via standardized heartbeat
+        redis_client.hset(
+            "worker:heartbeat:browser:worker-001",
+            mapping={
+                "timestamp": str(time.time()),
+                "worker_type": "browser",
+                "worker_id": "worker-001",
+            },
+        )
+
+        # Simulate worker-003 death by removing its heartbeat (if any)
+        redis_client.delete("worker:heartbeat:browser:worker-003")
 
         orphaned = registry.get_orphaned_sessions()
         assert set(orphaned) == {"session-003", "session-004"}
@@ -398,13 +447,45 @@ class TestWorkerRegistry:
         self, registry: WorkerRegistry, redis_client: RedisLike, setup_workers: None
     ) -> None:
         """Test cleaning up orphaned sessions."""
-        # Set up with proper format
-        redis_client.set("browser:affinity:session-001", "swarm_worker-001")
-        redis_client.set("browser:affinity:session-003", "swarm_worker-003")
-        redis_client.set("browser:affinity:session-004", "swarm_worker-003")
+        # Set up with contract hash format
+        now = time.time()
+        redis_client.hset(
+            "browser:affinity:session-001",
+            mapping={
+                "worker_id": "worker-001",
+                "direct_queue": "browser.direct.worker-001",
+                "timestamp": str(now),
+            },
+        )
+        redis_client.hset(
+            "browser:affinity:session-003",
+            mapping={
+                "worker_id": "worker-003",
+                "direct_queue": "browser.direct.worker-003",
+                "timestamp": str(now),
+            },
+        )
+        redis_client.hset(
+            "browser:affinity:session-004",
+            mapping={
+                "worker_id": "worker-003",
+                "direct_queue": "browser.direct.worker-003",
+                "timestamp": str(now),
+            },
+        )
 
-        # Simulate worker-003 death
-        redis_client.delete("browser:worker:worker-003")
+        # Establish liveness for worker-001 via standardized heartbeat
+        redis_client.hset(
+            "worker:heartbeat:browser:worker-001",
+            mapping={
+                "timestamp": str(time.time()),
+                "worker_type": "browser",
+                "worker_id": "worker-001",
+            },
+        )
+
+        # Simulate worker-003 death by ensuring no heartbeat
+        redis_client.delete("worker:heartbeat:browser:worker-003")
 
         cleaned_count = registry.cleanup_orphaned_sessions()
         assert cleaned_count == 2
@@ -436,16 +517,27 @@ class TestBrowserRouterHealthCheck:
         router = BrowserSessionRouter(redis_client=cast(Any, redis_client))
         worker_id = "worker-001"
 
-        # Set up healthy worker with session set
+        # Set up healthy heartbeat for worker
         redis_client.hset(
-            f"browser:worker:{worker_id}",
-            mapping={"status": "active", "last_heartbeat": datetime.now(UTC).isoformat()},
+            f"worker:heartbeat:browser:{worker_id}",
+            mapping={
+                "timestamp": str(time.time()),
+                "worker_type": "browser",
+                "worker_id": worker_id,
+            },
         )
-        redis_client.expire(f"browser:worker:{worker_id}", 60)
+        redis_client.expire(f"worker:heartbeat:browser:{worker_id}", 300)
         redis_client.sadd(f"browser:worker_sessions:{worker_id}", "session-001")
 
-        # Set up session owned by healthy worker
-        redis_client.set("browser:affinity:session-001", f"swarm_{worker_id}")
+        # Set up session owned by healthy worker (contract hash)
+        redis_client.hset(
+            "browser:affinity:session-001",
+            mapping={
+                "worker_id": worker_id,
+                "direct_queue": f"browser.direct.{worker_id}",
+                "timestamp": str(time.time()),
+            },
+        )
 
         # Route should succeed to healthy worker
         route = router.route_for_task(task_name, kwargs={"session_id": "session-001"})
@@ -454,8 +546,8 @@ class TestBrowserRouterHealthCheck:
         assert route["exchange"] == f"browser.direct.{worker_id}"
         assert route["routing_key"] == f"browser.direct.{worker_id}"
 
-        # Kill the worker but KEEP the session set (important!)
-        redis_client.delete(f"browser:worker:{worker_id}")
+        # Kill the worker heartbeat but KEEP the session set (important!)
+        redis_client.delete(f"worker:heartbeat:browser:{worker_id}")
         # Session set remains: redis_client.exists(f"browser:worker_sessions:{worker_id}") == True
 
         # Route should now return None (fallback to default)
@@ -465,20 +557,25 @@ class TestBrowserRouterHealthCheck:
         # Session ownership should be cleared
         assert not redis_client.exists("browser:affinity:session-001")
 
-    def test_router_handles_legacy_workers(self, redis_client: RedisLike) -> None:
-        """Test that router handles workers without registration (legacy/test)."""
+    def test_router_requires_heartbeat(self, redis_client: RedisLike) -> None:
+        """Router does not route to workers without fresh heartbeat (authoritative)."""
         from swarm.distributed.browser_router import BrowserSessionRouter
 
         router = BrowserSessionRouter(redis_client=cast(Any, redis_client))
-        worker_id = "legacy-worker"
+        worker_id = "no-heartbeat"
 
-        # No worker key, no session set - treated as healthy (legacy)
-        redis_client.set("browser:affinity:session-001", f"swarm_{worker_id}")
-
-        # Should still route (legacy worker support)
+        # Affinity present but no heartbeat -> do not route, clear affinity
+        redis_client.hset(
+            "browser:affinity:session-001",
+            mapping={
+                "worker_id": worker_id,
+                "direct_queue": f"browser.direct.{worker_id}",
+                "timestamp": str(time.time()),
+            },
+        )
         route = router.route_for_task("browser.goto", kwargs={"session_id": "session-001"})
-        assert route is not None
-        assert route["queue"] == f"browser.direct.{worker_id}"
+        assert route is None
+        assert not redis_client.exists("browser:affinity:session-001")
 
     def test_router_cleanup_task_routing(self, redis_client: RedisLike) -> None:
         """Test that cleanup tasks go to browser queue."""
@@ -498,27 +595,38 @@ class TestBrowserRouterHealthCheck:
 
         router = BrowserSessionRouter(redis_client=cast(Any, redis_client))
 
-        # Set up a healthy worker with session
+        # Set up a healthy worker with heartbeat and affinity hash
         worker_id = "worker-001"
         redis_client.hset(
-            f"browser:worker:{worker_id}",
-            mapping={"status": "active", "last_heartbeat": datetime.now(UTC).isoformat()},
+            f"worker:heartbeat:browser:{worker_id}",
+            mapping={
+                "timestamp": str(time.time()),
+                "worker_type": "browser",
+                "worker_id": worker_id,
+            },
         )
-        redis_client.expire(f"browser:worker:{worker_id}", 60)
+        redis_client.expire(f"worker:heartbeat:browser:{worker_id}", 300)
         redis_client.sadd(f"browser:worker_sessions:{worker_id}", "session-001")
-        redis_client.set("browser:affinity:session-001", f"swarm_{worker_id}")
+        redis_client.hset(
+            "browser:affinity:session-001",
+            mapping={
+                "worker_id": worker_id,
+                "direct_queue": f"browser.direct.{worker_id}",
+                "timestamp": str(time.time()),
+            },
+        )
 
         # Simulate connection error then recovery
         call_count = {"count": 0}
-        original_get = redis_client.get
+        original_hget = redis_client.hget
 
-        def failing_get(*args: Any, **kwargs: Any) -> Any:
+        def failing_hget(*args: Any, **kwargs: Any) -> Any:
             call_count["count"] += 1
             if call_count["count"] <= 2:
                 raise RedisConnectionError("Connection lost")
-            return original_get(*args, **kwargs)
+            return original_hget(*args, **kwargs)
 
-        monkeypatch.setattr(redis_client, "get", failing_get)
+        monkeypatch.setattr(redis_client, "hget", failing_hget)
 
         # First two attempts should fail gracefully
         route = router.route_for_task("browser.goto", kwargs={"session_id": "session-001"})

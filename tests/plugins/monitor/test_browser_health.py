@@ -84,39 +84,31 @@ async def test_browser_health_check_with_healthy_workers(
     """Test health check with healthy workers using Celery ping."""
     container, mock_discord_bot, mock_redis = container_with_mocked_redis
 
-    # Mock Celery app and control.ping response
+    # Healthy workers via fresh heartbeats
     import time
-    from unittest.mock import AsyncMock
 
     current_time = time.time()
 
-    # Mock the health status data that gets written and read back
-    mock_redis.hgetall.return_value = {
-        b"healthy_workers": b"2",
-        b"is_degraded": b"false",  # 2 workers >= 1 minimum = healthy
-        b"last_check": str(current_time).encode(),
-        b"min_required": b"1",
-    }
+    # Two fresh heartbeat keys
+    mock_redis.keys.return_value = [
+        b"worker:heartbeat:browser:worker1",
+        b"worker:heartbeat:browser:worker2",
+    ]
+
+    def _hget(name: str, field: str) -> bytes | None:
+        if field != "timestamp":
+            return None
+        return str(current_time).encode()
+
+    mock_redis.hget.side_effect = _hget
 
     # Create BrowserHealthMonitor cog using REAL DI container factory
     cog = container.browser_health_monitor_cog(discord_bot=mock_discord_bot)
 
-    # Mock Celery control.ping() to return 2 workers
-    with patch("swarm.celery_app.app.control") as mock_control:
-        mock_ping = MagicMock(
-            return_value=[{"celery@worker1": {"ok": "pong"}}, {"celery@worker2": {"ok": "pong"}}]
-        )
-        mock_control.ping = mock_ping
+    # Check health
+    await cog._check_worker_health()
 
-        # Mock asyncio.to_thread to directly call the function
-        with patch(
-            "asyncio.to_thread",
-            new=AsyncMock(side_effect=lambda func, *args, **kwargs: func(*args, **kwargs)),
-        ):
-            # Check health
-            await cog._check_worker_health()
-
-    health_status = await cog.get_health_status()
+    health_status = cog.get_health_status()
     is_healthy = not health_status.get("is_degraded", True)
 
     assert is_healthy is True
@@ -155,7 +147,7 @@ async def test_browser_health_check_with_stale_workers(
 
     # Check health - should mark as degraded
     await cog._check_worker_health()
-    health_status = await cog.get_health_status()
+    health_status = cog.get_health_status()
     is_healthy = not health_status.get("is_degraded", True)
 
     assert is_healthy is False
@@ -188,7 +180,7 @@ async def test_browser_health_check_no_workers(
 
     # Check health - should mark as degraded
     await cog._check_worker_health()
-    health_status = await cog.get_health_status()
+    health_status = cog.get_health_status()
     is_healthy = not health_status.get("is_degraded", True)
 
     assert is_healthy is False

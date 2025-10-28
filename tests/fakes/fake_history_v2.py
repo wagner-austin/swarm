@@ -32,7 +32,7 @@ class FakeHistoryBackendV2:
         self._store: dict[int, dict[str, deque[Turn]]] = defaultdict(
             lambda: defaultdict(lambda: deque(maxlen=max_turns))
         )
-        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, object]]] = []
 
     def _record_call(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         """Record method calls for test verification."""
@@ -80,7 +80,7 @@ class FakeHistoryBackendV2:
         """Check if a method was called during testing."""
         return any(call[0] == method_name for call in self.call_history)
 
-    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, Any]] | None:
+    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, object]] | None:
         """Get the arguments from the last call to a method."""
         for call in reversed(self.call_history):
             if call[0] == method_name:

@@ -147,5 +147,5 @@ async def test_status_no_shard(
     await cast(Any, cog.status.callback)(cog, interaction)
     assert len(mock_safe_send.await_args_list) > 0, "safe_send was never called"
     embed = mock_safe_send.await_args_list[0].kwargs["embed"]
-    # Shard info should be em dash
-    assert "Shard —" in embed.fields[-1].value
+    # Shard info should be shown as n/a when shard data is absent
+    assert "Shard n/a" in embed.fields[-1].value

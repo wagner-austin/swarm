@@ -19,7 +19,7 @@ class ConversationTurn:
     role: str
     content: str
     timestamp: datetime = field(default_factory=datetime.now)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 class FakeHistoryBackend:
@@ -35,7 +35,7 @@ class FakeHistoryBackend:
         self.fail_message = fail_message
         # Store conversations by (channel_id, user_id) tuple
         self.conversations: dict[tuple[int, int], list[ConversationTurn]] = {}
-        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, object]]] = []
         self.max_turns = 10  # Default max turns
 
     def _record_call(self, method_name: str, *args: Any, **kwargs: Any) -> None:
@@ -143,7 +143,7 @@ class FakeHistoryBackend:
         """Check if a method was called during testing."""
         return any(call[0] == method_name for call in self.call_history)
 
-    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, Any]] | None:
+    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, object]] | None:
         """Get the arguments from the last call to a method."""
         for call in reversed(self.call_history):
             if call[0] == method_name:

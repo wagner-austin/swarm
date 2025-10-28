@@ -2,8 +2,7 @@
 """
 Test HAProxy Redis failover functionality.
 
-This script verifies that HAProxy correctly handles Redis failover scenarios
-and that Flower continues to work when the primary Redis fails.
+This script verifies that HAProxy correctly handles Redis failover scenarios.
 
 Usage:
     python scripts/test_haproxy_failover.py
@@ -12,7 +11,7 @@ Usage:
 import asyncio
 import json
 import time
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import aiohttp
 import redis.asyncio as redis
@@ -37,9 +36,16 @@ async def check_redis_connection(host: str, port: int, password: str | None = No
         return False
 
 
-async def check_haproxy_stats(host: str = "localhost", port: int = 8080) -> dict[str, Any]:
+class HaproxyBackendInfo(TypedDict):
+    status: str
+    check_status: str
+
+
+async def check_haproxy_stats(
+    host: str = "localhost", port: int = 8080
+) -> dict[str, HaproxyBackendInfo]:
     """Check HAProxy stats to see backend status."""
-    stats: dict[str, Any] = {}
+    stats: dict[str, HaproxyBackendInfo] = {}
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"http://{host}:{port}/stats;csv") as resp:
@@ -82,19 +88,7 @@ async def check_haproxy_stats(host: str = "localhost", port: int = 8080) -> dict
     return stats
 
 
-async def check_flower_api(host: str = "localhost", port: int = 5555) -> bool:
-    """Check if Flower API is responsive."""
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"http://{host}:{port}/api/workers") as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    print(f"Flower API working, found {len(data)} workers")
-                    return True
-    except Exception as e:
-        print(f"Flower API check failed: {e}")
-
-    return False
+# Flower check removed (autoscaler no longer depends on Flower)
 
 
 async def simulate_redis_failover() -> None:
@@ -117,9 +111,7 @@ async def simulate_redis_failover() -> None:
     for server, info in stats.items():
         print(f"   - {server}: {info['status']} (check: {info['check_status']})")
 
-    # Check Flower
-    flower_ok = await check_flower_api()
-    print(f"\n   Flower API: {'[OK]' if flower_ok else '[FAIL]'}")
+    # Flower check removed
 
     # Step 2: Test Redis operations through HAProxy
     print("\n2. Testing Redis operations through HAProxy...")
@@ -143,18 +135,16 @@ async def simulate_redis_failover() -> None:
         print(f"   [FAIL] Redis operations failed: {e}")
 
     # Step 3: Monitor Flower during simulated failures
-    print("\n3. Monitoring Flower stability...")
+    print("\n3. Monitoring HAProxy stability...")
     print("   (In production, you would stop the primary Redis here)")
     print("   HAProxy should automatically failover to the backup server")
 
     # Check multiple times to ensure stability
     for i in range(3):
         await asyncio.sleep(2)
-        flower_ok = await check_flower_api()
         stats = await check_haproxy_stats()
 
         print(f"\n   Check {i + 1}:")
-        print(f"   - Flower API: {'[OK]' if flower_ok else '[FAIL]'}")
         for server, info in stats.items():
             if info["status"] != "no check":
                 print(f"   - {server}: {info['status']}")
@@ -163,7 +153,7 @@ async def simulate_redis_failover() -> None:
     print("\nTo fully test failover:")
     print("1. Stop the primary Redis: docker stop redis")
     print("2. Check HAProxy stats: http://localhost:8080/stats")
-    print("3. Verify Flower still works: http://localhost:5555")
+    print("3. Verify services remain up per HAProxy stats: http://localhost:8080/stats")
     print("4. Restart Redis: docker start redis")
     print("5. Verify HAProxy fails back to primary")
 

@@ -12,6 +12,7 @@ import pytest
 from discord.ext import commands
 
 from swarm.core.containers import Container
+from swarm.history.in_memory import MemoryBackend
 from swarm.plugins.commands.about import About
 from swarm.plugins.commands.chat import Chat
 from tests._mocks.mocks import StubInteraction
@@ -72,7 +73,8 @@ async def test_chat_command(monkeypatch: Any) -> None:
     discord_bot.container = Container()
     discord_bot.is_owner = AsyncMock(return_value=True)
 
-    cog = Chat(discord_bot)
+    # Explicitly provide in-memory backend for this unit test
+    cog = Chat(discord_bot, history_backend=MemoryBackend(8))
     ix = StubInteraction(discord_bot=discord_bot)
 
     await cast(Any, cog.chat.callback)(cog, ix, "hi", sync_in_test=True)

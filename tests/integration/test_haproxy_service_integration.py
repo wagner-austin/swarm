@@ -64,7 +64,7 @@ def test_services_redis_configuration_consistency() -> None:
     if not check_docker_daemon():
         pytest.skip("Docker daemon not available. Please start Docker.")
 
-    services_to_check = ["autoscaler", "swarm", "flower"]
+    services_to_check = ["autoscaler", "swarm"]
     redis_configs = {}
 
     for service in services_to_check:
@@ -159,29 +159,7 @@ async def test_celery_broker_has_valid_redis_url() -> None:
         pytest.skip("Celery not installed")
 
 
-@pytest.mark.docker
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_flower_connects_through_haproxy() -> None:
-    """Verify Flower is configured to use HAProxy."""
-    try:
-        # Check Flower's command to see broker URL
-        result = subprocess.run(
-            ["docker", "inspect", "flower", "--format", "{{.Config.Cmd}}"],
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode == 0:
-            cmd_str = result.stdout.strip()
-            # Flower should be using HAProxy (port 6380) in its broker URL
-            assert "haproxy-redis:6380" in cmd_str, f"Flower not using HAProxy. Command: {cmd_str}"
-        else:
-            pytest.skip(
-                "Flower container not running. Run 'docker compose --profile monitoring up -d flower' first."
-            )
-    except subprocess.CalledProcessError:
-        pytest.skip("Unable to check Flower configuration. Ensure Docker is running.")
+# Flower check removed (autoscaler is Flower-free)
 
 
 @pytest.mark.docker
@@ -262,7 +240,6 @@ async def test_haproxy_health_check() -> None:
             rdr = csv.DictReader(io.StringIO(r.text))
             upstash_up = False
             local_up = False
-            local_has_sessions = False
 
             for row in rdr:
                 px = row.get("# pxname") or row.get("pxname", "")
@@ -270,14 +247,14 @@ async def test_haproxy_health_check() -> None:
                 if px != backend_name or sv in ("FRONTEND", "BACKEND"):
                     continue
                 status = (row.get("status") or "").upper()
-                scur = _safe_int(row.get("scur"))
                 if sv == "redis_0":
                     upstash_up = status == "UP"
                 elif sv == "redis_1":
                     local_up = status == "UP"
-                    local_has_sessions = scur > 0
 
-            in_failover = local_up and (not upstash_up or local_has_sessions)
+            # Robust rule: failover only when primary is DOWN and backup is UP.
+            # Using scur>0 as a signal is noisy and can produce false positives.
+            in_failover = local_up and (not upstash_up)
             return upstash_up, local_up, in_failover
 
         upstash_up, local_up, in_failover = _haproxy_backend_status()

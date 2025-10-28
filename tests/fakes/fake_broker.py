@@ -20,7 +20,7 @@ class Message:
 
     id: str
     stream: str
-    data: dict[str, Any]
+    data: dict[str, object]
     timestamp: datetime = field(default_factory=datetime.now)
     ack_id: str | None = None
 
@@ -37,8 +37,8 @@ class FakeBroker:
         self.should_fail = should_fail
         self.fail_message = fail_message
         self.streams: dict[str, list[Message]] = {}
-        self.pending_responses: dict[str, Any] = {}
-        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.pending_responses: dict[str, object] = {}
+        self.call_history: list[tuple[str, tuple[Any, ...], dict[str, object]]] = []
         self.consumer_groups: dict[str, list[str]] = {}
         self._response_delay = 0.01  # Default response delay
 
@@ -50,7 +50,7 @@ class FakeBroker:
         """Set the simulated response delay."""
         self._response_delay = delay
 
-    async def publish(self, stream: str, data: dict[str, Any]) -> str:
+    async def publish(self, stream: str, data: dict[str, object]) -> str:
         """Publish a message to a stream."""
         self._record_call("publish", stream, data)
 
@@ -69,8 +69,12 @@ class FakeBroker:
         return message_id
 
     async def publish_and_wait(
-        self, request_stream: str, response_stream: str, data: dict[str, Any], timeout: float = 30.0
-    ) -> dict[str, Any]:
+        self,
+        request_stream: str,
+        response_stream: str,
+        data: dict[str, object],
+        timeout: float = 30.0,
+    ) -> dict[str, object]:
         """Publish a message and wait for a response."""
         self._record_call(
             "publish_and_wait", request_stream, response_stream, data, timeout=timeout
@@ -94,7 +98,9 @@ class FakeBroker:
             response = self.pending_responses.pop(correlation_id)
             if isinstance(response, Exception):
                 raise response
-            return response  # type: ignore[no-any-return]
+            from typing import cast as _cast
+
+            return _cast(dict[str, object], response)
 
         # Default response based on request type
         if "command" in data:
@@ -116,14 +122,14 @@ class FakeBroker:
         # Generic success response
         return {"status": "success", "correlation_id": correlation_id}
 
-    def set_response(self, correlation_id: str, response: dict[str, Any] | Exception) -> None:
+    def set_response(self, correlation_id: str, response: dict[str, object] | Exception) -> None:
         """Pre-configure a response for a specific correlation ID."""
         self.pending_responses[correlation_id] = response
 
     async def subscribe(
         self,
         streams: list[str],
-        handler: Callable[[str, dict[str, Any]], Awaitable[None]],
+        handler: Callable[[str, dict[str, object]], Awaitable[None]],
         group: str | None = None,
         consumer: str | None = None,
     ) -> None:
@@ -168,7 +174,7 @@ class FakeBroker:
         """Check if a method was called during testing."""
         return any(call[0] == method_name for call in self.call_history)
 
-    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, Any]] | None:
+    def get_call_args(self, method_name: str) -> tuple[tuple[Any, ...], dict[str, object]] | None:
         """Get the arguments from the last call to a method."""
         for call in reversed(self.call_history):
             if call[0] == method_name:
@@ -198,8 +204,12 @@ class FakeTimeoutBroker(FakeBroker):
         self.call_count = 0
 
     async def publish_and_wait(
-        self, request_stream: str, response_stream: str, data: dict[str, Any], timeout: float = 30.0
-    ) -> dict[str, Any]:
+        self,
+        request_stream: str,
+        response_stream: str,
+        data: dict[str, object],
+        timeout: float = 30.0,
+    ) -> dict[str, object]:
         """Simulate timeouts after a certain number of calls."""
         self.call_count += 1
 

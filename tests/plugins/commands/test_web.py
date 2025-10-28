@@ -55,6 +55,8 @@ def interaction() -> MagicMock:
     """Create a properly mocked Discord interaction."""
     inter = MagicMock(spec=discord.Interaction)
     inter.user.id = 12345
+    # Explicitly set guild_id to None to model DMs in tests
+    inter.guild_id = None
     inter.channel_id = 67890
     inter.response.defer = AsyncMock()
     inter.response.send_message = AsyncMock()
@@ -92,7 +94,7 @@ async def test_web_start_with_valid_url(
 
     # Verify browser was called (through our mocked CeleryBrowserRuntime)
     mock_browser.start.assert_awaited_once()
-    mock_browser.goto.assert_awaited_once_with("https://example.com")
+    mock_browser.goto.assert_awaited_once_with("https://example.com", session_id="discord:dm:67890")
 
 
 @pytest.mark.asyncio
