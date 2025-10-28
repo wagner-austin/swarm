@@ -4,24 +4,32 @@ import asyncio
 import signal
 import threading
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Generic, ParamSpec, Protocol, TypeVar
 
-from celery import Task
+from celery import Task as CeleryTask
 
 __all__ = ["SwarmTask"]
 
-if TYPE_CHECKING:
-    # For type checking, use the generic version
-    BaseTask = Task[Any, Any]
-else:
-    # At runtime, use the non-generic version
-    BaseTask = Task
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
-class SwarmTask(BaseTask):
-    """Base task with thread-local event loop and task ID management."""
+# Use TYPE_CHECKING pattern to handle stub vs runtime mismatch
+# - Stub declares Task as Generic[_P, _R], but runtime Task is not subscriptable
+# - The actual strict typing comes from Generic[_P, _R] on SwarmTask class below
+# Solution from: https://mypy.readthedocs.io/en/stable/runtime_troubles.html
+# and https://github.com/sbdchd/celery-types/issues/80
+class _RequestProto(Protocol):
+    id: str
+
+
+class _SwarmTaskLoopMixin(Generic[_P, _R]):
+    """Thread-local loop and id resolution helpers for tasks."""
 
     abstract = True
+
+    # Celery provides `request` with an `id` attribute; annotate for type-checking
+    request: _RequestProto
 
     # Thread-local storage for event loops - one loop per thread
     _thread_local = threading.local()
@@ -51,7 +59,7 @@ class SwarmTask(BaseTask):
         return new_loop
 
     @classmethod
-    def _close_thread_loop(cls, *_: Any) -> None:
+    def _close_thread_loop(cls, *_: object) -> None:
         """Close the thread-local event loop on shutdown."""
         loop = getattr(cls._thread_local, "loop", None)
         if loop and not loop.is_closed():
@@ -82,19 +90,35 @@ class SwarmTask(BaseTask):
             loop.close()
 
 
-# Register SIGTERM/SIGINT handlers so each worker thread
-# closes its own event loop cleanly during warm shutdown.
-# This prevents "event loop is closed" errors on worker restart.
+if TYPE_CHECKING:
+
+    class SwarmTask(CeleryTask[_P, _R], Generic[_P, _R]):
+        """Typed task base for type-checkers only."""
+
+        _thread_local: object
+
+        @classmethod
+        def get_loop(cls) -> asyncio.AbstractEventLoop: ...
+        @classmethod
+        def _close_thread_loop(cls, *_: object) -> None: ...
+        def resolve_task_id(self, supplied: str | None) -> str: ...
+        def resolve_session_id(self, supplied: str | None) -> str: ...
+else:
+
+    class SwarmTask(CeleryTask, _SwarmTaskLoopMixin[_P, _R], Generic[_P, _R]):
+        """Runtime task base with loop management."""
+
+        pass
+
+
+# Register SIGTERM/SIGINT handlers so each worker thread closes its own event
+# loop cleanly during warm shutdown. Prevents "event loop is closed" on restart.
 try:
-    # Only register signal handlers from the main thread
     if threading.current_thread() is threading.main_thread():
-        # Handle both SIGTERM (production) and SIGINT (local debugging)
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
                 signal.signal(sig, SwarmTask._close_thread_loop)
             except (OSError, ValueError):
-                # Signal might not be valid on this platform
                 pass
 except (ImportError, AttributeError):
-    # Non-POSIX platform (e.g., Windows) - no graceful loop close on signals
     pass
