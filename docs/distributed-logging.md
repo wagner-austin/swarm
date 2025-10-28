@@ -112,7 +112,8 @@ worker_memory_bytes{worker_id="worker-1",hostname="swarm-server-01",container_id
 from swarm.distributed.monitoring.heartbeat import WorkerHeartbeat
 import redis.asyncio as redis
 
-redis_client = redis.from_url("redis://localhost:6379")
+# Standardize on HAProxy as the single ingress
+redis_client = redis.from_url("redis://default:<password>@localhost:6380/0", decode_responses=True)
 heartbeat = WorkerHeartbeat(
     redis_client=redis_client,
     worker_id="worker-1", 

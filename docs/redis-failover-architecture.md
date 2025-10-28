@@ -32,11 +32,11 @@ All Services → HAProxy (port 6380) → [Upstash Primary | Local Redis Backup]
 All services connect ONLY through HAProxy at `redis://default:password@haproxy-redis:6380/0`
 
 ```yaml
-# docker-compose.yml - ALL services use same config
+# docker compose.yml - ALL services use same config
 environment:
   # Single connection point for ALL services
-  REDIS_URL: redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
-  CELERY_BROKER_URL: redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+  REDIS__URL: redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+  CELERY_BROKER_URLS: ${REDIS__URL}
   
   # HAProxy backend configuration (only HAProxy uses this)
   HAPROXY_BACKENDS: |
@@ -155,7 +155,7 @@ backend redis_backend
 REDIS_PASSWORD=your-password-here
 
 # Single Redis URL for all services (points to HAProxy)
-REDIS_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+REDIS__URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
 
 # Backend URLs (only for HAProxy health checker)
 UPSTASH_URL=rediss://default:${REDIS_PASSWORD}@gorgeous-jawfish-49826.upstash.io:6379/0
@@ -176,7 +176,7 @@ LOCAL_REDIS_URL=redis://default:${REDIS_PASSWORD}@redis:6379/0
 1. Create `/scripts/redis-health-check.py`
 2. Update HAProxy Dockerfile to include Python and redis-py
 3. Modify `generate_haproxy_config.py` to use external checks
-4. Update docker-compose.yml environment variables
+4. Update docker compose.yml environment variables
 5. Test failover by stopping Upstash and local Redis alternately
 6. Monitor HAProxy stats page at http://localhost:8404/stats
 
