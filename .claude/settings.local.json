@@ -47,7 +47,10 @@
       "Bash(then echo \"=== $file ===\")",
       "Bash(fi)",
       "Bash(mkdir:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(docker restart:*)",
+      "Bash(cut:*)",
+      "Bash(timeout 120 poetry run pytest:*)"
     ],
     "deny": []
   }
