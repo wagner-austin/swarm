@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Mapping, TypedDict, TypeGuard
 
 import yaml  # PyYAML (dev dependency already present)
 from discord.ext import commands
@@ -43,7 +43,28 @@ class Persona(TypedDict):
     allowed_users: list[int | str] | None
 
 
-def _coerce(raw_map: Any) -> dict[str, Persona]:
+class PersonaYaml(TypedDict, total=False):
+    prompt: str
+    allowed_users: list[int | str]
+
+
+def _is_persona_yaml(value: object) -> TypeGuard[PersonaYaml]:
+    if not isinstance(value, dict):
+        return False
+    prompt = value.get("prompt")
+    if not isinstance(prompt, str):
+        return False
+    allowed = value.get("allowed_users")
+    if allowed is not None:
+        if not isinstance(allowed, list):
+            return False
+        for u in allowed:
+            if not isinstance(u, int | str):
+                return False
+    return True
+
+
+def _coerce(raw_map: Mapping[str, object]) -> dict[str, Persona]:
     """Return mapping with strict ``Persona`` objects.
 
     Ensures *prompt* exists and fills missing ``allowed_users`` with ``None`` so
@@ -51,12 +72,11 @@ def _coerce(raw_map: Any) -> dict[str, Persona]:
     """
 
     result: dict[str, Persona] = {}
-    for key, val in dict(raw_map).items():
-        if not isinstance(val, dict) or "prompt" not in val:
-            # skip invalid entries quietly (matches earlier leniency)
+    for key, val in raw_map.items():
+        if not _is_persona_yaml(val):
             continue
-        prompt: str = str(val["prompt"])
-        allowed: list[int | str] | None = val.get("allowed_users")
+        prompt = val["prompt"]
+        allowed = val.get("allowed_users") if isinstance(val.get("allowed_users"), list) else None
         result[key] = {"prompt": prompt, "allowed_users": allowed}
     return result
 
@@ -103,10 +123,12 @@ def _load(fp: Path) -> dict[str, Persona]:
     if not fp.exists():
         return {}
 
-    raw: str = fp.read_text("utf-8")
-    data: Any = yaml.safe_load(raw) or {}
-    # ensure structure – mypy will validate below cast
-    return _coerce(data)
+    raw_text: str = fp.read_text("utf-8")
+    loaded: object = yaml.safe_load(raw_text) or {}
+    if not isinstance(loaded, dict):
+        return {}
+    prepared: dict[str, object] = {str(k): v for k, v in loaded.items()}
+    return _coerce(prepared)
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +153,9 @@ def _populate(target: dict[str, Persona]) -> None:
     _secret_env: str | None = os.getenv("SWARM_SECRET_PERSONAS")
     if _secret_env:
         try:
-            target.update(_coerce(yaml.safe_load(_secret_env) or {}))
+            loaded_env: object = yaml.safe_load(_secret_env) or {}
+            if isinstance(loaded_env, dict):
+                target.update(_coerce({str(k): v for k, v in loaded_env.items()}))
         except Exception as exc:
             # Fail soft – malformed env secrets shouldn't crash the bot
             logger.warning(f"Failed to load personas from SWARM_SECRET_PERSONAS env: {exc}")
@@ -141,7 +165,9 @@ def _populate(target: dict[str, Persona]) -> None:
     if _runtime_secret_file.exists():
         try:
             _runtime_raw: str = _runtime_secret_file.read_text("utf-8")
-            target.update(_coerce(yaml.safe_load(_runtime_raw) or {}))
+            loaded_file: object = yaml.safe_load(_runtime_raw) or {}
+            if isinstance(loaded_file, dict):
+                target.update(_coerce({str(k): v for k, v in loaded_file.items()}))
         except Exception as exc:
             logger.warning(
                 f"Failed to load personas from runtime secret file {_runtime_secret_file}: {exc}"

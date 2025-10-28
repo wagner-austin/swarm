@@ -9,9 +9,20 @@ either a full string or an async iterator of chunks.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any, Protocol, runtime_checkable
+from typing import Literal, Protocol, TypedDict, Unpack, runtime_checkable
 
-Message = dict[str, str]  # {"role": "user", "content": "..."}
+
+class Message(TypedDict):
+    role: Literal["user", "assistant", "system"]
+    content: str
+
+
+class GenerateOptions(TypedDict, total=False):
+    model: str
+    system_prompt: str
+    system_instruction: str
+    temperature: float
+    top_p: float
 
 
 @runtime_checkable
@@ -26,7 +37,7 @@ class LLMProvider(Protocol):
         *,
         messages: list[Message],
         stream: bool = False,
-        **options: Any,
+        **options: Unpack[GenerateOptions],
     ) -> str | AsyncIterator[str]:
         """Generate a completion or an async stream of chunks.
 
@@ -49,4 +60,4 @@ class LLMProvider(Protocol):
     # manage their own lifetime internally.
 
 
-__all__ = ["LLMProvider", "Message"]
+__all__ = ["LLMProvider", "Message", "GenerateOptions"]

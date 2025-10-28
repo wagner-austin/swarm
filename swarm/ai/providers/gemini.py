@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
-from typing import Any
+from collections.abc import AsyncGenerator, AsyncIterator, Iterable
+from typing import Protocol, runtime_checkable
 
-from swarm.ai.contracts import LLMProvider, Message
+from swarm.ai.contracts import GenerateOptions, LLMProvider, Message
 from swarm.core import alerts
 from swarm.core.exceptions import ModelOverloaded
 from swarm.core.settings import settings
@@ -37,8 +37,7 @@ class _GeminiProvider(LLMProvider):
         # defer validating the API key so that the module can be imported even
         # when GEMINI_API_KEY is missing (e.g. in CI), as long as the provider
         # is not actually used.
-        self._client: Any | None = None
-        self._genai: Any = None
+        self._client: _Client | None = None
 
     # ------------------------------------------------------------------
     # internal helpers
@@ -60,8 +59,7 @@ class _GeminiProvider(LLMProvider):
                 "`pip install google-genai`."
             ) from exc
 
-        self._genai = genai  # stash for debugging hooks if needed
-        self._client = genai.Client(api_key=api_key)
+        self._client = _ClientAdapter(genai.Client(api_key=api_key))
 
     # ---------------------------------------------------------------------
     # LLMProvider API
@@ -72,22 +70,22 @@ class _GeminiProvider(LLMProvider):
         *,
         messages: list[Message],
         stream: bool = False,
-        **options: Any,
+        model: str | None = None,
+        system_prompt: str | None = None,
+        system_instruction: str | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
     ) -> str | AsyncIterator[str]:
         """Generate a completion or stream using Google Gemini."""
 
         # Ensure SDK import happens **after** any caller monkey-patching.
         self._ensure_client()
-        # After ensuring client, _genai is guaranteed to be assigned
-        assert self._genai is not None
         from google.genai import types
 
-        system_prompt: str | None = options.get("system_prompt") or options.get(
-            "system_instruction"
-        )
+        system_prompt = system_prompt or system_instruction
 
         # Convert generic role/content history into google-genai `Content` list.
-        contents: list[types.Content] = []
+        contents: list[object] = []
         for m in messages:
             role = m.get("role")
             text = m.get("content", "")
@@ -95,9 +93,8 @@ class _GeminiProvider(LLMProvider):
             if role == "system":
                 # system handled via system_instruction; skip duplicate content
                 continue
-            if role == "assistant":
-                role = "model"
-            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
+            g_role = "model" if role == "assistant" else role
+            contents.append(types.Content(role=g_role, parts=[types.Part.from_text(text=text)]))
 
         gen_config = types.GenerateContentConfig(
             system_instruction=system_prompt,
@@ -112,15 +109,19 @@ class _GeminiProvider(LLMProvider):
                 assert self._client is not None
                 try:
                     for chunk in self._client.models.generate_content_stream(
-                        model=settings.gemini_model,
+                        model=model or settings.gemini_model,
                         contents=contents,
                         config=gen_config,
                     ):
-                        text_fragment = getattr(chunk, "text", None)
+                        text_fragment = chunk.text
                         if text_fragment:
                             out.append(text_fragment)
-                except (self._genai.errors.ServerError, json.JSONDecodeError) as err:
-                    if "overloaded" in str(err).lower() or "503" in str(err):
+                except Exception as err:
+                    if (
+                        isinstance(err, json.JSONDecodeError)
+                        or "overloaded" in str(err).lower()
+                        or "503" in str(err)
+                    ):
                         raise ModelOverloaded(
                             "Gemini model is currently overloaded. Please retry later."
                         ) from err
@@ -140,22 +141,99 @@ class _GeminiProvider(LLMProvider):
             assert self._client is not None
             try:
                 res = self._client.models.generate_content(
-                    model=settings.gemini_model,
+                    model=model or settings.gemini_model,
                     contents=contents,
                     config=gen_config,
                 )
-            except (self._genai.errors.ServerError, json.JSONDecodeError) as err:
-                if "overloaded" in str(err).lower() or "503" in str(err):
+            except Exception as err:
+                if (
+                    isinstance(err, json.JSONDecodeError)
+                    or "overloaded" in str(err).lower()
+                    or "503" in str(err)
+                ):
                     alerts.alert("Gemini model overloaded – some requests dropped")
                     raise ModelOverloaded(
                         "Gemini model is currently overloaded. Please retry later."
                     ) from err
                 alerts.alert("Gemini error – some requests dropped")
                 raise
-            return getattr(res, "text", str(res))
+            return res.text or str(res)
 
         return await asyncio.to_thread(_sync_call)
 
 
 # Singleton instance expected by the dynamic registry
 provider: LLMProvider = _GeminiProvider()
+
+
+# -------- Minimal protocols for google-genai surface we use ---------
+
+
+class _Chunk(Protocol):
+    @property
+    def text(self) -> str | None: ...
+
+
+class _Response(Protocol):
+    @property
+    def text(self) -> str | None: ...
+
+
+class _Models(Protocol):
+    def generate_content_stream(
+        self, *, model: str, contents: list[object], config: object
+    ) -> Iterable[_Chunk]: ...
+    def generate_content(
+        self, *, model: str, contents: list[object], config: object
+    ) -> _Response: ...
+
+
+class _Client(Protocol):
+    @property
+    def models(self) -> _Models: ...
+
+
+class _ChunkAdapter:
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    @property
+    def text(self) -> str | None:
+        t = getattr(self._inner, "text", None)
+        return t if isinstance(t, str) else None
+
+
+class _ResponseAdapter:
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    @property
+    def text(self) -> str | None:
+        t = getattr(self._inner, "text", None)
+        return t if isinstance(t, str) else None
+
+
+class _ModelsAdapter:
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    def generate_content_stream(
+        self, *, model: str, contents: list[object], config: object
+    ) -> Iterable[_Chunk]:
+        fn = getattr(self._inner, "generate_content_stream")
+        for chunk in fn(model=model, contents=contents, config=config):
+            yield _ChunkAdapter(chunk)
+
+    def generate_content(self, *, model: str, contents: list[object], config: object) -> _Response:
+        fn = getattr(self._inner, "generate_content")
+        res = fn(model=model, contents=contents, config=config)
+        return _ResponseAdapter(res)
+
+
+class _ClientAdapter:
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    @property
+    def models(self) -> _Models:
+        return _ModelsAdapter(getattr(self._inner, "models"))
