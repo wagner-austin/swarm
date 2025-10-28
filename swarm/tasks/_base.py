@@ -34,13 +34,36 @@ class _SwarmTaskLoopMixin(Generic[_P, _R]):
     # Thread-local storage for event loops - one loop per thread
     _thread_local = threading.local()
 
-    def resolve_task_id(self, supplied: str | None) -> str:
-        """Resolve task ID with fallback to request ID or UUID (legacy helper)."""
-        return supplied or self.request.id or str(uuid.uuid4())
-
     def resolve_session_id(self, supplied: str | None) -> str:
-        """Resolve session ID with fallback to Celery request ID or a new UUID."""
-        return supplied or self.request.id or str(uuid.uuid4())
+        """Resolve session ID with strict fallback to Celery request ID.
+
+        Args:
+            supplied: Optional explicit session ID
+
+        Returns:
+            Session ID (supplied or from request.id)
+
+        Raises:
+            RuntimeError: If session_id not provided and self.request.id unavailable
+        """
+        if supplied:
+            return supplied
+
+        request_id = self.request.id
+        if not request_id:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(
+                f"CRITICAL: self.request.id is falsy ({repr(request_id)}) in task. "
+                f"This should never happen. Request: {self.request}"
+            )
+            raise RuntimeError(
+                f"session_id not provided and self.request.id is unavailable ({repr(request_id)}). "
+                "This indicates a serious bug in Celery task initialization."
+            )
+
+        return request_id
 
     @classmethod
     def get_loop(cls) -> asyncio.AbstractEventLoop:
@@ -101,7 +124,6 @@ if TYPE_CHECKING:
         def get_loop(cls) -> asyncio.AbstractEventLoop: ...
         @classmethod
         def _close_thread_loop(cls, *_: object) -> None: ...
-        def resolve_task_id(self, supplied: str | None) -> str: ...
         def resolve_session_id(self, supplied: str | None) -> str: ...
 else:
 
