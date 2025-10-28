@@ -179,6 +179,11 @@ class WorkerLifecycle:
             f"Worker registered: {self.worker_id}",
             extra={"worker_id": self.worker_id, "capabilities": self.capabilities},
         )
+        # Immediate heartbeat pulse to avoid TTL expiry between register and thread start
+        try:
+            self._heartbeat_pulse()
+        except Exception as e:
+            logger.warning(f"Initial heartbeat pulse failed for {self.worker_id}: {e}")
 
     def start_heartbeat(self) -> None:
         """Start background heartbeat thread."""
@@ -192,6 +197,11 @@ class WorkerLifecycle:
         )
         self._heartbeat_thread.start()
         logger.info(f"Started heartbeat thread for worker {self.worker_id}")
+        # Pulse once immediately to ensure TTL is extended promptly
+        try:
+            self._heartbeat_pulse()
+        except Exception as e:
+            logger.warning(f"Heartbeat pulse after start failed for {self.worker_id}: {e}")
 
     def stop_heartbeat(self) -> None:
         """Stop heartbeat and mark sessions as orphaned."""
@@ -317,6 +327,37 @@ class WorkerLifecycle:
             self.shutdown_event.wait(self.heartbeat_interval)
 
         logger.debug(f"Heartbeat loop stopped for worker {self.worker_id}")
+
+    def _heartbeat_pulse(self) -> None:
+        """Perform a single heartbeat update (synchronous)."""
+        worker_key = f"browser:worker:{self.worker_id}"
+        sessions_key = f"browser:worker_sessions:{self.worker_id}"
+        heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
+
+        # Compute session count and write atomically
+        with self.redis.pipeline() as pipe:
+            session_count = self.redis.scard(sessions_key)
+            pipe.hset(
+                worker_key,
+                mapping={
+                    "last_heartbeat": datetime.now(UTC).isoformat(),
+                    "current_sessions": str(session_count),
+                },
+            )
+            pipe.expire(worker_key, self.heartbeat_timeout)
+            pipe.expire(sessions_key, self.heartbeat_timeout)
+
+            hb: HeartbeatRecord = {
+                "timestamp": str(time.time()),
+                "worker_type": "browser",
+                "worker_id": self.worker_id,
+            }
+            pipe.hset(heartbeat_key, mapping=_hb_mapping(hb))
+            heartbeat_ttl = int(3 * float(self.heartbeat_interval))
+            if heartbeat_ttl < 1:
+                heartbeat_ttl = 1
+            pipe.expire(heartbeat_key, heartbeat_ttl)
+            pipe.execute()
 
     def _has_gpu(self) -> bool:
         """Check if GPU is available."""
