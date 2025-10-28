@@ -199,8 +199,10 @@ class BrowserEngine(ServiceABC):
         future: concurrent.futures.Future[T] = asyncio.run_coroutine_threadsafe(
             _on_engine_loop(), loop
         )
+        # Derive proxy timeout from Playwright timeout with grace, bounded to avoid hangs
+        timeout_seconds = max((self._timeout_ms / 1000.0) + 10.0, 60.0)
         # Wait for result in caller's loop with a timeout guard
-        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=30.0)
+        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout_seconds)
 
     async def run_write(self, fn: Callable[[], Awaitable[T]]) -> T:
         """Run *fn* with exclusive access (no other readers or writers).
@@ -232,8 +234,10 @@ class BrowserEngine(ServiceABC):
         future: concurrent.futures.Future[T] = asyncio.run_coroutine_threadsafe(
             _on_engine_loop(), loop
         )
+        # Derive proxy timeout from Playwright timeout with grace, bounded to avoid hangs
+        timeout_seconds = max((self._timeout_ms / 1000.0) + 10.0, 60.0)
         # Wait for result in caller's loop with a timeout guard
-        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=30.0)
+        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout_seconds)
 
     # ------------------------------------------------------------------+
     # Lifecycle                                                        #
