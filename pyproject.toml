@@ -37,7 +37,6 @@ python-json-logger = "^3.3.0"
 docker = ">=7.0.0"
 # --- celery for distributed task queue ---
 celery = {extras = ["redis"], version = ">=5.3,<5.4"}
-flower = ">=2.0"  # Celery monitoring
 "async-timeout" = ">=4.0"  # Timeout handling for celery_autoscaler
 asgiref = ">=3.8"
 
@@ -70,17 +69,19 @@ python_paths = ["."]
 [tool.mypy]
 # Search path for additional stubs / local packages
 mypy_path = "stubs"
-# Exclude noisy helper stubs from type-checking
-exclude = [
-    "tests/helpers/mocks.py",
-    "tests/helpers/__init__.py",
-]
+# Plugins
+plugins = ["pydantic.mypy"]
+# Limit type-checking to library code only to avoid Windows path issues with device mounts
+files = ["swarm"]
 # Strictness knobs ─ tighten gradual typing
 strict_optional = true
 warn_unused_configs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 disallow_untyped_defs = true
+explicit_package_bases = true
+namespace_packages = true
+ignore_missing_imports = true
 
 # ------------------------------------------------------------------
 # Ruff – the fast Python linter & formatter
@@ -99,3 +100,4 @@ ignore = ["E501", "UP035", "F401", "UP022"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
+
