@@ -53,7 +53,8 @@ services:
       - "6380:6380"  # HAProxy Redis endpoint with automatic failover
       - "8080:8080"  # HAProxy stats dashboard
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   prometheus:
@@ -103,7 +104,7 @@ services:
       - "3100:3100"   # Loki HTTP API
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
     restart: unless-stopped
@@ -156,8 +157,10 @@ services:
       - ${USERPROFILE}/.config/swarm/personas:/home/pwuser/.config/swarm/personas:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro  # For DockerApiBackend
     depends_on:
-      - redis
-      - haproxy-redis
+      redis:
+        condition: service_healthy
+      haproxy-redis:
+        condition: service_healthy
     environment:
       - METRICS_PORT=9200
       - USE_DISTRIBUTED_WORKERS=true
@@ -189,37 +192,6 @@ services:
       start_period: 90s
     restart: unless-stopped
 
-  # Flower for Celery monitoring
-  flower:
-    image: mher/flower:2.0
-    container_name: flower
-    profiles: ["monitoring"]
-    command:
-      - celery
-      - --broker=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
-      - flower
-      - --port=5555
-      - --url_prefix=
-      # Disable Celery events in Flower – REST API is sufficient for autoscaler
-      - --events=false
-      - --inspect-timeout=60
-      - --persistent
-      - --loglevel=info
-      - --broker_api=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
-    ports:
-      - "5555:5555"
-    environment:
-      - FLOWER_UNAUTHENTICATED_API=true
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-    depends_on:
-      - haproxy-redis
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:5555/healthcheck"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
   # Celery Exporter for Prometheus metrics
   # Provides task-level metrics without the overhead of Flower
   celery-exporter:
@@ -236,7 +208,8 @@ services:
     environment:
       - CE_BROKER_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
     depends_on:
-      - haproxy-redis
+      haproxy-redis:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
@@ -316,34 +289,32 @@ services:
     profiles: ["monitoring"]
     env_file:
       - .env
-    # Monitors Celery queues via Flower and scales workers
     stop_signal: SIGTERM
     stop_grace_period: 30s
     command:
       - python
       - -m
       - scripts.celery_autoscaler
-      - --flower-url=http://flower:5555
       - --orchestrator=docker-api
     environment:
-      - FLOWER_URL=http://flower:5555
       - ORCHESTRATOR=docker-api
       - CHECK_INTERVAL=30
       - PYTHONPATH=/app
       - COMPOSE_PROJECT_NAME=swarm
       - WORKER_METRICS_PORT=9100
-      # --- Redis Configuration ---
-      # All services connect to HAProxy WITH auth on port 6380
-      # HAProxy passes connections through to backends (TCP proxy)
+      - AUTOSCALER_METRICS_PORT=9809
       - REDIS_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
       - CELERY_BROKER_URLS=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+    ports:
+      - "9809:9809"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - .:/app
     depends_on:
-      - flower
-      - redis
-      - haproxy-redis
+      redis:
+        condition: service_healthy
+      haproxy-redis:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD

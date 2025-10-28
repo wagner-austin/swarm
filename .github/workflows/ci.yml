@@ -42,6 +42,14 @@ jobs:
       - name: Run ruff format check
         run: poetry run ruff format --check .
 
+      - name: Enforce no casts/ignores in app code
+        run: |
+          set -e
+          if grep -RIn "cast\(" swarm scripts | grep -v "^$"; then
+            echo "Forbidden typing.cast found in app code" >&2; exit 1; fi
+          if grep -RIn "#\s*type:\s*ignore" swarm scripts | grep -v "^$"; then
+            echo "Forbidden type: ignore found in app code" >&2; exit 1; fi
+
       - name: Run mypy
         run: poetry run mypy --strict .
 

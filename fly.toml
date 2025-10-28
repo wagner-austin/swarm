@@ -28,10 +28,8 @@ kill_timeout = 30
   swarm = "python -m swarm.core"
   # Celery worker for browser automation
   worker = "/usr/local/bin/entrypoint.worker.sh"
-  # Flower monitoring UI (optional - can be removed to save resources)
-  flower = "celery --broker=${CELERY_BROKER_URL} flower --port=5555 --persistent"
-  # Autoscaler using Fly.io backend
-  autoscaler = "python -m scripts.celery_autoscaler --flower-url=http://localhost:5555 --orchestrator=fly.io --fly-api-token=$FLY_API_TOKEN"
+  # Autoscaler using Fly.io backend (Flower-free)
+  autoscaler = "python -m scripts.celery_autoscaler --orchestrator=fly.io --fly-api-token=$FLY_API_TOKEN"
 
 # Health checks for each process type
 [[checks]]

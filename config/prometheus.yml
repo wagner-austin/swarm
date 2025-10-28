@@ -31,6 +31,13 @@ scrape_configs:
     scrape_interval: 15s
     metrics_path: /metrics
 
+  - job_name: 'autoscaler'
+    static_configs:
+      # Autoscaler metrics: aggregated queue depth and decisions
+      - targets: ['autoscaler:9809']
+    scrape_interval: 15s
+    metrics_path: /metrics
+
   - job_name: 'haproxy_stats'
     static_configs:
       # HAProxy stats: backend health, connection counts, failover status

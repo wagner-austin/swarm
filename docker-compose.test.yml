@@ -27,6 +27,7 @@ services:
     environment:
       # Keep using HAProxy like production, but it points to local Redis only
       REDIS_URL: redis://haproxy-redis:6380/0
+      REDIS__URL: redis://haproxy-redis:6380/0
       CELERY_BROKER_URLS: >-
         redis://default:${REDIS_PASSWORD}@redis:6379/0;redis://default:${REDIS_PASSWORD}@redis:6379/0
 
@@ -34,11 +35,8 @@ services:
     environment:
       # Keep using HAProxy like production for consistency
       REDIS_URL: redis://haproxy-redis:6380/0
+      REDIS__URL: redis://haproxy-redis:6380/0
       CELERY_BROKER_URLS: >-
         redis://default:${REDIS_PASSWORD}@redis:6379/0;redis://default:${REDIS_PASSWORD}@redis:6379/0
 
-  flower:
-    environment:
-      # Flower also uses HAProxy for consistency with other services
-      CELERY_BROKER_URL: redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
-      CELERY_RESULT_BACKEND: redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
+  # Flower removed in test stack

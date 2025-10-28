@@ -30,8 +30,10 @@ services:
     volumes:
       - .:/app
     depends_on:
-      - redis
-      - haproxy-redis
+      redis:
+        condition: service_healthy
+      haproxy-redis:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD

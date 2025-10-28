@@ -21,33 +21,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Flower for Celery monitoring
-  flower:
-    image: mher/flower:2.0
-    container_name: flower
-    command:
-      # Uses Celery app configuration which includes Upstash + fallback
-      - celery
-      - --app=swarm.celery_app:app
-      - flower
-      - --port=5555
-      - --url_prefix=
-    ports:
-      - "5555:5555"
-    env_file:
-      - ../.env
-    environment:
-      # These will use Upstash from .env with local fallback
-      - REDIS_FALLBACK_URL=redis://redis-fallback:6379/0
-      - REDIS_FALLBACK_ENABLED=true
-    depends_on:
-      - redis-fallback
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:5555/healthcheck"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
+  # Flower removed; use autoscaler and exporter/observability instead
 
   # Discord frontend
   swarm:
@@ -75,7 +49,6 @@ services:
       - "9200:9200"
     depends_on:
       - redis-fallback
-      - flower
     healthcheck:
       test:
         - CMD
@@ -153,10 +126,8 @@ services:
       - python
       - -m
       - scripts.celery_autoscaler
-      - --flower-url=http://flower:5555
       - --orchestrator=docker-api
     environment:
-      - FLOWER_URL=http://flower:5555
       - ORCHESTRATOR=docker-api
       - CHECK_INTERVAL=30
       - PYTHONPATH=/app
@@ -169,7 +140,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ..:/app
     depends_on:
-      - flower
       - redis-fallback
     healthcheck:
       test:
