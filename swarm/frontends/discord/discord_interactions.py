@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any
+from typing import Mapping
 
 import discord
 from swarm.core.settings import DISCORD_LIMIT, settings
@@ -89,7 +89,13 @@ async def safe_defer(
 async def safe_send(
     interaction: discord.Interaction,
     content: str | None = None,
-    **kwargs: Any,
+    *,
+    embed: discord.Embed | None = None,
+    file: discord.File | None = None,
+    ephemeral: bool = False,
+    suppress_embeds: bool = False,
+    silent: bool = False,
+    tts: bool = False,
 ) -> None:
     """Send a response/follow-up/channel message in a *safe* order.
 
@@ -98,7 +104,7 @@ async def safe_send(
         2. ``interaction.followup.send``.
         3. Fallback to the interaction's channel (if available).
 
-    Any ``discord.HTTPException`` not related to codes *10062* or *40060* is
+    All HTTP exceptions from Discord not related to codes *10062* or *40060* are
     re-raised so upstream handlers can decide the appropriate action.
     """
     # Enforce Discord message length limits (settings.discord_chunk_size defaults to 1900)
@@ -106,8 +112,6 @@ async def safe_send(
         max_len: int = DISCORD_LIMIT
         if len(content) > max_len:
             content = content[: max_len - 1] + "…"
-
-    from typing import cast
 
     target: discord.abc.Messageable | None = None
 
@@ -127,7 +131,42 @@ async def safe_send(
 
     if not done_flag:
         try:
-            await interaction.response.send_message(content or "", **kwargs)
+            if embed is not None and file is not None:
+                await interaction.response.send_message(
+                    content or "",
+                    embed=embed,
+                    file=file,
+                    ephemeral=ephemeral,
+                    suppress_embeds=suppress_embeds,
+                    silent=silent,
+                    tts=tts,
+                )
+            elif embed is not None:
+                await interaction.response.send_message(
+                    content or "",
+                    embed=embed,
+                    ephemeral=ephemeral,
+                    suppress_embeds=suppress_embeds,
+                    silent=silent,
+                    tts=tts,
+                )
+            elif file is not None:
+                await interaction.response.send_message(
+                    content or "",
+                    file=file,
+                    ephemeral=ephemeral,
+                    suppress_embeds=suppress_embeds,
+                    silent=silent,
+                    tts=tts,
+                )
+            else:
+                await interaction.response.send_message(
+                    content or "",
+                    ephemeral=ephemeral,
+                    suppress_embeds=suppress_embeds,
+                    silent=silent,
+                    tts=tts,
+                )
             return
         except discord.HTTPException as exc:
             # If the exception is *unknown interaction* or *already
@@ -139,14 +178,46 @@ async def safe_send(
 
     # Fallback to follow-up webhook.
     try:
-        await interaction.followup.send(content or "", **kwargs)
+        if embed is not None and file is not None:
+            await interaction.followup.send(
+                content or "",
+                embed=embed,
+                file=file,
+                suppress_embeds=suppress_embeds,
+                silent=silent,
+                tts=tts,
+            )
+        elif embed is not None:
+            await interaction.followup.send(
+                content or "",
+                embed=embed,
+                suppress_embeds=suppress_embeds,
+                silent=silent,
+                tts=tts,
+            )
+        elif file is not None:
+            await interaction.followup.send(
+                content or "",
+                file=file,
+                suppress_embeds=suppress_embeds,
+                silent=silent,
+                tts=tts,
+            )
+        else:
+            await interaction.followup.send(
+                content or "",
+                suppress_embeds=suppress_embeds,
+                silent=silent,
+                tts=tts,
+            )
         return
     except discord.HTTPException as exc:
         if exc.code not in (10062, 10015, 40060):
             raise
         # The follow-up failed (likely because the token is expired) – as a
         # last resort fall back to the interaction's channel.
-        target = cast(discord.abc.Messageable | None, interaction.channel)
+        chan = getattr(interaction, "channel", None)
+        target = chan if isinstance(chan, discord.abc.Messageable) else None
 
     if target is None:  # DM or unknown channel; nothing more we can do.
         return
@@ -155,7 +226,37 @@ async def safe_send(
     # an unhandled error shadowing the root-cause.
     try:
         # The channel API has no concept of ephemerality.
-        kwargs.pop("ephemeral", None)
-        await target.send(content or "", **kwargs)
+        if embed is not None and file is not None:
+            await target.send(
+                content or "",
+                embed=embed,
+                file=file,
+                suppress_embeds=suppress_embeds,
+                silent=silent,
+                tts=tts,
+            )
+        elif embed is not None:
+            await target.send(
+                content or "",
+                embed=embed,
+                suppress_embeds=suppress_embeds,
+                silent=silent,
+                tts=tts,
+            )
+        elif file is not None:
+            await target.send(
+                content or "",
+                file=file,
+                suppress_embeds=suppress_embeds,
+                silent=silent,
+                tts=tts,
+            )
+        else:
+            await target.send(
+                content or "",
+                suppress_embeds=suppress_embeds,
+                silent=silent,
+                tts=tts,
+            )
     except Exception:  # pragma: no cover – log and swallow
         logger.exception("Final channel send fallback failed.")

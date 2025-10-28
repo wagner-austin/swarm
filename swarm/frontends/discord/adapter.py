@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Protocol
 
 from swarm.core.lifecycle import SwarmLifecycle
 from swarm.frontends.base import FrontendAdapter
@@ -19,6 +19,6 @@ class DiscordFrontendAdapter(FrontendAdapter):
     async def shutdown(self) -> None:
         await self.lifecycle.shutdown(signal_name="frontend_shutdown")
 
-    async def dispatch_message(self, message: Any) -> None:
+    async def dispatch_message(self, message: object) -> None:
         # For Discord, most messages are handled via events, but this allows future orchestration.
         pass

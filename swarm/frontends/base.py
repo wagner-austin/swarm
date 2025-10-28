@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Protocol
 
 
 class FrontendAdapter(ABC):
@@ -19,7 +19,7 @@ class FrontendAdapter(ABC):
         ...
 
     @abstractmethod
-    async def dispatch_message(self, message: Any) -> None:
+    async def dispatch_message(self, message: object) -> None:
         """Dispatch a message or event to this frontend (optional for some frontends)."""
         ...
 
