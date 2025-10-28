@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.Cog
 
 from swarm.ai import providers as _providers
+from swarm.ai.contracts import Message
 from swarm.ai.personas import (
     PERSONALITIES,
     prompt as persona_prompt,
@@ -16,7 +17,6 @@ from swarm.core.settings import DISCORD_LIMIT, settings  # fully typed alias
 # Centralized interaction helpers
 from swarm.frontends.discord.discord_interactions import safe_send
 from swarm.history.backends import HistoryBackend
-from swarm.history.in_memory import MemoryBackend
 from swarm.plugins.commands.decorators import background_app_command
 
 INTERNAL_ERROR = "An internal error occurred. Please try again later."
@@ -31,18 +31,14 @@ DEFAULT_SYSTEM_PROMPT = "Always include your name at the beginning of a response
 
 
 class Chat(commands.Cog):
-    def __init__(
-        self, discord_bot: commands.Bot, history_backend: HistoryBackend | None = None
-    ) -> None:
+    def __init__(self, discord_bot: commands.Bot, history_backend: HistoryBackend) -> None:
         super().__init__()  # <-- no args
         self.bot = discord_bot  # keep ref for future use
         # Remember last selected personality per channel
         self._channel_persona: dict[int, str] = {}
-        # Conversation history backend (pluggable)
-        if history_backend is None:
-            # Fallback to in-memory if DI not wired (e.g. in tests)
-            history_backend = MemoryBackend(settings.conversation_max_turns)
+        # Conversation history backend (DI required – no fallback)
         self._history: HistoryBackend = history_backend
+        logger.info("[Chat] Using history backend: %s", type(self._history).__name__)
 
     async def cog_unload(self) -> None:
         """Clean up resources when the cog is unloaded."""
@@ -135,20 +131,19 @@ class Chat(commands.Cog):
         # Inform Discord we are processing (shows typing indicator)
 
         # Build chat history (excluding the system prompt – passed separately)
-        messages: list[dict[str, str]] = [
-            {"role": role, "content": content}
-            for u, a in await self._history.recent(channel_id_int, personality)
-            for role, content in (("user", u), ("assistant", a))
-        ]
-        messages.append({"role": "user", "content": prompt})
+        messages: list[Message] = []
+        for u, a in await self._history.recent(channel_id_int, personality):
+            messages.append(Message(role="user", content=u))
+            messages.append(Message(role="assistant", content=a))
+        messages.append(Message(role="user", content=prompt))
 
         # Call the provider and collect its reply
-        model: str | None = getattr(settings, f"{provider_name}_model", None)
+        model_opt: str | None = getattr(settings, f"{provider_name}_model", None)
         try:
             raw_reply = await provider.generate(
                 messages=messages,
                 stream=True,
-                model=model,
+                model=model_opt or "",
                 system_prompt=final_system_prompt,
             )
         except ModelOverloaded:

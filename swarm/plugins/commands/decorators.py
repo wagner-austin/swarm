@@ -12,7 +12,7 @@ import asyncio
 import functools
 import logging
 from collections.abc import Callable, Coroutine
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import ParamSpec, TypeGuard, TypeVar
 
 import discord
 from discord.ext import commands
@@ -41,7 +41,9 @@ async def setup(_bot: commands.Bot) -> None:  # pragma: no cover
 
 def background_app_command(
     *, defer_ephemeral: bool = False
-) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, None]]]:
+) -> Callable[
+    [Callable[P, Coroutine[object, object, R]]], Callable[P, Coroutine[object, object, None]]
+]:
     """Decorate **long-running** ``discord.app_commands`` commands.
 
     Behaviour:
@@ -58,9 +60,12 @@ def background_app_command(
     value.
     """
 
+    def _looks_like_interaction(obj: object) -> TypeGuard[discord.Interaction]:
+        return hasattr(obj, "response") and hasattr(obj, "followup")
+
     def decorator(
-        func: Callable[P, Coroutine[Any, Any, R]],
-    ) -> Callable[P, Coroutine[Any, Any, None]]:
+        func: Callable[P, Coroutine[object, object, R]],
+    ) -> Callable[P, Coroutine[object, object, None]]:
         @functools.wraps(func)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
             # The canonical signature for a command cog method is
@@ -68,15 +73,19 @@ def background_app_command(
             # so the *first* positional arg after ``self`` is the interaction.
             interaction: discord.Interaction | None = None
             if "interaction" in kwargs:
-                interaction = cast(discord.Interaction, kwargs["interaction"])
+                maybe = kwargs["interaction"]
+                if isinstance(maybe, discord.Interaction):
+                    interaction = maybe
+                elif _looks_like_interaction(maybe):
+                    interaction = maybe
             elif args:
                 # args[0] = self, args[1] = interaction (usually)
                 maybe = args[1] if len(args) > 1 else None
                 # Accept stub/mock objects used in unit tests that mimic the
                 # minimal ``discord.Interaction`` interface instead of using
                 # ``isinstance`` which fails for AsyncMock-spec instances.
-                if maybe is not None and hasattr(maybe, "response") and hasattr(maybe, "followup"):
-                    interaction = cast(discord.Interaction, maybe)
+                if maybe is not None and _looks_like_interaction(maybe):
+                    interaction = maybe
 
             if interaction is None:
                 raise TypeError(
@@ -90,9 +99,9 @@ def background_app_command(
             async def _runner() -> None:
                 try:
                     # Remove testing-only flag before forwarding to actual command.
-                    forwarded_kwargs = dict(kwargs)
-                    forwarded_kwargs.pop("sync_in_test", None)
-                    await func(*args, **forwarded_kwargs)  # type: ignore[arg-type]
+                    if "sync_in_test" in kwargs:
+                        del kwargs["sync_in_test"]
+                    await func(*args, **kwargs)
                 except Exception as exc:  # noqa: BLE001 – intentional blanket
                     logger.exception("Unhandled error in background command", exc_info=exc)
                     # 3. Surface a generic error to the user – do *not* leak internals.

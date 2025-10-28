@@ -1,7 +1,7 @@
 """AlertPump Cog
 ================
 Background task that relays runtime alerts (text messages) from
-`SwarmLifecycle.alerts_q` to the swarm owner via DM.  Any part of the core system can
+`SwarmLifecycle.alerts_q` to the swarm owner via DM. any part of the core system can
 enqueue a human-readable string on that queue and it will be delivered.
 """
 
@@ -13,7 +13,7 @@ import csv
 import io
 import logging
 import os
-from typing import Any, Coroutine, Mapping, Optional, Tuple, cast
+from typing import Mapping, Protocol
 
 import discord
 import requests
@@ -59,7 +59,9 @@ def read_haproxy_backend_status(
 ) -> tuple[bool, bool, bool]:
     """Return (upstash_up, local_up, in_failover).
 
-    Failover = local (backup) is up AND (primary is down OR local is serving traffic).
+    Failover is considered active only when the primary (Upstash) is DOWN and the
+    local backup is UP. Using session counts for the backup is noisy and can lead
+    to false positives; rely on UP/DOWN status for robust detection.
     """
     url = f"{base.rstrip('/')}/stats;csv;norefresh"
     r = requests.get(url, timeout=timeout, auth=auth)
@@ -68,7 +70,6 @@ def read_haproxy_backend_status(
     rdr = csv.DictReader(io.StringIO(r.text))
     upstash_up = False
     local_up = False
-    local_has_sessions = False
 
     for row in rdr:
         px = _g(row, "# pxname")
@@ -77,22 +78,24 @@ def read_haproxy_backend_status(
             continue
 
         status = (_g(row, "status") or "").upper()
-        scur = _to_int(_g(row, "scur"))
 
         if sv == "redis_0":  # primary (Upstash)
             upstash_up = status == "UP"
         elif sv == "redis_1":  # backup (local)
             local_up = status == "UP"
-            local_has_sessions = scur > 0
-
-    in_failover = local_up and (not upstash_up or local_has_sessions)
+    # Robust rule: failover only when primary is DOWN and backup is UP
+    in_failover = local_up and (not upstash_up)
     return upstash_up, local_up, in_failover
+
+
+class _HasAlertsQueue(Protocol):
+    alerts_q: asyncio.Queue[str]
 
 
 class AlertPump(commands.Cog):
     """Listens on ``lifecycle.alerts_q`` and forwards messages to the swarm owner."""
 
-    def __init__(self, *, discord_bot: commands.Bot, lifecycle: Any) -> None:
+    def __init__(self, *, discord_bot: commands.Bot, lifecycle: _HasAlertsQueue) -> None:
         super().__init__()  # No bot passed to base
         self.discord_bot = discord_bot
         self.lifecycle = lifecycle
@@ -106,7 +109,7 @@ class AlertPump(commands.Cog):
             logger.warning("AlertPump loaded but lifecycle.alerts_q not available – disabled")
             return  # cannot proceed without a queue
 
-        q: asyncio.Queue[str] = cast("asyncio.Queue[str]", self.lifecycle.alerts_q)
+        q: asyncio.Queue[str] = self.lifecycle.alerts_q
         loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._relay_loop(q))
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any, Coroutine, cast
+from typing import Coroutine, Protocol
 
 import discord  # need both Message & Interaction types
 from discord.ext import commands
@@ -17,10 +17,15 @@ from swarm.core import metrics as default_metrics
 from swarm.core.telemetry import SWARM_LATENCY
 
 
+class MetricsLike(Protocol):
+    def increment_message_count(self) -> None: ...
+    def increment_discord_message_count(self) -> None: ...
+
+
 class MetricsTracker(commands.Cog):
     """Increment lightweight counters for /status."""
 
-    def __init__(self, discord_bot: commands.Bot, metrics: Any = default_metrics) -> None:
+    def __init__(self, discord_bot: commands.Bot, metrics: MetricsLike = default_metrics) -> None:
         # keep a ref so we can recognise our own messages
         self.bot = discord_bot
         self.metrics = metrics
@@ -126,5 +131,5 @@ class MetricsTracker(commands.Cog):
             self.metrics.increment_discord_message_count()
 
 
-async def setup(bot: commands.Bot, metrics: Any | None = None) -> None:  # noqa: D401 – entry point
+async def setup(bot: commands.Bot, metrics: MetricsLike | None = None) -> None:  # noqa: D401 – entry point
     await bot.add_cog(MetricsTracker(discord_bot=bot, metrics=metrics or default_metrics))

@@ -1,43 +1,67 @@
 """
 Browser Health Monitoring for Discord frontend
-==========================================
+==============================================
 
-Monitors Celery browser workers using the Celery control API and sets degradation
-status when browser workers become unavailable, providing fail-fast behavior for
-web commands.
+Single source of truth for liveness: Redis heartbeats.
+Counts fresh heartbeat keys for browser workers, caches status, and persists a
+Redis snapshot for other components to read (e.g., web command health gate).
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import NotRequired, TypedDict
 
-import redis.asyncio as redis_asyncio
+from discord.ext import commands
 
+from swarm.core.telemetry import (
+    BROWSER_DEGRADED,
+    BROWSER_HEALTH_LAST_CHECK_SECONDS,
+    BROWSER_HEALTHY_WORKERS,
+)
 from swarm.plugins.base_di import BaseDIClientCog
 from swarm.types import RedisBytes
 
 logger = logging.getLogger(__name__)
 
 
+class BrowserHealthStatus(TypedDict):
+    """Typed shape for cached browser health status."""
+
+    healthy_workers: int
+    is_degraded: bool
+    last_check: float
+    min_required: int
+    healthy: bool
+    error: NotRequired[str]
+
+
+STALE_WINDOW_SECONDS: float = 90.0
+
+
 class BrowserHealthMonitor(BaseDIClientCog):
-    """
-    Monitors Celery browser workers and tracks pool health in the swarm.
+    """Monitors browser worker health via Redis heartbeats only."""
 
-    Uses Celery's control.ping() API to detect active workers and sets
-    BROWSER_DEGRADED status when fewer than minimum workers are healthy,
-    enabling web commands to fail fast instead of timing out.
-    """
-
-    def __init__(self, *, discord_bot: Any, redis_client: RedisBytes) -> None:
+    def __init__(self, *, discord_bot: commands.Bot, redis: RedisBytes | None = None) -> None:
         super().__init__(discord_bot)
         self.bot = discord_bot
-        self.redis = redis_client
         self.monitoring_task: asyncio.Task[None] | None = None
-        # Reduced from 15s to 60s to save Redis commands (was 57,600 commands/10 days)
-        # 60s is still fast enough to detect worker failures for fail-fast behavior
-        self.check_interval = 60.0  # seconds
+        self.check_interval = 60.0  # Check every 60 seconds
         self.min_healthy_workers = 1
+
+        # Expose Redis client from DI for snapshot persistence (optional)
+        self.redis: RedisBytes | None = redis
+
+        # Cached status
+        self._cached_status: BrowserHealthStatus = {
+            "healthy_workers": 0,
+            "is_degraded": True,
+            "last_check": 0.0,
+            "min_required": self.min_healthy_workers,
+            "healthy": False,
+        }
 
     async def cog_load(self) -> None:
         """Start background health monitoring when cog loads."""
@@ -69,29 +93,56 @@ class BrowserHealthMonitor(BaseDIClientCog):
                 await asyncio.sleep(self.check_interval)
 
     async def _check_worker_health(self) -> None:
-        """Check health of browser workers via Redis heartbeats and update status."""
-        try:
-            current_time = time.time()
+        """Check health of browser workers via Redis heartbeats."""
+        current_time = time.time()
+        healthy_workers = 0
 
-            # Count workers with active heartbeat keys
-            healthy_workers = 0
-            pattern = "browser:worker:*"
-            async for key in self.redis.scan_iter(match=pattern):  # type: ignore[attr-defined]
-                # Optional: we could also check remaining TTL here if needed
-                healthy_workers += 1
+        try:
+            if self.redis is None:
+                raise RuntimeError("Redis client unavailable for health aggregation")
+
+            keys: list[bytes] = await self.redis.keys("worker:heartbeat:browser:*")
+            fresh = 0
+            for k in keys:
+                key_str = k.decode()
+                ts_raw = await self.redis.hget(key_str, "timestamp")
+                if ts_raw is None:
+                    continue
+                ts_str = ts_raw.decode() if isinstance(ts_raw, (bytes | bytearray)) else str(ts_raw)
+                try:
+                    ts = float(ts_str)
+                except Exception:
+                    continue
+                if current_time - ts <= STALE_WINDOW_SECONDS:
+                    fresh += 1
+            healthy_workers = fresh
 
             is_degraded = healthy_workers < self.min_healthy_workers
 
-            # Store status in Redis for web commands to check
+            # Update cached status
+            self._cached_status = {
+                "healthy_workers": healthy_workers,
+                "is_degraded": is_degraded,
+                "last_check": current_time,
+                "min_required": self.min_healthy_workers,
+                "healthy": not is_degraded,
+            }
+
+            # Persist health snapshot for fast reads
             await self.redis.hset(
                 "browser:health",
                 mapping={
-                    "healthy_workers": healthy_workers,
-                    "is_degraded": str(is_degraded).lower(),
-                    "last_check": current_time,
-                    "min_required": self.min_healthy_workers,
+                    "healthy_workers": str(healthy_workers),
+                    "is_degraded": "true" if is_degraded else "false",
+                    "last_check": str(current_time),
+                    "min_required": str(self.min_healthy_workers),
                 },
             )
+
+            # Export Prometheus metrics
+            BROWSER_HEALTHY_WORKERS.set(healthy_workers)
+            BROWSER_DEGRADED.set(1 if is_degraded else 0)
+            BROWSER_HEALTH_LAST_CHECK_SECONDS.set(current_time)
 
             # Log status
             if is_degraded:
@@ -103,34 +154,21 @@ class BrowserHealthMonitor(BaseDIClientCog):
 
         except Exception as exc:
             logger.error(f"Failed to check worker health: {exc}", exc_info=True)
-
-    async def get_health_status(self) -> dict[str, Any]:
-        """Get current browser pool health status."""
-        try:
-            health_data = await self.redis.hgetall("browser:health")
-            if not health_data:
-                return {"healthy": False, "error": "No health data available"}
-
-            return {
-                "healthy_workers": int(health_data.get(b"healthy_workers", 0)),
-                "is_degraded": health_data.get(b"is_degraded", b"true").decode() == "true",
-                "last_check": float(health_data.get(b"last_check", 0)),
-                "min_required": int(health_data.get(b"min_required", 1)),
+            # Mark as degraded on error
+            self._cached_status = {
+                "healthy_workers": 0,
+                "is_degraded": True,
+                "last_check": current_time,
+                "min_required": self.min_healthy_workers,
+                "healthy": False,
+                "error": str(exc),
             }
-        except Exception as exc:
-            logger.error(f"Failed to get health status: {exc}")
-            return {"healthy": False, "error": str(exc)}
+
+    def get_health_status(self) -> BrowserHealthStatus:
+        """Get current browser pool health status from cache."""
+        return self._cached_status.copy()
 
 
-async def setup(discord_bot: Any) -> None:
+async def setup(discord_bot: commands.Bot) -> None:
     """Load the browser health monitoring cog."""
-    from swarm.core.containers import Container
-
-    if hasattr(discord_bot, "container"):
-        container: Container = discord_bot.container
-        redis_client = container.redis_client()
-        await discord_bot.add_cog(
-            BrowserHealthMonitor(discord_bot=discord_bot, redis_client=redis_client)
-        )
-    else:
-        logger.warning("Discord bot container not available, skipping browser health monitoring")
+    await discord_bot.add_cog(BrowserHealthMonitor(discord_bot=discord_bot))

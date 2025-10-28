@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, Protocol
+from typing import Awaitable, Callable, Protocol
 
 import discord
 from discord import app_commands
@@ -7,11 +7,13 @@ from discord.ext import commands
 
 from swarm.frontends.discord.discord_interactions import safe_send
 from swarm.frontends.discord.discord_owner import get_owner
+from swarm.frontends.discord.types import SafeSendFunc
 from swarm.plugins.base_di import BaseDIClientCog
+from swarm.utils.signals import _HasShutdown
 
 
 class MetricsProtocol(Protocol):
-    def get_stats(self) -> dict[str, Any]: ...
+    def get_stats(self) -> dict[str, float | int]: ...
     def format_hms(self, seconds: float) -> str: ...
 
 
@@ -20,10 +22,11 @@ class Shutdown(BaseDIClientCog):
         self,
         *,
         discord_bot: commands.Bot,
-        lifecycle: Any = None,
+        lifecycle: _HasShutdown | None = None,
         metrics_mod: MetricsProtocol | None = None,
-        get_owner_func: Callable[[commands.Bot], Any] | None = None,
-        safe_send_func: Callable[..., Any] | None = None,
+        get_owner_func: Callable[[commands.Bot], Awaitable[discord.User | discord.Member]]
+        | None = None,
+        safe_send_func: SafeSendFunc | None = None,
     ) -> None:
         BaseDIClientCog.__init__(self, discord_bot)
         self.discord_bot = discord_bot

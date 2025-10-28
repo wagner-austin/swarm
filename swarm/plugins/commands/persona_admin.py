@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 import discord
 import yaml
@@ -31,6 +31,7 @@ from swarm.ai.personas import (  # noqa: F401 – re-export for tests
 )
 from swarm.frontends.discord.discord_interactions import safe_send
 from swarm.frontends.discord.discord_owner import get_owner
+from swarm.frontends.discord.types import SafeDeferFunc, SafeSendFunc
 
 __all__ = ["PersonaAdmin"]
 
@@ -76,8 +77,8 @@ class PersonaAdmin(commands.GroupCog, group_name="persona"):
     def __init__(
         self,
         discord_bot: commands.Bot,
-        safe_send_func: Callable[..., Awaitable[Any]] | None = None,
-        safe_defer_func: Callable[..., Awaitable[Any]] | None = None,
+        safe_send_func: SafeSendFunc | None = None,
+        safe_defer_func: SafeDeferFunc | None = None,
     ) -> None:
         super().__init__()
         self.bot = discord_bot
