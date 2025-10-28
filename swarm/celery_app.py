@@ -6,7 +6,7 @@ This replaces the custom broker.py with Celery, providing:
 - Built-in retry logic
 - Task routing based on type
 - Better connection pooling
-- Monitoring via Flower
+- Monitoring via Prometheus/Grafana
 """
 
 from __future__ import annotations
@@ -14,30 +14,23 @@ from __future__ import annotations
 import logging
 import os
 import ssl
-from typing import Any, Iterator
+from typing import Iterator
 
 import celery.signals as signals
 from celery.app.base import Celery
 from celery.app.task import Task as CeleryTask
 from kombu import Queue
 
-from swarm.core.logger_setup import bind_log_context, setup_logging
+from swarm.core.logger_setup import bind_log_context
 from swarm.core.settings import Settings
 from swarm.distributed.browser_router import BrowserSessionRouter
 
-# Initialize logging first
-setup_logging()
 logger = logging.getLogger(__name__)
+
 settings = Settings()
 
-# Log startup configuration
-logger.info("Initializing Celery configuration")
-logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
-logger.info(f"Redis enabled: {settings.redis.enabled}")
-logger.info(f"Redis URL from settings: {'SET' if settings.redis.url else 'NOT SET'}")
-
-# Determine if we're in production
-is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
+# Determine if we're in production (standardized on DEPLOYMENT_ENV)
+is_production = os.getenv("DEPLOYMENT_ENV", "local").lower() == "production"
 
 
 # Fix rediss:// URLs for Celery - it requires ssl_cert_reqs in the URL
@@ -68,19 +61,12 @@ def create_celery(
         # Get Celery broker URLs from environment
         # This can be a single URL or semicolon-separated list for failover
         celery_broker_urls = os.getenv("CELERY_BROKER_URLS")
-        logger.info(f"CELERY_BROKER_URLS env var: {'SET' if celery_broker_urls else 'NOT SET'}")
-
         # Fallback to REDIS_URL if CELERY_BROKER_URLS not set
         if not celery_broker_urls:
             primary_url = settings.redis.url
             if not primary_url:
-                logger.error("FATAL: Neither CELERY_BROKER_URLS nor REDIS_URL configured")
-                logger.error(
-                    f"Environment variables checked: CELERY_BROKER_URLS={celery_broker_urls}, REDIS__URL={os.getenv('REDIS__URL')}"
-                )
                 raise ValueError("Neither CELERY_BROKER_URLS nor REDIS_URL configured")
             celery_broker_urls = primary_url
-            logger.warning("CELERY_BROKER_URLS not set, using REDIS_URL from settings")
     else:
         celery_broker_urls = broker_url
 
@@ -89,15 +75,8 @@ def create_celery(
     if ";" in celery_broker_urls:
         broker_urls_list = celery_broker_urls.split(";")
         broker_urls = [url.strip() for url in broker_urls_list if url.strip()]
-        logger.info(f"Celery configured with {len(broker_urls)} broker URLs for failover")
-        # Log sanitized URLs (hide passwords)
-        for i, url in enumerate(broker_urls):
-            sanitized = url.split("@")[1] if "@" in url else url
-            logger.info(f"  Broker {i + 1}: ...@{sanitized}")
     else:
         broker_urls = celery_broker_urls
-        sanitized = broker_urls.split("@")[1] if "@" in broker_urls else broker_urls
-        logger.info(f"Celery configured with single broker URL: ...@{sanitized}")
 
     # Process URLs to add SSL parameters
     if isinstance(broker_urls, list):
@@ -120,6 +99,8 @@ def create_celery(
         broker_url=broker_urls,  # List of URLs for automatic failover!
         # Result backend must be a single URL - use primary only
         result_backend=result_backend,
+        # Preserve our logging configuration in workers
+        worker_hijack_root_logger=False,
         broker_failover_strategy="round-robin",  # Use built-in round-robin strategy
         broker_connection_retry_on_startup=True,  # Retry connection on startup
         broker_connection_retry=True,  # Retry broker connection on failure
@@ -163,7 +144,7 @@ def create_celery(
         result_expires=3600,  # 1 hour in seconds
         # Event settings for monitoring
         # DISABLED by default - events cost 10-20 Redis commands per task!
-        # Flower still works for autoscaler (uses API, not events)
+        # celery-exporter provides metrics WITHOUT events via Celery Inspect API
         # celery-exporter provides metrics WITHOUT events via Celery Inspect API
         # Set CELERY_SEND_EVENTS=true environment variable to enable for debugging
         worker_send_task_events=os.getenv("CELERY_SEND_EVENTS", "false").lower() == "true",
@@ -189,13 +170,6 @@ def create_celery(
     # Import tasks to register them
     celery_app.autodiscover_tasks(["swarm.tasks"])
 
-    # Log configuration on startup
-    if isinstance(broker_urls, list):
-        logger.info(f"Celery broker failover configured with {len(broker_urls)} URLs")
-        logger.info("Failover strategy: round-robin")
-    else:
-        logger.info("Celery configured with single broker URL")
-
     return celery_app
 
 
@@ -214,44 +188,56 @@ app.conf.task_routes = [BrowserSessionRouter(), prev_routes]
 
 @signals.task_prerun.connect
 def bind_task_context(
-    sender: CeleryTask[Any, Any],
+    sender: object,
     task_id: str,
-    task: CeleryTask[Any, Any],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    **extra: Any,
+    task: object,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    **extra: object,
 ) -> None:
     """Bind task context to all logs within this task."""
-    bind_log_context(job_id=task_id)
-    logger.debug(f"Task {task.name} starting with ID {task_id}")
+    # Bind full context for the executing worker thread
+    try:
+        from swarm.utils.context_bootstrap import bootstrap_thread_log_context
+
+        request = getattr(task, "request", None)
+        hostname = getattr(request, "hostname", None)
+        bootstrap_thread_log_context(service="celery-worker", hostname=hostname, job_id=task_id)
+    except Exception as e:
+        # Best effort fallback: still bind service to avoid 'unknown' in logs
+        logger.warning(f"Failed to bootstrap full task context: {e}")
+        bind_log_context(service="celery-worker", job_id=task_id)
+    name = getattr(task, "name", "unknown")
+    logger.debug(f"Task {name} starting with ID {task_id}")
 
 
 @signals.task_postrun.connect
 def unbind_task_context(
-    sender: CeleryTask[Any, Any],
+    sender: object,
     task_id: str,
-    task: CeleryTask[Any, Any],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    retval: Any | None,
+    task: object,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    retval: object | None,
     state: str,
-    **extra: Any,
+    **extra: object,
 ) -> None:
     """Clear task context after task completes."""
-    logger.debug(f"Task {task.name} completed with ID {task_id}")
+    name = getattr(task, "name", "unknown")
+    logger.debug(f"Task {name} completed with ID {task_id}")
     bind_log_context(job_id="-")
 
 
 @signals.task_failure.connect
 def log_task_failure(
-    sender: CeleryTask[Any, Any],
+    sender: object,
     task_id: str,
     exception: Exception,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    traceback: Any,
-    einfo: Any,
-    **extra: Any,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    traceback: object,
+    einfo: object,
+    **extra: object,
 ) -> None:
     """Log task failures with full context."""
     logger.error(f"Task failed with ID {task_id}: {exception}")
@@ -266,9 +252,33 @@ used by the BrowserHealthMonitor and the affinity router.
 _worker_lifecycle = None  # Global instance
 
 
+@signals.worker_process_init.connect
+def bind_worker_context(**kwargs: object) -> None:
+    """Bind logging context in each worker subprocess.
+
+    This runs in each forked worker process, ensuring logs have proper
+    service and worker_id context instead of 'unknown'.
+    """
+    from swarm.core.logger_setup import (
+        auto_detect_deployment_context,
+        bind_deployment_context,
+        bind_log_context,
+    )
+
+    # Bind deployment context (hostname, container_id, etc)
+    deployment_context = auto_detect_deployment_context()
+    bind_deployment_context(context=deployment_context)
+
+    # Bind service context - worker_id will be set in worker_ready
+    bind_log_context(service="celery-worker")
+
+    logger.debug("Worker subprocess logging context bound")
+
+
 @signals.worker_ready.connect
-def register_worker(sender: Any, **kwargs: Any) -> None:
+def register_worker(sender: object, **kwargs: object) -> None:
     """Register worker when Celery starts."""
+    from swarm.core.logger_setup import bind_log_context
     from swarm.distributed.worker_lifecycle import WorkerLifecycle
 
     global _worker_lifecycle
@@ -280,11 +290,23 @@ def register_worker(sender: Any, **kwargs: Any) -> None:
         logger.error("Cannot register worker: no hostname found")
         return
 
-    # Extract the host part after @
-    if "@" in hostname:
-        worker_id = hostname.split("@", 1)[1]
-    else:
-        worker_id = hostname
+    # Use centralized identity helper for consistency
+    try:
+        from swarm.utils.worker_identity import canonical_worker_id
+
+        worker_id = canonical_worker_id(hostname)
+    except Exception:
+        # Fallback to basic split
+        worker_id = hostname.split("@", 1)[1] if "@" in hostname else hostname
+
+    # Bind full thread context for the worker main thread
+    try:
+        from swarm.utils.context_bootstrap import bootstrap_thread_log_context
+
+        bootstrap_thread_log_context(service="celery-worker", worker_id=worker_id)
+    except Exception as e:
+        logger.warning(f"Failed to bootstrap worker thread context: {e}")
+        bind_log_context(service="celery-worker", worker_id=worker_id)
 
     logger.info(f"Worker ready signal received, registering worker: {worker_id}")
 
@@ -300,7 +322,7 @@ def register_worker(sender: Any, **kwargs: Any) -> None:
 
 
 @signals.worker_shutting_down.connect
-def unregister_worker(sender: Any, **kwargs: Any) -> None:
+def unregister_worker(sender: object, **kwargs: object) -> None:
     """Clean up when worker shuts down."""
     global _worker_lifecycle
 

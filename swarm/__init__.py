@@ -8,20 +8,23 @@ accessible under the `swarm` namespace.
 
 from __future__ import annotations
 
-from importlib import import_module
-from types import ModuleType
-
 # ---------------------------------------------------------------------------+
 #  Apply shutdown-hygiene patches                                           +
 # ---------------------------------------------------------------------------+
 # Import once on startup to patch stdlib and third-party libraries.
 # This module is safe to import on any platform and with any dependency set,
 # as it internally handles platform-specific logic and optional dependencies.
+import logging
+from importlib import import_module
+from types import ModuleType
+
+logger = logging.getLogger(__name__)
+
 try:
     import swarm.compat.shutdown_hygiene  # noqa: F401
-except Exception:  # pragma: no cover
-    # This should not happen, but as a safeguard, we don't want to crash.
-    pass
+except Exception as exc:  # pragma: no cover
+    # Best-effort: log and continue; do not crash app startup on hygiene patch failure.
+    logger.warning(f"Failed to import shutdown hygiene patch: {exc}")
 
 
 # ---------------------------------------------------------------------------+

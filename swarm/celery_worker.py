@@ -35,7 +35,7 @@ from typing import List, Literal
 from celery import Celery
 
 from swarm.celery_app import app
-from swarm.core.logger_setup import setup_logging
+from swarm.core.logger_setup import bind_log_context, bootstrap_logging
 
 logger = logging.getLogger(__name__)
 
@@ -142,23 +142,15 @@ def start_worker(
         without_gossip: Disable gossip events
         without_mingle: Disable worker synchronization
     """
-    # Setup logging
-    setup_logging()
+    # Setup logging (config + deployment baseline)
+    bootstrap_logging(service="celery-worker")
 
-    # Bind deployment context for structured logging
-    from swarm.core.logger_setup import (
-        auto_detect_deployment_context,
-        bind_deployment_context,
-        bind_log_context,
+    # Bind full thread context (service + worker_id) for process main thread
+    from swarm.utils.context_bootstrap import bootstrap_thread_log_context
+
+    bootstrap_thread_log_context(
+        service="celery-worker", hostname=hostname or os.getenv("WORKER_ID")
     )
-
-    # Set deployment context (hostname, container_id, etc)
-    deployment_context = auto_detect_deployment_context()
-    bind_deployment_context(context=deployment_context)
-
-    # Set worker identity
-    worker_id = hostname or os.getenv("WORKER_ID", f"worker-{os.getpid()}")
-    bind_log_context(service="celery-worker", worker_id=worker_id)
 
     # Log startup information
     logger.info(
