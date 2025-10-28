@@ -118,35 +118,37 @@ def test_session_registry_basic() -> None:
 @pytest.mark.timeout(60)
 def test_session_affinity_same_worker() -> None:
     """Test that tasks with same session ID go to same worker."""
-    from swarm.tasks.browser import cleanup, click, goto, screenshot, wait_for
+    from swarm.tasks.browser import click, goto, screenshot, wait_for
 
     # This test works with just 1 worker
     _wait_for_browser_workers(min_workers=1)
 
     # Create a session with goto - allow extra time for first task
     goto_result = goto.delay(url=TEST_URL)
+    session_id = goto_result.id
+
     goto_res = goto_result.get(timeout=60)  # Extra time for worker startup
     assert goto_res["success"] is True
-    session_id = goto_res["session_id"]
+    # Verify session_id matches task_id (default behavior)
+    assert goto_res["session_id"] == session_id
 
-    try:
-        # Multiple operations should use the same session
-        screenshot_res = screenshot.delay(session_id=session_id).get(timeout=45)
-        assert screenshot_res["success"] is True
-        assert screenshot_res["session_id"] == session_id
+    # Multiple operations should use the same session
+    screenshot_res = screenshot.delay(session_id=session_id).get(timeout=45)
+    assert screenshot_res["success"] is True
+    assert screenshot_res["session_id"] == session_id
 
-        # Ensure the element is present and visible before clicking to reduce flakiness
-        wait_for.delay(session_id=session_id, selector=EXAMPLE_LINK_SELECTOR).get(timeout=60)
-        click_res = click.delay(
-            session_id=session_id,
-            selector=EXAMPLE_LINK_SELECTOR,
-            no_wait_after=True,
-        ).get(timeout=45)
-        assert click_res["success"] is True
-        assert click_res["session_id"] == session_id
+    # Ensure the element is present and visible before clicking to reduce flakiness
+    wait_for.delay(session_id=session_id, selector=EXAMPLE_LINK_SELECTOR).get(timeout=60)
 
-    finally:
-        cleanup.delay(session_id=session_id).get(timeout=10)
+    # Last task auto-cleans up
+    click_res = click.delay(
+        session_id=session_id,
+        selector=EXAMPLE_LINK_SELECTOR,
+        no_wait_after=True,
+        auto_cleanup=True,
+    ).get(timeout=45)
+    assert click_res["success"] is True
+    assert click_res["session_id"] == session_id
 
 
 @pytest.mark.skipif(os.getenv("NO_NET") == "1", reason="Network access disabled")
@@ -156,36 +158,30 @@ def test_different_sessions_distribution() -> None:
 
     With multiple workers, sessions COULD distribute but it's not required.
     """
-    from swarm.tasks.browser import cleanup, goto
+    from swarm.tasks.browser import goto
 
     # Get available workers (works with any number)
     _wait_for_browser_workers(min_workers=1)
 
-    # Create multiple sessions
+    # Create multiple sessions - each auto-cleans on completion
     class SessionInfo(TypedDict):
         session_id: str
         url: str
 
     sessions: list[SessionInfo] = []
 
-    try:
-        for i in range(3):
-            goto_result = goto.delay(url=f"{TEST_URL}?session={i}")
-            goto_res = goto_result.get(timeout=45)
-            assert goto_res["success"] is True
-            sessions.append({"session_id": goto_res["session_id"], "url": goto_res["url"]})
+    for i in range(3):
+        goto_result = goto.delay(url=f"{TEST_URL}?session={i}", auto_cleanup=True)
+        goto_res = goto_result.get(timeout=45)
+        assert goto_res["success"] is True
+        sessions.append({"session_id": goto_res["session_id"], "url": f"{TEST_URL}?session={i}"})
 
-        # Verify each session has its own session_id
-        task_ids = [s["session_id"] for s in sessions]
-        assert len(set(task_ids)) == 3, "Each session should have unique session_id"
+    # Verify each session has its own session_id
+    task_ids = [s["session_id"] for s in sessions]
+    assert len(set(task_ids)) == 3, "Each session should have unique session_id"
 
-        # If we have multiple workers, sessions COULD be distributed
-        # (but we don't require it for the test to pass)
-
-    finally:
-        # Cleanup all sessions
-        for session in sessions:
-            cleanup.delay(session_id=session["session_id"]).get(timeout=10)
+    # If we have multiple workers, sessions COULD be distributed
+    # (but we don't require it for the test to pass)
 
 
 def test_session_routing_after_registry_set() -> None:
@@ -286,31 +282,32 @@ def test_concurrent_session_operations() -> None:
 
     All concurrent tasks should successfully execute on the same worker.
     """
-    from swarm.tasks.browser import cleanup, goto, screenshot
+    from swarm.tasks.browser import goto, screenshot
 
     _wait_for_browser_workers(min_workers=1)
 
     # Create initial session
     goto_result = goto.delay(url=TEST_URL)
+    session_id = goto_result.id
+
     goto_res = goto_result.get(timeout=60)  # Extra time for first task
-    session_id = goto_res["session_id"]
+    assert goto_res["session_id"] == session_id
 
-    try:
-        # Launch multiple screenshot tasks concurrently
-        screenshot_tasks = []
-        for i in range(3):
-            task = screenshot.delay(session_id=session_id)
-            screenshot_tasks.append(task)
+    # Launch multiple screenshot tasks concurrently
+    screenshot_tasks = []
+    for i in range(3):
+        task = screenshot.delay(session_id=session_id)
+        screenshot_tasks.append(task)
 
-        # All should complete successfully
-        for i, task in enumerate(screenshot_tasks):
-            res = task.get(timeout=45)
-            assert res["success"] is True
-            assert res["session_id"] == session_id
-            print(f"Screenshot {i} completed")
+    # All should complete successfully
+    for i, task in enumerate(screenshot_tasks):
+        res = task.get(timeout=45)
+        assert res["success"] is True
+        assert res["session_id"] == session_id
+        print(f"Screenshot {i} completed")
 
-    finally:
-        cleanup.delay(session_id=session_id).get(timeout=10)
+    # Final cleanup screenshot
+    screenshot.delay(session_id=session_id, auto_cleanup=True).get(timeout=45)
 
 
 def test_router_direct_queue_passthrough() -> None:
@@ -333,66 +330,68 @@ def test_concurrent_session_operations_with_gap() -> None:
     This reproduces the prior deadlock window by adding a gap after goto, then
     launching concurrent screenshots. With a dedicated engine loop, all complete.
     """
-    from swarm.tasks.browser import cleanup, goto, screenshot
+    from swarm.tasks.browser import goto, screenshot
 
     _wait_for_browser_workers(min_workers=1)
 
     goto_result = goto.delay(url=TEST_URL)
+    session_id = goto_result.id
+
     goto_res = goto_result.get(timeout=60)
-    session_id = goto_res["session_id"]
+    assert goto_res["session_id"] == session_id
 
-    try:
-        # Insert a delay to ensure the creator loop would have stopped previously
-        time.sleep(1.0)
+    # Insert a delay to ensure the creator loop would have stopped previously
+    time.sleep(1.0)
 
-        tasks = [screenshot.delay(session_id=session_id) for _ in range(3)]
-        for t in tasks:
-            res = t.get(timeout=45)
-            assert res["success"] is True
-            assert res["session_id"] == session_id
-    finally:
-        cleanup.delay(session_id=session_id).get(timeout=20)
+    tasks = [screenshot.delay(session_id=session_id) for _ in range(3)]
+    for t in tasks:
+        res = t.get(timeout=45)
+        assert res["success"] is True
+        assert res["session_id"] == session_id
+
+    # Final cleanup screenshot
+    screenshot.delay(session_id=session_id, auto_cleanup=True).get(timeout=45)
 
 
 @pytest.mark.skipif(os.getenv("NO_NET") == "1", reason="Network access disabled")
 @pytest.mark.timeout(180)
 def test_many_concurrent_screenshots() -> None:
     """Stress: many concurrent screenshots complete without deadlock/timeouts."""
-    from swarm.tasks.browser import cleanup, goto, screenshot
+    from swarm.tasks.browser import goto, screenshot
 
     _wait_for_browser_workers(min_workers=1)
 
     goto_result = goto.delay(url=TEST_URL)
-    goto_res = goto_result.get(timeout=60)
-    session_id = goto_res["session_id"]
+    session_id = goto_result.id
 
-    try:
-        n = 10
-        tasks = [screenshot.delay(session_id=session_id) for _ in range(n)]
-        results = [t.get(timeout=60) for t in tasks]
-        assert all(r.get("success") is True for r in results)
-        assert all(r.get("session_id") == session_id for r in results)
-    finally:
-        cleanup.delay(session_id=session_id).get(timeout=20)
+    goto_res = goto_result.get(timeout=60)
+    assert goto_res["session_id"] == session_id
+
+    n = 10
+    tasks = [screenshot.delay(session_id=session_id) for _ in range(n)]
+    results = [t.get(timeout=60) for t in tasks]
+    assert all(r.get("success") is True for r in results)
+    assert all(r.get("session_id") == session_id for r in results)
+
+    # Final cleanup screenshot
+    screenshot.delay(session_id=session_id, auto_cleanup=True).get(timeout=45)
 
 
 @pytest.mark.skipif(os.getenv("NO_NET") == "1", reason="Network access disabled")
 @pytest.mark.timeout(60)
 def test_cleanup_does_not_deadlock_and_clears_state() -> None:
-    """Cleanup path schedules on engine loop and finishes reliably."""
-    from swarm.tasks.browser import cleanup, goto, screenshot, status
+    """Auto cleanup path schedules on engine loop and finishes reliably."""
+    from swarm.tasks.browser import goto, screenshot, status
 
     _wait_for_browser_workers(min_workers=1)
 
     goto_result = goto.delay(url=TEST_URL)
+    session_id = goto_result.id
     goto_res = goto_result.get(timeout=60)
-    session_id = goto_res["session_id"]
+    assert goto_res["session_id"] == session_id
 
-    # Ensure a page exists
-    screenshot.delay(session_id=session_id).get(timeout=45)
-
-    # Cleanup should complete quickly and not block
-    cleanup.delay(session_id=session_id).get(timeout=20)
+    # Last task auto-cleans up via lifecycle manager
+    screenshot.delay(session_id=session_id, auto_cleanup=True).get(timeout=45)
 
     # Status should indicate no active browser after cleanup
     st = status.delay(session_id=session_id).get(timeout=15)

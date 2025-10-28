@@ -74,7 +74,7 @@ def _wait_for_browser_worker(timeout: float = 20.0) -> None:
 def test_browser_goto_thread_pool() -> None:
     """Test that browser.goto task executes without coroutine serialization errors."""
     # Import tasks after app is configured to ensure they use the test app
-    from swarm.tasks.browser import cleanup, goto  # noqa: E402
+    from swarm.tasks.browser import goto  # noqa: E402
 
     _wait_for_browser_worker()
 
@@ -99,8 +99,10 @@ def test_browser_goto_thread_pool() -> None:
     assert "session_id" in res
     assert res["session_id"] == result.id
 
-    # Cleanup
-    cleanup.delay(session_id=res["session_id"]).get(timeout=10)
+    # Cleanup via auto_cleanup
+    from swarm.tasks.browser import screenshot
+
+    screenshot.delay(session_id=res["session_id"], auto_cleanup=True).get(timeout=10)
 
 
 @pytest.mark.integration
@@ -108,7 +110,7 @@ def test_browser_goto_thread_pool() -> None:
 def test_browser_screenshot_thread_pool() -> None:
     """Test that browser.screenshot task executes and returns base64 data."""
     # Import tasks after app is configured
-    from swarm.tasks.browser import cleanup, goto, screenshot  # noqa: E402
+    from swarm.tasks.browser import goto, screenshot  # noqa: E402
 
     _wait_for_browser_worker()
     # First navigate to a page
@@ -119,17 +121,13 @@ def test_browser_screenshot_thread_pool() -> None:
     session_id = goto_res["session_id"]
     print(f"Using session_id for screenshot: {session_id}")
 
-    try:
-        # Then take a screenshot using the same browser session
-        screenshot_res = screenshot.delay(session_id=session_id).get(timeout=30)
-        assert screenshot_res["success"] is True
-        assert "data" in screenshot_res
-        # Should be base64 encoded
-        assert isinstance(screenshot_res["data"], str)
-        assert len(screenshot_res["data"]) > 100  # Should have actual image data
-    finally:
-        # Cleanup the browser engine
-        cleanup.delay(session_id=session_id).get(timeout=10)
+    # Take screenshot with auto-cleanup
+    screenshot_res = screenshot.delay(session_id=session_id, auto_cleanup=True).get(timeout=30)
+    assert screenshot_res["success"] is True
+    assert "data" in screenshot_res
+    # Should be base64 encoded
+    assert isinstance(screenshot_res["data"], str)
+    assert len(screenshot_res["data"]) > 100  # Should have actual image data
 
 
 @pytest.mark.integration
@@ -137,7 +135,7 @@ def test_browser_screenshot_thread_pool() -> None:
 def test_browser_click_thread_pool() -> None:
     """Test that browser.click task executes without errors."""
     # Import tasks after app is configured
-    from swarm.tasks.browser import cleanup, click, goto, wait_for  # noqa: E402
+    from swarm.tasks.browser import click, goto, wait_for  # noqa: E402
 
     _wait_for_browser_worker()
 
@@ -147,19 +145,16 @@ def test_browser_click_thread_pool() -> None:
     assert goto_res["success"] is True
     session_id = goto_res["session_id"]
 
-    try:
-        # Click on the "More information..." link that exists on example.com
-        # Using text selector for reliability
-        # Wait for the element to be visible to reduce CI timing flakes
-        wait_for.delay(session_id=session_id, selector=EXAMPLE_LINK_SELECTOR).get(timeout=60)
-        click_res = click.delay(
-            session_id=session_id,
-            selector=EXAMPLE_LINK_SELECTOR,
-            no_wait_after=True,
-        ).get(timeout=30)
+    # Wait for the element to be visible to reduce CI timing flakes
+    wait_for.delay(session_id=session_id, selector=EXAMPLE_LINK_SELECTOR).get(timeout=60)
 
-        assert click_res["success"] is True
-        assert click_res["selector"] == EXAMPLE_LINK_SELECTOR
-    finally:
-        # Always cleanup the browser engine to prevent resource leaks
-        cleanup.delay(session_id=session_id).get(timeout=10)
+    # Click with auto-cleanup
+    click_res = click.delay(
+        session_id=session_id,
+        selector=EXAMPLE_LINK_SELECTOR,
+        no_wait_after=True,
+        auto_cleanup=True,
+    ).get(timeout=30)
+
+    assert click_res["success"] is True
+    assert click_res["selector"] == EXAMPLE_LINK_SELECTOR
