@@ -1,4 +1,16 @@
-from typing import Any, Dict, Generic, List, Mapping, Optional, Sequence, TypeVar, Union
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    TypeVar,
+    Union,
+    overload,
+)
 
 _T = TypeVar("_T")
 
@@ -12,6 +24,7 @@ class Redis(Generic[_T]):
     async def setex(self, key: str, seconds: int, value: _T) -> bool: ...
     async def exists(self, *keys: str) -> int: ...
     async def keys(self, pattern: str = "*") -> list[_T]: ...
+    def scan_iter(self, *, match: str | None = None) -> Any: ...
     async def scan(
         self,
         cursor: int = 0,
@@ -82,4 +95,9 @@ class Redis(Generic[_T]):
     async def close(self) -> None: ...
     def __await__(self) -> Any: ...  # For connection initialization
 
-def from_url(url: str, **kwargs: Any) -> Redis[bytes]: ...
+@overload
+def from_url(
+    url: str, *, decode_responses: Literal[False] = ..., **kwargs: Any
+) -> Redis[bytes]: ...
+@overload
+def from_url(url: str, *, decode_responses: Literal[True] = ..., **kwargs: Any) -> Redis[str]: ...
