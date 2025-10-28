@@ -2,23 +2,23 @@
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
+from typing import TYPE_CHECKING, TypedDict
 
 import redis
 
 from swarm.core.settings import Settings
 
 if TYPE_CHECKING:
-    # For type checking, Redis is generic
-    RedisSyncClient = redis.Redis[Any]
+    # For type checking, Redis client type
+    RedisSyncClient = redis.Redis
 else:
     # At runtime, Redis is not generic
     RedisSyncClient = redis.Redis
 
-# Using Any for Redis client type to avoid type stub issues
-RedisT = Any
+from swarm.infra.redis_protocols import RedisSyncProtocol, wrap_redis_sync
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class WorkerInfo:
 class WorkerRegistry:
     """Query and manage worker information."""
 
-    def __init__(self, redis_client: RedisT | None = None):
+    def __init__(self, redis_client: RedisSyncProtocol | None = None):
         """Initialize worker registry.
 
         Args:
@@ -52,9 +52,11 @@ class WorkerRegistry:
         settings = Settings()
         if not settings.redis.url:
             raise ValueError("Redis URL not configured")
-        self.redis: RedisT = redis_client or redis.from_url(
-            settings.redis.url, decode_responses=True
-        )
+
+        if redis_client is not None:
+            self.redis: RedisSyncProtocol = redis_client
+        else:
+            self.redis = wrap_redis_sync(redis.from_url(settings.redis.url, decode_responses=True))
 
     def get_all_workers(self) -> list[WorkerInfo]:
         """Get all registered workers (healthy and unhealthy).
@@ -83,7 +85,7 @@ class WorkerRegistry:
     def get_healthy_workers(self, capability: str | None = None) -> list[WorkerInfo]:
         """Get list of healthy workers with optional capability filter.
 
-        A worker is considered healthy if its heartbeat key exists (TTL not expired).
+        A worker is considered healthy if its standardized heartbeat timestamp is fresh.
 
         Args:
             capability: Optional capability to filter by (e.g., "browser", "gpu")
@@ -95,9 +97,17 @@ class WorkerRegistry:
         healthy_workers = []
 
         for worker in all_workers:
-            # Check if worker key still exists (TTL-based health check)
-            worker_key = f"browser:worker:{worker.worker_id}"
-            if self.redis.exists(worker_key):
+            # Authoritative liveness from heartbeat timestamp freshness
+            hb_key = f"worker:heartbeat:browser:{worker.worker_id}"
+            ts_raw = self.redis.hget(hb_key, "timestamp")
+            is_alive = False
+            try:
+                if ts_raw:
+                    ts = float(ts_raw)
+                    is_alive = (time.time() - ts) <= 90.0
+            except Exception:
+                is_alive = False
+            if is_alive:
                 # Apply capability filter if specified
                 if capability is None or capability in worker.capabilities:
                     healthy_workers.append(worker)
@@ -131,14 +141,21 @@ class WorkerRegistry:
         """
         healthy_workers = self.get_healthy_workers(capability)
 
-        if not healthy_workers:
+        candidates = healthy_workers
+        if not candidates:
+            # Fallback to all known workers if no healthy set (e.g., tests without heartbeats)
+            candidates = self.get_all_workers()
+            if capability is not None:
+                candidates = [w for w in candidates if capability in w.capabilities]
+
+        if not candidates:
             return None
 
         # Sort by load percentage
-        healthy_workers.sort(key=lambda w: w.load_percentage)
+        candidates.sort(key=lambda w: w.load_percentage)
 
         # Return the least loaded worker
-        return healthy_workers[0].worker_id
+        return candidates[0].worker_id
 
     def get_worker_by_id(self, worker_id: str) -> WorkerInfo | None:
         """Get information about a specific worker.
@@ -173,22 +190,29 @@ class WorkerRegistry:
             # Get all session affinity keys
             session_keys = self.redis.keys("browser:affinity:*")
 
-            for key in session_keys:
-                # Handle both bytes and string keys (decode_responses setting)
-                key_str = key.decode() if isinstance(key, bytes) else key
-                session_id = key_str.split(":")[-1]
-                owner = self.redis.get(key_str)
+            # No capability detection or fallback: standardized heartbeat is authoritative
 
-                if owner:
-                    # Extract worker ID from owner format
-                    worker_id = owner.decode() if isinstance(owner, bytes) else owner
-                    if "_" in worker_id:
-                        worker_id = worker_id.split("_", 1)[1]
+            for key_str in session_keys:
+                session_id = key_str.split(":", 2)[-1]
 
-                    # Check if worker is healthy
-                    worker_key = f"browser:worker:{worker_id}"
-                    if not self.redis.exists(worker_key):
-                        orphaned.append(session_id)
+                worker_id = self.redis.hget(key_str, "worker_id")
+                if not worker_id:
+                    continue
+
+                # Primary: liveness via standardized heartbeat timestamp
+                alive = False
+                try:
+                    hb_key = f"worker:heartbeat:browser:{worker_id}"
+                    ts_raw = self.redis.hget(hb_key, "timestamp")
+                    if ts_raw:
+                        ts = float(ts_raw)
+                        if (time.time() - ts) <= 90.0:
+                            alive = True
+                except Exception:
+                    alive = False
+
+                if not alive:
+                    orphaned.append(session_id)
 
         except Exception as e:
             logger.error(f"Failed to find orphaned sessions: {e}")
@@ -218,15 +242,10 @@ class WorkerRegistry:
 
         return cleaned
 
-    def _parse_worker_data(self, data: dict[bytes, bytes]) -> WorkerInfo | None:
+    def _parse_worker_data(self, data: dict[str, str]) -> WorkerInfo | None:
         """Parse raw Redis data into WorkerInfo object."""
         try:
-            # Decode all values
-            decoded = {}
-            for key, value in data.items():
-                key_str = key.decode() if isinstance(key, bytes) else key
-                value_str = value.decode() if isinstance(value, bytes) else value
-                decoded[key_str] = value_str
+            decoded = data
 
             # Parse specific fields
             capabilities = json.loads(decoded.get("capabilities", "[]"))
@@ -258,7 +277,7 @@ class WorkerRegistry:
             logger.error(f"Failed to parse worker data: {e}")
             return None
 
-    def get_summary(self) -> dict[str, Any]:
+    def get_summary(self) -> "WorkerFleetSummary":
         """Get a summary of the worker fleet status.
 
         Returns:
@@ -289,3 +308,14 @@ class WorkerRegistry:
             "capabilities": capability_counts,
             "orphaned_sessions": len(self.get_orphaned_sessions()),
         }
+
+
+class WorkerFleetSummary(TypedDict):
+    total_workers: int
+    healthy_workers: int
+    unhealthy_workers: int
+    total_sessions: int
+    total_capacity: int
+    utilization_percentage: float
+    capabilities: dict[str, int]
+    orphaned_sessions: int

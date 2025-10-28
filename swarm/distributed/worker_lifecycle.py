@@ -8,42 +8,73 @@ import threading
 import time
 from datetime import UTC, datetime, timezone
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
+from typing import TYPE_CHECKING, TypedDict
 
 import redis
 
 from swarm.core.settings import Settings
 
 if TYPE_CHECKING:
-    # For type checking, Redis is generic
-    RedisSyncClient = redis.Redis[Any]
+    # For type checking, Redis client type
+    RedisSyncClient = redis.Redis
 else:
     # At runtime, Redis is not generic
     RedisSyncClient = redis.Redis
 
-# Using Any for Redis client type to avoid type stub issues
-RedisT = Any
+from swarm.infra.redis_protocols import RedisSyncProtocol, wrap_redis_sync
 
 logger = logging.getLogger(__name__)
 
 
 class WorkerLifecycle:
-    """Manages worker registration, heartbeat, and cleanup."""
+    """Manages worker registration, heartbeat, and cleanup.
 
-    def __init__(self, worker_id: str, redis_client: RedisT | None = None):
+    Instances are cached per ``worker_id`` to avoid repeatedly constructing
+    Redis clients and duplicating background state when helpers call
+    ``WorkerLifecycle(worker_id)`` in hot paths.
+    """
+
+    # Simple in-process cache of instances by worker_id
+    _instances: dict[str, "WorkerLifecycle"] = {}
+    _init_done: bool = False
+    redis: "RedisSyncProtocol"
+    shutdown_event: threading.Event
+    _heartbeat_thread: threading.Thread | None
+    _registered: bool
+    heartbeat_interval: int
+    heartbeat_timeout: int
+    max_sessions: int
+
+    def __new__(
+        cls, worker_id: str, redis_client: RedisSyncProtocol | None = None
+    ) -> "WorkerLifecycle":
+        # Only apply caching when no explicit client is injected
+        if redis_client is None:
+            existing = cls._instances.get(worker_id)
+            if existing is not None:
+                return existing
+        return super().__new__(cls)
+
+    def __init__(self, worker_id: str, redis_client: RedisSyncProtocol | None = None) -> None:
         """Initialize worker lifecycle manager.
 
         Args:
             worker_id: Unique identifier for this worker
             redis_client: Redis client instance (uses default if not provided)
         """
+        # Guard against reinitialization when returned from cache
+        if self._init_done:
+            return
+
         self.worker_id = worker_id
         settings = Settings()
         if not settings.redis.url:
             raise ValueError("Redis URL not configured")
-        self.redis: RedisT = redis_client or redis.from_url(
-            settings.redis.url, decode_responses=True
-        )
+
+        if redis_client is not None:
+            self.redis = redis_client
+        else:
+            self.redis = wrap_redis_sync(redis.from_url(settings.redis.url, decode_responses=True))
         self.shutdown_event = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
         self._registered = False
@@ -61,6 +92,10 @@ class WorkerLifecycle:
                 "max_sessions": self.max_sessions,
             },
         )
+        # Mark initialized and populate cache when using implicit client
+        self._init_done = True
+        if redis_client is None:
+            WorkerLifecycle._instances[worker_id] = self
 
     @cached_property
     def capabilities(self) -> list[str]:
@@ -102,20 +137,18 @@ class WorkerLifecycle:
         # Use pipeline for atomic multi-field writes
         with self.redis.pipeline() as pipe:
             # Set worker data
-            pipe.hset(
-                worker_key,
-                mapping={
-                    "hostname": self.worker_id,
-                    "capabilities": json.dumps(self.capabilities),
-                    "started_at": datetime.now(UTC).isoformat(),
-                    "last_heartbeat": datetime.now(UTC).isoformat(),
-                    "status": "active",
-                    "current_sessions": "0",
-                    "max_sessions": str(self.max_sessions),
-                    "platform": platform.system(),
-                    "python_version": platform.python_version(),
-                },
-            )
+            worker_info: dict[str, str] = {
+                "hostname": self.worker_id,
+                "capabilities": json.dumps(self.capabilities),
+                "started_at": datetime.now(UTC).isoformat(),
+                "last_heartbeat": datetime.now(UTC).isoformat(),
+                "status": "active",
+                "current_sessions": "0",
+                "max_sessions": str(self.max_sessions),
+                "platform": platform.system(),
+                "python_version": platform.python_version(),
+            }
+            pipe.hset(worker_key, mapping=worker_info)
 
             # Set TTL on worker key
             pipe.expire(worker_key, self.heartbeat_timeout)
@@ -123,6 +156,21 @@ class WorkerLifecycle:
             # Initialize empty session set
             pipe.delete(sessions_key)  # Clear any old data
             pipe.expire(sessions_key, self.heartbeat_timeout)
+
+            # Initialize standardized heartbeat key for browser workers
+            heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
+            pipe.hset(
+                heartbeat_key,
+                mapping={
+                    "timestamp": str(time.time()),
+                    "worker_type": "browser",
+                    "worker_id": self.worker_id,
+                },
+            )
+            heartbeat_ttl = int(3 * float(self.heartbeat_interval))
+            if heartbeat_ttl < 1:
+                heartbeat_ttl = 1
+            pipe.expire(heartbeat_key, heartbeat_ttl)
 
             pipe.execute()
 
@@ -155,6 +203,7 @@ class WorkerLifecycle:
         # Update worker status and cleanup
         worker_key = f"browser:worker:{self.worker_id}"
         sessions_key = f"browser:worker_sessions:{self.worker_id}"
+        heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
 
         try:
             with self.redis.pipeline() as pipe:
@@ -172,6 +221,7 @@ class WorkerLifecycle:
                 # Remove worker data
                 pipe.delete(worker_key)
                 pipe.delete(sessions_key)
+                pipe.delete(heartbeat_key)
 
                 pipe.execute()
 
@@ -210,12 +260,20 @@ class WorkerLifecycle:
 
     def _heartbeat_loop(self) -> None:
         """Background thread that updates heartbeat."""
+        # Bind logging and deployment context for this background thread to avoid unknown fields
+        try:
+            from swarm.utils.context_bootstrap import bootstrap_thread_log_context
+
+            bootstrap_thread_log_context(service="celery-worker", worker_id=self.worker_id)
+        except Exception:
+            pass
         logger.debug(f"Heartbeat loop started for worker {self.worker_id}")
 
         while not self.shutdown_event.is_set():
             try:
                 worker_key = f"browser:worker:{self.worker_id}"
                 sessions_key = f"browser:worker_sessions:{self.worker_id}"
+                heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
 
                 # Use pipeline for atomic updates
                 with self.redis.pipeline() as pipe:
@@ -232,6 +290,18 @@ class WorkerLifecycle:
                     # Extend TTLs
                     pipe.expire(worker_key, self.heartbeat_timeout)
                     pipe.expire(sessions_key, self.heartbeat_timeout)
+
+                    # Update standardized heartbeat
+                    hb: HeartbeatRecord = {
+                        "timestamp": str(time.time()),
+                        "worker_type": "browser",
+                        "worker_id": self.worker_id,
+                    }
+                    pipe.hset(heartbeat_key, mapping=_hb_mapping(hb))
+                    heartbeat_ttl = int(3 * float(self.heartbeat_interval))
+                    if heartbeat_ttl < 1:
+                        heartbeat_ttl = 1
+                    pipe.expire(heartbeat_key, heartbeat_ttl)
 
                     pipe.execute()
 
@@ -274,7 +344,18 @@ class WorkerLifecycle:
         ]
         return any(os.path.exists(path) for path in firefox_paths)
 
-    def get_status(self) -> dict[str, Any]:
+    class WorkerStatus(TypedDict, total=False):
+        status: str
+        hostname: str
+        capabilities: list[str]
+        started_at: str
+        last_heartbeat: str
+        platform: str
+        python_version: str
+        current_sessions: int
+        max_sessions: int
+
+    def get_status(self) -> "WorkerStatus":
         """Get current worker status."""
         worker_key = f"browser:worker:{self.worker_id}"
         data = self.redis.hgetall(worker_key)
@@ -282,26 +363,72 @@ class WorkerLifecycle:
         if not data:
             return {"status": "not_found"}
 
-        # Decode bytes and parse JSON fields
-        status = {}
+        # Decode bytes to strings
+        decoded: dict[str, str] = {}
         for key, value in data.items():
-            key_str = key.decode() if isinstance(key, bytes) else key
-            value_str = value.decode() if isinstance(value, bytes) else value
+            k = key.decode() if isinstance(key, bytes) else key
+            v = value.decode() if isinstance(value, bytes) else value
+            decoded[k] = v
 
-            if key_str == "capabilities":
-                status[key_str] = json.loads(value_str)
-            elif key_str in ["current_sessions", "max_sessions"]:
-                status[key_str] = int(value_str)
-            else:
-                status[key_str] = value_str
+        ws: WorkerLifecycle.WorkerStatus = {}
+        if "status" in decoded:
+            ws["status"] = decoded["status"]
+        if "hostname" in decoded:
+            ws["hostname"] = decoded["hostname"]
+        if "platform" in decoded:
+            ws["platform"] = decoded["platform"]
+        if "python_version" in decoded:
+            ws["python_version"] = decoded["python_version"]
+        if "started_at" in decoded:
+            ws["started_at"] = decoded["started_at"]
+        if "last_heartbeat" in decoded:
+            ws["last_heartbeat"] = decoded["last_heartbeat"]
+        if "current_sessions" in decoded:
+            try:
+                ws["current_sessions"] = int(decoded["current_sessions"])
+            except ValueError:
+                pass
+        if "max_sessions" in decoded:
+            try:
+                ws["max_sessions"] = int(decoded["max_sessions"])
+            except ValueError:
+                pass
+        if "capabilities" in decoded:
+            try:
+                caps = json.loads(decoded["capabilities"])
+                if isinstance(caps, list):
+                    ws["capabilities"] = [str(c) for c in caps]
+            except Exception:
+                pass
 
-        return status
+        return ws
 
     def is_healthy(self) -> bool:
-        """Check if this worker is healthy based on Redis TTL."""
-        worker_key = f"browser:worker:{self.worker_id}"
+        """Check health based on authoritative heartbeat timestamp."""
+        heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
         try:
-            # If key exists, worker is healthy
-            return bool(self.redis.exists(worker_key))
+            ts_str = self.redis.hget(heartbeat_key, "timestamp")
+            if not ts_str:
+                return False
+            ts = float(ts_str)
+            return (time.time() - ts) <= 90.0
         except Exception:
             return False
+
+
+class HeartbeatRecord(TypedDict):
+    timestamp: str
+    worker_type: str
+    worker_id: str
+
+
+def _hb_mapping(hb: HeartbeatRecord) -> dict[str, str]:
+    """Convert a HeartbeatRecord to a concrete dict[str, str] for Redis.
+
+    Avoids casts by constructing an explicit mapping per Redis stub contract.
+    """
+    return {
+        "timestamp": hb["timestamp"],
+        "worker_type": hb["worker_type"],
+        "worker_id": hb["worker_id"],
+    }

@@ -8,7 +8,7 @@ This is a core data structure used by the orchestrator and other services.
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import TypedDict
 
 
 @dataclass
@@ -16,7 +16,7 @@ class WorkerInfo:
     """Information about a single worker."""
 
     id: str
-    capabilities: dict[str, Any]
+    capabilities: list[str]
     status: str = "healthy"
     jobs_completed: int = 0
     jobs_failed: int = 0
@@ -43,7 +43,7 @@ class WorkerPool:
         self.health_timeout = health_timeout
         self.workers: dict[str, WorkerInfo] = {}
 
-    def register_worker(self, worker_id: str, capabilities: dict[str, Any]) -> None:
+    def register_worker(self, worker_id: str, capabilities: list[str]) -> None:
         """Register a new worker or update existing."""
         if worker_id in self.workers:
             # Update existing worker
@@ -102,7 +102,16 @@ class WorkerPool:
 
         return removed
 
-    def get_statistics(self) -> dict[str, Any]:
+    class PoolStatistics(TypedDict):
+        worker_type: str
+        total_workers: int
+        healthy_workers: int
+        unhealthy_workers: int
+        total_jobs_completed: int
+        total_jobs_failed: int
+        success_rate: float
+
+    def get_statistics(self) -> PoolStatistics:
         """Get pool statistics."""
         healthy_workers = self.get_healthy_workers()
         total_jobs_completed = sum(w.jobs_completed for w in self.workers.values())

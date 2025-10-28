@@ -8,7 +8,7 @@ Implements scaling using direct Docker API for proper container lifecycle manage
 import asyncio
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Optional, TypedDict
 
 try:
     import docker
@@ -150,7 +150,7 @@ class DockerApiBackend(ScalingBackend):
                     "REDIS_PASSWORD not set in environment - workers may fail to authenticate"
                 )
             haproxy_url = f"redis://default:{redis_password}@haproxy-redis:6380/0"
-            logger.info("DockerApiBackend: Configuring worker with HAProxy URL on port 6380")
+            logger.info("DockerApiBackend: Configuring worker with HAProxy URL on port 6380/db0")
 
             # Environment variables for Celery worker
             environment = {
@@ -177,7 +177,7 @@ class DockerApiBackend(ScalingBackend):
             }
 
             # Container configuration
-            config: dict[str, Any] = {
+            config: dict[str, object] = {
                 "image": self.image,
                 "name": container_name,
                 "entrypoint": ["/usr/local/bin/entrypoint.worker.sh"],
@@ -254,7 +254,11 @@ class DockerApiBackend(ScalingBackend):
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
 
-            filters = {
+            class _ListFilters(TypedDict, total=False):
+                label: list[str]
+                status: str
+
+            filters: _ListFilters = {
                 "label": [
                     f"swarm.project={self.project_name}",
                     f"discord.worker.type={worker_type}",
@@ -291,9 +295,10 @@ class DockerApiBackend(ScalingBackend):
             # Get all worker containers (including stopped ones)
             loop = asyncio.get_event_loop()
 
-            filters = {
-                "label": f"swarm.project={self.project_name}",
-            }
+            class _AllFilters(TypedDict, total=False):
+                label: str
+
+            filters: _AllFilters = {"label": f"swarm.project={self.project_name}"}
 
             # Get both running and stopped containers
             all_containers = await loop.run_in_executor(

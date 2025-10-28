@@ -8,21 +8,15 @@ No Lua scripts, no complexity - just what's needed to fix test flakiness.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+import time
+from typing import TYPE_CHECKING, TypedDict
 
 import redis.asyncio as redis_asyncio
 
 from swarm.core.settings import Settings
 from swarm.infra import async_close_redis
-
-if TYPE_CHECKING:
-    # For type checking, Redis is generic
-    from redis.asyncio import Redis as _Redis
-
-    RedisAsyncClient = _Redis[Any]
-else:
-    # At runtime, Redis is not generic
-    RedisAsyncClient = redis_asyncio.Redis
+from swarm.infra.redis_protocols import RedisAsyncProtocol, wrap_redis_async
+from swarm.utils.worker_identity import direct_queue_name
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +35,11 @@ class SessionRegistry:
     Uses one key per session with built-in expiry to avoid memory leaks.
     """
 
-    def __init__(self, redis_client: RedisAsyncClient | None = None) -> None:
+    def __init__(self, redis_client: RedisAsyncProtocol | None = None) -> None:
         """Initialize session registry with Redis client."""
-        self._redis: RedisAsyncClient | None = redis_client
+        self._redis: RedisAsyncProtocol | None = redis_client
 
-    async def _get_redis(self) -> RedisAsyncClient:
+    async def _get_redis(self) -> RedisAsyncProtocol:
         """Get or create Redis client."""
         if self._redis is None:
             settings = Settings()
@@ -53,13 +47,16 @@ class SessionRegistry:
                 raise ValueError("Redis URL not configured")
 
             logger.info(f"SessionRegistry connecting to Redis URL: {settings.redis.url}")
-            self._redis = redis_asyncio.from_url(
+
+            inner = redis_asyncio.from_url(
                 settings.redis.url,
                 decode_responses=True,  # Return strings instead of bytes
-                socket_connect_timeout=1,  # Fast fail on connection issues
-                socket_timeout=1,  # Fast fail on operations
+                socket_connect_timeout=2,  # Reasonable connect timeout
+                socket_timeout=3,  # Allow brief HAProxy/backend delays
             )
+            self._redis = wrap_redis_async(inner)
 
+        assert self._redis is not None
         return self._redis
 
     async def set_owner(self, session_id: str, worker_id: str) -> bool:
@@ -80,22 +77,23 @@ class SessionRegistry:
         redis = await self._get_redis()
 
         try:
-            # One key per session with built-in expiry
-            # No need for separate TTL key or hash scanning
-            # Use affinity namespace separate from session metadata
+            # One key per session: authoritative hash with TTL
             session_key = f"{AFFINITY_PREFIX}{session_id}"
-            logger.debug(f"About to SETEX key={session_key}, ttl={SESSION_TTL}, value={worker_id}")
-            result = await redis.setex(session_key, SESSION_TTL, worker_id)
-            logger.debug(f"SETEX result: {result}")
 
-            # Verify it was actually written
-            check = await redis.get(session_key)
-            logger.debug(f"Verification GET returned: {check}")
+            # Canonical direct queue naming (host-only id)
+            direct_queue = direct_queue_name(worker_id)
 
-            # Do NOT add the session to worker_sessions here.
-            # Only the worker itself should claim it once the task starts.
+            record: AffinityRecord = {
+                "worker_id": worker_id,
+                "direct_queue": direct_queue,
+                "timestamp": str(time.time()),
+            }
+            await redis.hset(session_key, mapping=_affinity_mapping(record))
+            await redis.expire(session_key, SESSION_TTL)
 
-            logger.debug(f"Set session {session_id} owner to worker {worker_id}")
+            logger.debug(
+                f"Set session {session_id} owner to worker {worker_id} with {direct_queue}"
+            )
             return True
 
         except Exception as exc:
@@ -118,12 +116,11 @@ class SessionRegistry:
             session_key = f"{AFFINITY_PREFIX}{session_id}"
 
             # Best-effort: try to remove from session set, but ignore errors
-            owner = await redis.get(session_key)
+            owner = await redis.hget(session_key, "worker_id")
             if owner:
-                clean_worker_id = owner.split("_", 1)[1] if "_" in owner else owner
-                sessions_key = f"browser:worker_sessions:{clean_worker_id}"
+                sessions_key = f"browser:worker_sessions:{owner}"
                 try:
-                    await redis.srem(sessions_key, session_id)  # type: ignore[attr-defined]
+                    await redis.srem(sessions_key, session_id)
                 except Exception:
                     pass  # Best effort cleanup
 
@@ -156,13 +153,12 @@ class SessionRegistry:
             session_key = f"{AFFINITY_PREFIX}{session_id}"
 
             # Get current owner
-            worker_id = await redis.get(session_key)
+            worker_id = await redis.hget(session_key, "worker_id")
             if not worker_id:
                 return None
 
             # Refresh TTL only if less than half remaining
-            # This prevents polling from making sessions immortal
-            ttl = await redis.ttl(session_key)  # type: ignore[attr-defined]
+            ttl = await redis.ttl(session_key)
             if 0 < ttl < SESSION_TTL // 2 or ttl == -1:
                 await redis.expire(session_key, SESSION_TTL)
 
@@ -183,3 +179,17 @@ class SessionRegistry:
 # - SETEX is atomic, preventing accidental overwrites
 # - TTL refresh on read keeps long-running sessions alive
 # - No background cleanup needed - Redis handles expiry automatically
+# Typed hash schema for affinity entries in Redis
+class AffinityRecord(TypedDict):
+    worker_id: str
+    direct_queue: str
+    timestamp: str
+
+
+def _affinity_mapping(a: AffinityRecord) -> dict[str, str]:
+    """Convert AffinityRecord to a concrete dict[str, str] for Redis API."""
+    return {
+        "worker_id": a["worker_id"],
+        "direct_queue": a["direct_queue"],
+        "timestamp": a["timestamp"],
+    }

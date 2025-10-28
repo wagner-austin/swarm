@@ -4,7 +4,7 @@ Designed for extensibility and future-proofing.
 """
 
 from enum import Enum, auto
-from typing import Any, Callable, Optional
+from typing import Callable
 
 
 class WorkerState(Enum):
@@ -24,7 +24,7 @@ class BaseStateMachine:
     def __init__(self, initial_state: Enum) -> None:
         self.state: Enum = initial_state
         self._last_state: Enum | None = None
-        self._on_transition: Callable[[Enum, Enum], Any] | None = None
+        self._on_transition: Callable[[Enum, Enum], None] | None = None
 
     def set_state(self, new_state: Enum) -> None:
         if new_state != self.state:
@@ -36,6 +36,6 @@ class BaseStateMachine:
     def get_state(self) -> Enum:
         return self.state
 
-    def on_transition(self, callback: Callable[[Enum, Enum], Any]) -> None:
+    def on_transition(self, callback: Callable[[Enum, Enum], None]) -> None:
         """Register a callback for state transitions: fn(old_state, new_state)."""
         self._on_transition = callback
