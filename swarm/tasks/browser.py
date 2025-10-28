@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 
 def typed_task(
     *,
-    base: type[SwarmTask[[], object]] | None = None,
+    base: type | None = None,
     bind: bool | None = None,
     name: str | None = None,
 ) -> Callable[[Callable[..., object]], object]:
@@ -98,12 +98,13 @@ def typed_task(
 
             # Ensure base=SwarmTask and call Celery with explicit keywords to satisfy typing
             # Let mypy infer type to satisfy Celery's TypeVar bound
-            base_cls = base if base is not None else SwarmTask
+            base_cls: type = base if base is not None else SwarmTask
 
             # Narrow optional types before passing to Celery's strict API
+            dec: Callable[[Callable[..., object]], object]
             if bind is not None and name is not None:
                 # Both bind and name are provided
-                dec = app.task(base=base_cls, bind=bind, name=name)
+                dec = app.task(base=base_cls, bind=bind, name=name)  # narrow to our callable shape
             elif bind is not None:
                 # Only bind is provided (name is None)
                 dec = app.task(base=base_cls, bind=bind)
@@ -117,9 +118,10 @@ def typed_task(
 
         # Plain sync function - same pattern
         # Let mypy infer type to satisfy Celery's TypeVar bound
-        base_cls2 = base if base is not None else SwarmTask
+        base_cls2: type = base if base is not None else SwarmTask
 
         # Narrow optional types before passing to Celery's strict API
+        dec2: Callable[[Callable[..., object]], object]
         if bind is not None and name is not None:
             # Both bind and name are provided
             dec2 = app.task(base=base_cls2, bind=bind, name=name)
@@ -224,18 +226,57 @@ class BrowserTask(SwarmTask[..., object]):
 
     async def get_or_create_engine(self, session_id: str) -> BrowserEngine:
         """Return the BrowserEngine for session_id, creating it once in a thread-safe way."""
+        thread_id = threading.current_thread().ident
+        worker_id = canonical_worker_id(getattr(self.request, "hostname", None))
+        task_id = getattr(self.request, "id", None)
+
+        logger.info(
+            f"get_or_create_engine called: session_id={session_id}, "
+            f"worker_id={worker_id}, thread_id={thread_id}, task_id={task_id}"
+        )
+
         # Fast path: someone already created it
         with _engines_lock:
             existing = _engines.get(session_id)
+            logger.info(
+                f"Lock acquired: existing type={type(existing).__name__ if existing else 'None'}, "
+                f"total_engines={sum(1 for v in _engines.values() if isinstance(v, BrowserEngine))}"
+            )
+
             if isinstance(existing, BrowserEngine):
-                thread_id = threading.current_thread().ident
-                logger.info(f"Session {session_id} on thread {thread_id} found existing engine")
+                logger.info(
+                    f"Session {session_id} found existing engine on worker {worker_id}, thread {thread_id}"
+                )
                 return existing
             if existing is _CREATING_SENTINEL:
                 # Another thread is creating; fall through to wait loop
-                logger.info(f"Another thread is creating engine for {session_id}, waiting...")
+                logger.warning(
+                    f"Found CREATING_SENTINEL for {session_id}, entering wait loop (worker={worker_id})"
+                )
                 pass
             else:
+                # Enforce per-worker engine capacity before creating a new one
+                try:
+                    worker_id = canonical_worker_id(getattr(self.request, "hostname", None))
+                    max_allowed = WorkerLifecycle(worker_id).max_sessions
+                except Exception:
+                    # Fallback if lifecycle not available
+                    worker_id = canonical_worker_id(getattr(self.request, "hostname", None))
+                    max_allowed = 10
+                engine_count = sum(1 for v in _engines.values() if isinstance(v, BrowserEngine))
+                if engine_count >= max_allowed:
+                    active_sessions = [
+                        sid for sid, v in _engines.items() if isinstance(v, BrowserEngine)
+                    ]
+                    logger.error(
+                        "Engine limit reached (%s/%s). Active sessions: %s",
+                        engine_count,
+                        max_allowed,
+                        active_sessions,
+                    )
+                    raise RuntimeError(
+                        f"Worker at capacity ({engine_count} engines). Sessions may have leaked."
+                    )
                 # We'll create it - claim creation slot
                 _engines[session_id] = _CREATING_SENTINEL
 
@@ -284,6 +325,18 @@ class BrowserTask(SwarmTask[..., object]):
                 except Exception as e:
                     logger.error(f"Error registering session affinity: {e}", exc_info=True)
 
+                # Register with lifecycle manager for TTL-based cleanup
+                try:
+                    from swarm.distributed.session_lifecycle import lifecycle_manager
+
+                    await lifecycle_manager.register_session(
+                        session_id=session_id,
+                        worker_id=worker_id,
+                        ttl_seconds=3600,
+                    )
+                except Exception as le:
+                    logger.warning(f"Failed to register session with lifecycle manager: {le}")
+
                 return engine
             except Exception as e:
                 # Creation failed - remove sentinel
@@ -293,41 +346,17 @@ class BrowserTask(SwarmTask[..., object]):
                 logger.error(f"Failed to create engine for {session_id}: {e}")
                 raise
 
-    async def cleanup_engine(self, session_id: str) -> None:
-        """Clean up browser engine for a task."""
-        # Pop inside the lock
-        with _engines_lock:
-            engine = _engines.pop(session_id, None)
+    async def auto_cleanup_session(self, session_id: str) -> None:
+        """Cleanup session via lifecycle manager, called from finally blocks.
 
-        # Stop the engine outside the lock to avoid blocking other threads
-        if isinstance(engine, BrowserEngine):
-            try:
-                await engine.stop(graceful=True)
-                logger.info(f"Cleaned up browser engine for session {session_id}")
-            except Exception as e:
-                logger.error(f"Error cleaning up browser engine: {e}")
+        Centralizes cleanup logic to prevent drift across tasks.
+        """
+        from swarm.distributed.session_lifecycle import lifecycle_manager
 
         try:
-            # Cleanup the session metadata hash (used by goto/status)
-            redis = await self.get_redis()
-            await redis.delete(f"browser:session:{session_id}")
+            await lifecycle_manager.unregister_session(session_id)
         except Exception as e:
-            logger.debug(f"Session metadata cleanup skipped: {e}")
-
-        # Always clear the affinity registry and update lifecycle ownership
-        try:
-            from swarm.distributed.session_registry import SessionRegistry
-
-            registry = SessionRegistry()
-            # Remove session from lifecycle set for this worker
-            try:
-                worker_id = canonical_worker_id(getattr(self.request, "hostname", None))
-                WorkerLifecycle(worker_id).remove_session(session_id)
-            except Exception as le:
-                logger.warning(f"Failed to remove session from lifecycle: {le}")
-            await registry.clear_owner(session_id)
-        except Exception as e:
-            logger.error(f"Error clearing session from registry: {e}")
+            logger.error(f"Failed to cleanup session {session_id}: {e}")
 
     def on_failure(
         self,
@@ -344,95 +373,176 @@ class BrowserTask(SwarmTask[..., object]):
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.goto")
-async def goto(self: BrowserTask, url: str, session_id: str | None = None) -> GotoTaskResponse:
-    """
-    Navigate to a URL within a task's browser session.
+async def goto(
+    self: BrowserTask, url: str, session_id: str | None = None, auto_cleanup: bool = False
+) -> GotoTaskResponse:
+    """Navigate to a URL within a task's browser session.
 
     Args:
         url: The URL to navigate to
         session_id: Session ID for session management (defaults to current task)
+        auto_cleanup: If True, cleanup session after this task completes
 
     Returns:
         Dict with success status and navigation details
     """
     session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(session_id)
-    await engine.goto(url)
+    try:
+        engine = await self.get_or_create_engine(session_id)
+        # Heartbeat to extend session TTL
+        try:
+            from swarm.distributed.session_lifecycle import lifecycle_manager
 
-    # Update session metadata with current URL
-    redis = await self.get_redis()
-    await redis.hset(f"browser:session:{session_id}", "url", url)
+            await lifecycle_manager.heartbeat_session(session_id)
+        except Exception as hb_exc:
+            logger.warning(
+                "Lifecycle heartbeat failed for session %s during goto: %r",
+                session_id,
+                hb_exc,
+                exc_info=True,
+            )
+        await engine.goto(url)
 
-    return {"success": True, "session_id": session_id, "url": url}
+        # Update session metadata with current URL
+        redis = await self.get_redis()
+        await redis.hset(f"browser:session:{session_id}", "url", url)
+
+        return {"success": True, "session_id": session_id, "url": url}
+    finally:
+        if auto_cleanup:
+            await self.auto_cleanup_session(session_id)
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.click")
 async def click(
-    self: BrowserTask, selector: str, session_id: str | None = None, no_wait_after: bool = False
+    self: BrowserTask,
+    selector: str,
+    session_id: str | None = None,
+    no_wait_after: bool = False,
+    auto_cleanup: bool = False,
 ) -> ClickTaskResponse:
-    """
-    Click an element within a task's browser session.
+    """Click an element within a task's browser session.
 
     Args:
         selector: CSS selector for the element
         session_id: Session ID for session management (defaults to current task)
+        no_wait_after: If True, don't wait for navigation after click
+        auto_cleanup: If True, cleanup session after this task completes
 
     Returns:
         Dict with click result
     """
     session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(session_id)
-    await engine.click(selector, no_wait_after=no_wait_after)
+    try:
+        engine = await self.get_or_create_engine(session_id)
+        try:
+            from swarm.distributed.session_lifecycle import lifecycle_manager
 
-    return {"success": True, "session_id": session_id, "selector": selector}
+            await lifecycle_manager.heartbeat_session(session_id)
+        except Exception as hb_exc:
+            logger.warning(
+                "Lifecycle heartbeat failed for session %s during click: %r",
+                session_id,
+                hb_exc,
+                exc_info=True,
+            )
+        await engine.click(selector, no_wait_after=no_wait_after)
+
+        return {"success": True, "session_id": session_id, "selector": selector}
+    finally:
+        if auto_cleanup:
+            await self.auto_cleanup_session(session_id)
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.fill")
 async def fill(
-    self: BrowserTask, selector: str, text: str, session_id: str | None = None
+    self: BrowserTask,
+    selector: str,
+    text: str,
+    session_id: str | None = None,
+    auto_cleanup: bool = False,
 ) -> FillTaskResponse:
-    """
-    Fill a form field within a task's browser session.
+    """Fill a form field within a task's browser session.
 
     Args:
         selector: CSS selector for the field
         text: Text to fill
         session_id: Session ID for session management (defaults to current task)
+        auto_cleanup: If True, cleanup session after this task completes
 
     Returns:
         Dict with fill result
     """
     session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(session_id)
-    await engine.fill(selector, text)
+    try:
+        engine = await self.get_or_create_engine(session_id)
+        try:
+            from swarm.distributed.session_lifecycle import lifecycle_manager
 
-    return {"success": True, "session_id": session_id, "selector": selector, "text": text}
+            await lifecycle_manager.heartbeat_session(session_id)
+        except Exception as hb_exc:
+            logger.warning(
+                "Lifecycle heartbeat failed for session %s during fill: %r",
+                session_id,
+                hb_exc,
+                exc_info=True,
+            )
+        await engine.fill(selector, text)
+
+        return {"success": True, "session_id": session_id, "selector": selector, "text": text}
+    finally:
+        if auto_cleanup:
+            await self.auto_cleanup_session(session_id)
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.upload")
 async def upload(
-    self: BrowserTask, selector: str, file_path: str, session_id: str | None = None
+    self: BrowserTask,
+    selector: str,
+    file_path: str,
+    session_id: str | None = None,
+    auto_cleanup: bool = False,
 ) -> UploadTaskResponse:
-    """
-    Upload a file to a form field.
+    """Upload a file to a form field.
 
     Args:
         selector: CSS selector for the file input
         file_path: Path to the file to upload
         session_id: Session ID for session management (defaults to current task)
+        auto_cleanup: If True, cleanup session after this task completes
 
     Returns:
         Dict with upload result
     """
     session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(session_id)
-    await engine.upload(selector, Path(file_path))
+    try:
+        engine = await self.get_or_create_engine(session_id)
+        try:
+            from swarm.distributed.session_lifecycle import lifecycle_manager
 
-    return {"success": True, "session_id": session_id, "selector": selector, "file_path": file_path}
+            await lifecycle_manager.heartbeat_session(session_id)
+        except Exception as hb_exc:
+            logger.warning(
+                "Lifecycle heartbeat failed for session %s during upload: %r",
+                session_id,
+                hb_exc,
+                exc_info=True,
+            )
+        await engine.upload(selector, Path(file_path))
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "selector": selector,
+            "file_path": file_path,
+        }
+    finally:
+        if auto_cleanup:
+            await self.auto_cleanup_session(session_id)
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.wait_for")
@@ -441,44 +551,72 @@ async def wait_for(
     selector: str,
     state: Literal["visible", "hidden", "attached", "detached"] = "visible",
     session_id: str | None = None,
+    auto_cleanup: bool = False,
 ) -> WaitForTaskResponse:
-    """
-    Wait for an element to reach a specific state.
+    """Wait for an element to reach a specific state.
 
     Args:
         selector: CSS selector to wait for
         state: State to wait for
         session_id: Session ID for session management (defaults to current task)
+        auto_cleanup: If True, cleanup session after this task completes
 
     Returns:
         Dict with wait result
     """
     session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(session_id)
-    await engine.wait_for(selector, state)
+    try:
+        engine = await self.get_or_create_engine(session_id)
+        try:
+            from swarm.distributed.session_lifecycle import lifecycle_manager
 
-    return {"success": True, "session_id": session_id, "selector": selector, "state": state}
+            await lifecycle_manager.heartbeat_session(session_id)
+        except Exception as hb_exc:
+            logger.warning(
+                "Lifecycle heartbeat failed for session %s during wait_for: %r",
+                session_id,
+                hb_exc,
+                exc_info=True,
+            )
+        await engine.wait_for(selector, state)
+
+        return {"success": True, "session_id": session_id, "selector": selector, "state": state}
+    finally:
+        if auto_cleanup:
+            await self.auto_cleanup_session(session_id)
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.screenshot")
-async def screenshot(self: BrowserTask, session_id: str | None = None) -> ScreenshotTaskResponse:
-    """
-    Take a screenshot within a task's browser session.
+async def screenshot(
+    self: BrowserTask, session_id: str | None = None, auto_cleanup: bool = False
+) -> ScreenshotTaskResponse:
+    """Take a screenshot within a task's browser session.
 
     Args:
         session_id: Session ID for session management (defaults to current task)
+        auto_cleanup: If True, cleanup session after screenshot completes
 
     Returns:
         Dict with base64 encoded screenshot
     """
     session_id = self.resolve_session_id(session_id)
-
-    engine = await self.get_or_create_engine(session_id)
-
     temp_path = os.path.join(tempfile.gettempdir(), f"screenshot_{session_id}_{os.getpid()}.png")
 
     try:
+        engine = await self.get_or_create_engine(session_id)
+        try:
+            from swarm.distributed.session_lifecycle import lifecycle_manager
+
+            await lifecycle_manager.heartbeat_session(session_id)
+        except Exception as hb_exc:
+            logger.warning(
+                "Lifecycle heartbeat failed for session %s during screenshot: %r",
+                session_id,
+                hb_exc,
+                exc_info=True,
+            )
+
         await engine.screenshot(temp_path)
 
         with open(temp_path, "rb") as f:
@@ -490,93 +628,137 @@ async def screenshot(self: BrowserTask, session_id: str | None = None) -> Screen
             "data": base64.b64encode(image_data).decode("utf-8"),
         }
     finally:
+        # Always cleanup temp file
         if os.path.exists(temp_path):
             os.unlink(temp_path)
 
+        # Optionally cleanup session
+        if auto_cleanup:
+            await self.auto_cleanup_session(session_id)
+
 
 @typed_task(base=BrowserTask, bind=True, name="browser.status")
-async def status(self: BrowserTask, session_id: str | None = None) -> StatusTaskResponse:
-    """
-    Get status of a browser session.
+async def status(
+    self: BrowserTask, session_id: str | None = None, auto_cleanup: bool = False
+) -> StatusTaskResponse:
+    """Get status of a browser session.
 
     Args:
         session_id: Session ID for session management (defaults to current task)
+        auto_cleanup: If True, cleanup session after getting status
 
     Returns:
         Dict with session status
     """
     session_id = self.resolve_session_id(session_id)
 
-    # Check if engine exists in global registry
-    with _engines_lock:
-        engine = _engines.get(session_id)
-
-    if isinstance(engine, BrowserEngine):
-        engine_status: BrowserEngineStatus = await engine.status()
-        # Ensure session_id is present for UI rendering (/web status)
+    try:
+        # Heartbeat even if engine not present to keep active sessions alive
         try:
-            engine_status["session_id"] = str(session_id)
-        except Exception:
-            # Best-effort; if session_id is not serializable, omit it
-            pass
-        return {"success": True, "data": engine_status}
-    else:
-        redis = await self.get_redis()
-        session_data = await redis.hgetall(f"browser:session:{session_id}")
+            from swarm.distributed.session_lifecycle import lifecycle_manager
 
-        if session_data:
-            # Decode bytes to strings
-            decoded_data: dict[str, str] = {k.decode(): v.decode() for k, v in session_data.items()}
-            # Compose a complete typed payload with sensible defaults for unknowns
-            data: BrowserEngineStatus = {
-                "worker_id": "unknown",
-                "status": "unknown",
-                "browser_active": False,
-                "page_active": False,
-                "url": decoded_data.get("url"),
-                "sessions": 0,
-                "uptime": 0.0,
-                "error": None,
-                "session_id": str(session_id),
-            }
-            return {"success": True, "data": data}
+            await lifecycle_manager.heartbeat_session(session_id)
+        except Exception as hb_exc:
+            logger.warning(
+                "Lifecycle heartbeat failed for session %s during status: %r",
+                session_id,
+                hb_exc,
+                exc_info=True,
+            )
+
+        # Check if engine exists in global registry
+        with _engines_lock:
+            engine = _engines.get(session_id)
+
+        if isinstance(engine, BrowserEngine):
+            engine_status: BrowserEngineStatus = await engine.status()
+            # Ensure session_id is present for UI rendering (/web status)
+            try:
+                engine_status["session_id"] = str(session_id)
+            except Exception:
+                # Best-effort; if session_id is not serializable, omit it
+                pass
+            return {"success": True, "data": engine_status}
         else:
-            data_nf: BrowserEngineStatus = {
-                "session_id": str(session_id),
-                "status": "not_found",
-                "browser_active": False,
-                "page_active": False,
-                "sessions": 0,
-                "worker_id": "unknown",
-                "url": None,
-                "uptime": 0.0,
-            }
-            return {"success": True, "data": data_nf}
+            redis = await self.get_redis()
+            session_data = await redis.hgetall(f"browser:session:{session_id}")
+
+            if session_data:
+                # Decode bytes to strings
+                decoded_data: dict[str, str] = {
+                    k.decode(): v.decode() for k, v in session_data.items()
+                }
+                # Compose a complete typed payload with sensible defaults for unknowns
+                data: BrowserEngineStatus = {
+                    "worker_id": "unknown",
+                    "status": "unknown",
+                    "browser_active": False,
+                    "page_active": False,
+                    "url": decoded_data.get("url"),
+                    "sessions": 0,
+                    "uptime": 0.0,
+                    "error": None,
+                    "session_id": str(session_id),
+                }
+                return {"success": True, "data": data}
+            else:
+                data_nf: BrowserEngineStatus = {
+                    "session_id": str(session_id),
+                    "status": "not_found",
+                    "browser_active": False,
+                    "page_active": False,
+                    "sessions": 0,
+                    "worker_id": "unknown",
+                    "url": None,
+                    "uptime": 0.0,
+                }
+                return {"success": True, "data": data_nf}
+    finally:
+        if auto_cleanup:
+            await self.auto_cleanup_session(session_id)
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.start")
-async def start(self: BrowserTask, session_id: str | None = None) -> StartTaskResponse:
-    """
-    Explicitly start a browser session for a task.
+async def start(
+    self: BrowserTask, session_id: str | None = None, auto_cleanup: bool = False
+) -> StartTaskResponse:
+    """Explicitly start a browser session for a task.
 
     Args:
         session_id: Session ID for session management (defaults to current task)
+        auto_cleanup: If True, cleanup session after starting
 
     Returns:
         Dict with session start result
     """
     session_id = self.resolve_session_id(session_id)
 
-    engine = await self.get_or_create_engine(session_id)
-    await engine.health_check()
+    try:
+        engine = await self.get_or_create_engine(session_id)
+        await engine.health_check()
+        try:
+            from swarm.distributed.session_lifecycle import lifecycle_manager
 
-    return {"success": True, "session_id": session_id}
+            await lifecycle_manager.heartbeat_session(session_id)
+        except Exception as hb_exc:
+            logger.warning(
+                "Lifecycle heartbeat failed for session %s during start: %r",
+                session_id,
+                hb_exc,
+                exc_info=True,
+            )
+
+        return {"success": True, "session_id": session_id}
+    finally:
+        if auto_cleanup:
+            await self.auto_cleanup_session(session_id)
 
 
 @typed_task(base=BrowserTask, bind=True, name="browser.cleanup")
 async def cleanup(self: BrowserTask, session_id: str) -> CleanupTaskResponse:
-    """
-    Clean up a browser session for a task.
+    """Clean up a browser session.
+
+    Single source of truth - all cleanup goes through SessionLifecycleManager.
 
     Args:
         session_id: The session ID to cleanup
@@ -584,46 +766,12 @@ async def cleanup(self: BrowserTask, session_id: str) -> CleanupTaskResponse:
     Returns:
         Dict with cleanup status
     """
-    await self.cleanup_engine(session_id)
+    from swarm.distributed.session_lifecycle import lifecycle_manager
+
+    # Single source of truth - lifecycle manager owns all cleanup logic
+    await lifecycle_manager.unregister_session(session_id)
 
     return {"success": True, "session_id": session_id}
-
-
-def _cleanup_all_engines() -> None:
-    """Clean up all browser engines across all threads.
-
-    Handles engines on different event loops appropriately.
-    """
-    # Get a copy of all engines and clear the dict under the lock
-    with _engines_lock:
-        engines_to_clean = [(k, v) for k, v in _engines.items() if isinstance(v, BrowserEngine)]
-        _engines.clear()
-
-    if not engines_to_clean:
-        return
-
-    logger.info(f"Cleaning up {len(engines_to_clean)} browser engines")
-    for session_id, engine in engines_to_clean:
-        try:
-            # Always schedule cleanup on the engine's own loop when available
-            loop = getattr(engine, "_loop", None)
-            if loop is not None and not loop.is_closed():
-
-                async def _stop() -> None:
-                    await engine.stop(graceful=True)
-
-                future = asyncio.run_coroutine_threadsafe(_stop(), loop)
-                future.result(timeout=10)
-            else:
-                # No loop present; best-effort direct await on a temporary loop
-                tmp_loop = asyncio.new_event_loop()
-                try:
-                    tmp_loop.run_until_complete(engine.stop(graceful=True))
-                finally:
-                    tmp_loop.close()
-            logger.debug(f"Cleaned up engine for session {session_id}")
-        except Exception as exc:
-            logger.warning(f"Error shutting down engine for session {session_id}: {exc}")
 
 
 # Register cleanup on worker shutdown
@@ -631,9 +779,16 @@ def _cleanup_all_engines() -> None:
 def cleanup_engines_on_shutdown(**kwargs: object) -> None:
     """Clean up browser engines when worker shuts down.
 
-    Cleans up all engines regardless of which thread created them.
+    Uses lifecycle manager for coordinated shutdown across all sessions.
     """
-    _cleanup_all_engines()
+    from swarm.distributed.session_lifecycle import lifecycle_manager
+
+    # Lifecycle manager handles full cleanup:
+    # - Stops background cleanup loop
+    # - Cleans all tracked sessions
+    # - Stops all engines gracefully
+    # - Clears all affinity mappings
+    lifecycle_manager.stop()
     logger.info("Browser engine cleanup completed on worker shutdown")
 
 
