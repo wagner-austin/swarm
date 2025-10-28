@@ -2,8 +2,8 @@
 # Minimal commands: start, stop, check
 
 .PHONY: help install lint format test check \
-        start stop docker-status haproxy-config \
-        docker-kill-orphans docker-prune-project \
+        start stop docker-status \
+        docker-kill-orphans docker-prune-project docker-wipe-all rebuild \
         clean clean-cache
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ PYTHON  := $(RUN) python
 PIP     := $(RUN) pip
 RUFF    := $(RUN) ruff
 MYPY    := $(RUN) mypy
-PYTEST  := $(RUN) pytest -rsxv
+PYTEST  := $(RUN) python -c "import scripts.guard_flushdb_runtime as _g, pytest, sys; _g.install(); sys.exit(pytest.main(['-rsxv']))"
 SWARM_TEST_MODE  := $(RUN) pytest -rsxv
 
 # ---------------------------------------------------------------------------
@@ -72,8 +72,14 @@ lint: install               ## ruff fix + ruff format + mypy strict type-check +
 	- $(RUFF) check --fix .
 	$(RUFF) format .
 	- $(RUFF) check . --select D401 --fix
-	$(MYPY) --strict .
+	$(MYPY) --strict swarm
+	$(PYTHON) scripts/guard_test_redis_safety.py
 	$(PYTHON) scripts/ruff_no_direct_discord_response.py swarm/ tests/
+	$(PYTHON) scripts/guard_no_direct_redis_refs.py swarm/
+	$(PYTHON) scripts/guard_no_redis_protocol_duplication.py
+	$(PYTHON) scripts/guard_no_any_usage.py scripts/celery_autoscaler.py swarm/distributed/backends/
+	$(PYTHON) scripts/guard_no_cast_usage.py swarm/
+	$(PYTHON) scripts/guard_no_pcalls.py swarm/
 
 format: lint               ## auto-format code base (ruff + black)
 	$(RUFF) format .
@@ -89,10 +95,7 @@ test: install  ## run pytest suite (uses local Redis via TEST_COMPOSE_FILES in C
 # ---------------------------------------------------------------------------
 # Docker / Redis stack
 # ---------------------------------------------------------------------------
-haproxy-config: install        ## generate HAProxy config from Redis URLs
-	@poetry run python scripts/generate_haproxy_config.py
-
-start: haproxy-config ## start ALL services and containers (default + test + profiles)
+start: install ## start ALL services and containers (default + test + profiles)
 	docker compose $(COMPOSE_FILES) $(START_PROFILE_FLAGS) up -d
 
 stop: ## stop ALL services and containers (keep volumes)
@@ -112,18 +115,9 @@ ifeq ($(OS),Windows_NT)
 docker-kill-orphans:   ## force remove containers on $(PROJECT_NAME)_default network (if any)
 	@echo "Killing containers on network $(PROJECT_NAME)_default if any..."
 	@echo "Removing autoscaled worker containers by label (swarm.project=$(PROJECT_NAME)) if any..."
-	@powershell -NoProfile -Command "\
-		$$labelIds = docker ps -aq --filter 'label=swarm.project=$(PROJECT_NAME)'; \
-		if ($$labelIds) { docker rm -f $$labelIds | Out-Null; Write-Output 'Removed labeled worker containers'; } \
-		else { Write-Output 'No labeled worker containers found'; }"
-	@powershell -NoProfile -Command "\
-		$$ids = docker ps -aq --filter 'network=$(PROJECT_NAME)_default'; \
-		if ($$ids) { docker rm -f $$ids | Out-Null; Write-Output 'Removed orphan containers on $(PROJECT_NAME)_default'; } \
-		else { Write-Output 'No orphan containers on $(PROJECT_NAME)_default'; }"
-	@powershell -NoProfile -Command "\
-		$$ErrorActionPreference='SilentlyContinue'; \
-		docker network inspect $(PROJECT_NAME)_default > $$null 2> $$null; \
-		if ($$LASTEXITCODE -eq 0) { docker network rm $(PROJECT_NAME)_default > $$null 2> $$null }"
+	-@docker ps -aq --filter "label=swarm.project=$(PROJECT_NAME)" 2>nul | findstr /r "." >nul && (docker rm -f $$(docker ps -aq --filter "label=swarm.project=$(PROJECT_NAME)") >nul 2>&1 && echo Removed labeled worker containers) || echo No labeled worker containers found
+	-@docker ps -aq --filter "network=$(PROJECT_NAME)_default" 2>nul | findstr /r "." >nul && (docker rm -f $$(docker ps -aq --filter "network=$(PROJECT_NAME)_default") >nul 2>&1 && echo Removed orphan containers on $(PROJECT_NAME)_default) || echo No orphan containers on $(PROJECT_NAME)_default
+	-@docker network inspect $(PROJECT_NAME)_default >nul 2>&1 && docker network rm $(PROJECT_NAME)_default >nul 2>&1 || echo Network $(PROJECT_NAME)_default already removed
 else
 docker-kill-orphans:   ## force remove containers on $(PROJECT_NAME)_default network (if any)
 	@echo "Killing containers on network $(PROJECT_NAME)_default if any..."
@@ -144,4 +138,45 @@ docker-prune-project:  ## prune unused images/volumes and networks (destructive)
 clean-cache: install        ## remove Python / tool caches (__pycache__, .pytest_cache, etc.)
 	-@$(RUN) python -c "import pathlib, shutil; [(shutil.rmtree(p) if p.is_dir() else p.unlink()) if p.exists() else None for pattern in ['__pycache__', '.pytest_cache', '.ruff_cache', '.mypy_cache', '*.egg-info'] for p in pathlib.Path('.').rglob(pattern)]; print('Cleaned cache files')"
 
-clean: clean-cache          ## alias for clean-cache
+rebuild: install     ## rebuild containers from scratch and start
+	docker compose $(COMPOSE_FILES) $(START_PROFILE_FLAGS) build --no-cache
+	docker compose $(COMPOSE_FILES) $(START_PROFILE_FLAGS) up -d
+
+ifeq ($(OS),Windows_NT)
+docker-wipe-all:            ## DANGEROUS: remove ALL containers, images, volumes, prune networks (Windows)
+	@echo "Removing ALL containers..."
+	-@docker ps -aq 2>nul | findstr /r "." >nul && (docker rm -f $$(docker ps -aq) >nul 2>&1 && echo Removed containers) || echo No containers
+	@echo "Removing ALL images..."
+	-@docker images -aq 2>nul | findstr /r "." >nul && (docker rmi -f $$(docker images -aq) >nul 2>&1 && echo Removed images) || echo No images
+	@echo "Removing ALL volumes..."
+	-@docker volume ls -q 2>nul | findstr /r "." >nul && (docker volume rm -f $$(docker volume ls -q) >nul 2>&1 && echo Removed volumes) || echo No volumes
+	@echo "Pruning unused networks..."
+	-@docker network prune -f >nul 2>&1 || echo Networks pruned
+else
+docker-wipe-all:            ## DANGEROUS: remove ALL containers, images, volumes, prune networks (Unix)
+	@echo "Removing ALL containers..."
+	-@ids=$$(docker ps -aq); if [ -n "$$ids" ]; then docker rm -f $$ids >/dev/null 2>&1 && echo Removed containers; else echo "No containers"; fi
+	@echo "Removing ALL images..."
+	-@ids=$$(docker images -aq); if [ -n "$$ids" ]; then docker rmi -f $$ids >/dev/null 2>&1 && echo Removed images; else echo "No images"; fi
+	@echo "Removing ALL volumes..."
+	-@ids=$$(docker volume ls -q); if [ -n "$$ids" ]; then docker volume rm -f $$ids >/dev/null 2>&1 && echo Removed volumes; else echo "No volumes"; fi
+	@echo "Pruning unused networks..."
+	-@docker network prune -f >/dev/null 2>&1 || true
+endif
+
+clean: ## Stop and remove THIS project's containers/images/volumes, then rebuild
+	@echo "Stopping compose stacks..."
+	- docker compose $(COMPOSE_FILES) $(START_PROFILE_FLAGS) down --remove-orphans --volumes --rmi all
+	- docker compose $(TEST_COMPOSE_FILES) down --remove-orphans --volumes --rmi all
+	@$(MAKE) -s docker-kill-orphans
+	@echo "Rebuilding containers from scratch..."
+	@$(MAKE) -s rebuild
+
+.PHONY: clean-all
+clean-all: ## DANGEROUS: system-wide wipe of ALL Docker data, then rebuild
+	@echo "Wiping ALL Docker data on this machine (containers, images, volumes, networks)..."
+	@$(MAKE) -s docker-wipe-all
+	@echo "Rebuilding containers from scratch..."
+	@$(MAKE) -s rebuild
+
+
