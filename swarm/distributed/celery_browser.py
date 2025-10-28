@@ -5,16 +5,26 @@ Replaces the old RemoteBrowserRuntime with Celery task invocations.
 This provides better reliability, monitoring, and scalability.
 """
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import logging
-from typing import Any, Dict, Optional
+import time
+from typing import Callable, TypeVar
 
-from celery import group
-from celery.result import AsyncResult
-
+from swarm.browser.types import (
+    BrowserEngineStatus,
+    BrowserStatusAggregate,
+    GotoTaskResponse,
+    ScrapeDataResponse,
+    ScreenshotTaskResponse,
+    StartTaskResponse,
+    StatusTaskResponse,
+)
 from swarm.celery_app import app
 
+R = TypeVar("R")
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +37,7 @@ class CeleryBrowserRuntime:
     """
 
     def __init__(self) -> None:
-        self._active_sessions: dict[str, AsyncResult[Any]] = {}
+        self._active_sessions: set[str] = set()
         # Optional default session id to use when caller does not supply one
         self._current_session_id: str | None = None
 
@@ -37,6 +47,25 @@ class CeleryBrowserRuntime:
 
     def _resolve_session_id(self, session_id: str | None) -> str | None:
         return session_id or self._current_session_id
+
+    @staticmethod
+    def _wait_result_polling(getter: Callable[[float], R], deadline_s: float) -> R:
+        """Wait for a Celery result with short-window polling to avoid idle closes.
+
+        Uses repeated small timeouts up to a firm deadline. Raises on final timeout.
+        """
+        from celery.exceptions import TimeoutError as CeleryTimeoutError  # local import
+
+        end = time.time() + deadline_s
+        while True:
+            remaining = end - time.time()
+            if remaining <= 0:
+                raise CeleryTimeoutError("Operation timed out")
+            per_attempt = 2.0 if remaining > 2.0 else max(0.1, remaining)
+            try:
+                return getter(per_attempt)
+            except CeleryTimeoutError:
+                continue
 
     async def goto(
         self, url: str, worker_hint: str | None = None, session_id: str | None = None
@@ -48,24 +77,25 @@ class CeleryBrowserRuntime:
             await self.start()
             sid = self._current_session_id
 
-        kwargs: dict[str, Any] = {"url": url}
+        kwargs: dict[str, object] = {"url": url}
         if sid:
             kwargs["session_id"] = sid
 
-        result = app.send_task("browser.goto", kwargs=kwargs, queue="browser")
+        res = app.send_task("browser.goto", kwargs=kwargs, queue="browser")
 
         # Wait for result
-        response = await asyncio.get_event_loop().run_in_executor(None, result.get, 30.0)
-
-        if not response.get("success"):
-            raise RuntimeError(f"Navigation failed: {response.get('error', 'Unknown error')}")
+        response: GotoTaskResponse = await asyncio.to_thread(
+            CeleryBrowserRuntime._wait_result_polling, res.get, 30.0
+        )
+        if not response["success"]:
+            raise RuntimeError("Navigation failed")
 
     async def click(
         self, selector: str, worker_hint: str | None = None, session_id: str | None = None
     ) -> None:
         """Click an element (fire-and-forget)."""
         sid = self._resolve_session_id(session_id)
-        kwargs: dict[str, Any] = {"selector": selector}
+        kwargs: dict[str, object] = {"selector": selector}
         if sid:
             kwargs["session_id"] = sid
         app.send_task("browser.click", kwargs=kwargs, queue="browser")
@@ -73,22 +103,23 @@ class CeleryBrowserRuntime:
 
     async def start(self, worker_hint: str | None = None, session_id: str | None = None) -> None:
         """Start a browser session. If session_id provided, reuse it."""
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, object] = {}
         if session_id:
             kwargs["session_id"] = session_id
 
-        result = app.send_task("browser.start", kwargs=kwargs or None, queue="browser")
+        res = app.send_task("browser.start", kwargs=kwargs or None, queue="browser")
 
-        response = await asyncio.get_event_loop().run_in_executor(None, result.get, 30.0)
-
-        if not response.get("success"):
-            raise RuntimeError(f"Start failed: {response.get('error', 'Unknown error')}")
+        response: StartTaskResponse = await asyncio.to_thread(
+            CeleryBrowserRuntime._wait_result_polling, res.get, 30.0
+        )
+        if not response["success"]:
+            raise RuntimeError("Start failed")
 
         # Store task ID for session tracking
         sid = response.get("session_id") or session_id
         if sid is None:
             raise RuntimeError("Start did not return session_id")
-        self._active_sessions[sid] = result
+        self._active_sessions.add(sid)
         # Update current session id
         self._current_session_id = sid
 
@@ -105,78 +136,90 @@ class CeleryBrowserRuntime:
             await self.start()
             sid = self._current_session_id
 
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, object] = {}
         if sid:
             kwargs["session_id"] = sid
 
-        result = app.send_task("browser.screenshot", kwargs=kwargs or None, queue="browser")
+        res = app.send_task("browser.screenshot", kwargs=kwargs or None, queue="browser")
 
-        response = await asyncio.get_event_loop().run_in_executor(None, result.get, 30.0)
-
-        if not response.get("success"):
-            raise RuntimeError(f"Screenshot failed: {response.get('error', 'Unknown error')}")
+        response: ScreenshotTaskResponse = await asyncio.to_thread(
+            CeleryBrowserRuntime._wait_result_polling, res.get, 30.0
+        )
+        if not response["success"]:
+            raise RuntimeError("Screenshot failed")
 
         # Decode base64 data
         return base64.b64decode(response["data"])
 
     async def status(
         self, worker_hint: str | None = None, session_id: str | None = None
-    ) -> dict[str, Any]:
+    ) -> BrowserStatusAggregate:
         """Get browser status."""
         # If a specific session is requested, query just that session first
         sid = self._resolve_session_id(session_id)
         if sid:
-            status_result = app.send_task(
+            res_single = app.send_task(
                 "browser.status", kwargs={"session_id": sid}, queue="browser"
             )
             try:
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None, status_result.get, 5.0
+                response = await asyncio.to_thread(
+                    CeleryBrowserRuntime._wait_result_polling, res_single.get, 5.0
                 )
                 if response.get("success"):
-                    return {"active_sessions": 1, "sessions": [response["data"]]}
+                    single: BrowserStatusAggregate = {
+                        "active_sessions": 1,
+                        "sessions": [response["data"]],
+                    }
+                    return single
             except Exception as e:
                 logger.warning(f"Failed to get status for session {sid}: {e}")
 
         # Get status for all active tasks
-        statuses = []
+        statuses: list[BrowserEngineStatus] = []
 
-        for sid2, result in list(self._active_sessions.items()):
-            status_result = app.send_task(
-                "browser.status", kwargs={"session_id": sid2}, queue="browser"
-            )
+        for sid2 in list(self._active_sessions):
+            res_loop = app.send_task("browser.status", kwargs={"session_id": sid2}, queue="browser")
 
             try:
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None, status_result.get, 5.0
+                response = await asyncio.to_thread(
+                    CeleryBrowserRuntime._wait_result_polling, res_loop.get, 5.0
                 )
 
                 if response.get("success") and response["data"]["status"] == "not_found":
                     # Task no longer exists, remove from tracking
-                    del self._active_sessions[sid2]
+                    self._active_sessions.discard(sid2)
                 else:
                     statuses.append(response["data"])
             except Exception as e:
                 logger.warning(f"Failed to get status for session {sid2}: {e}")
 
-        return {"active_sessions": len(statuses), "sessions": statuses}
+        aggregate: BrowserStatusAggregate = {
+            "active_sessions": len(statuses),
+            "sessions": statuses,
+        }
+        return aggregate
 
     async def cleanup_all(self) -> None:
         """Clean up all tracked browser sessions."""
         cleanup_tasks = []
 
-        for sid3 in list(self._active_sessions.keys()):
-            cleanup_result = app.send_task("browser.cleanup", kwargs={"session_id": sid3}, queue="browser")
-            cleanup_tasks.append(cleanup_result)
+        for sid3 in list(self._active_sessions):
+            cleanup_result = app.send_task(
+                "browser.cleanup", kwargs={"session_id": sid3}, queue="browser"
+            )
+            cleanup_tasks.append(cleanup_result.get)
 
-        # Wait for all cleanups to complete
+        # Wait for all cleanups to complete: fetch each result with a timeout
         if cleanup_tasks:
-            group_result = group(*cleanup_tasks)()
-            await asyncio.get_event_loop().run_in_executor(None, group_result.get, 10.0)
+            for getter in cleanup_tasks:
+                try:
+                    await asyncio.to_thread(CeleryBrowserRuntime._wait_result_polling, getter, 10.0)
+                except Exception as e:
+                    logger.warning(f"Cleanup task failed: {e}")
 
         self._active_sessions.clear()
 
-    async def scrape_data(self, url: str, actions: list[dict[str, Any]]) -> dict[str, Any]:
+    async def scrape_data(self, url: str, actions: list[dict[str, object]]) -> ScrapeDataResponse:
         """
         High-level scraping task.
 
@@ -187,13 +230,13 @@ class CeleryBrowserRuntime:
         Returns:
             Scraped data and results
         """
-        result = app.send_task(
+        res = app.send_task(
             "browser.scrape_data", kwargs={"url": url, "actions": actions}, queue="browser"
         )
 
-        response = await asyncio.get_event_loop().run_in_executor(None, result.get, 60.0)
-
-        if not response.get("success"):
-            raise RuntimeError(f"Scraping failed: {response}")
-
-        return dict(response)
+        response: ScrapeDataResponse = await asyncio.to_thread(
+            CeleryBrowserRuntime._wait_result_polling, res.get, 60.0
+        )
+        if not response["success"]:
+            raise RuntimeError("Scraping failed")
+        return response
