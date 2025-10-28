@@ -145,11 +145,6 @@ _CREATING_SENTINEL: _CreatingSentinel = "__creating__"
 _engines: dict[str, BrowserEngine | _CreatingSentinel] = {}
 _engines_lock = threading.Lock()
 
-# Cap the number of concurrently alive browser engines per worker to avoid
-# resource exhaustion (CPU, memory, file descriptors) leading to timeouts.
-# Keep this conservative relative to worker concurrency.
-MAX_ENGINES_PER_WORKER = 8
-
 # Weak reference dictionary to store Redis clients per event loop
 # This ensures clients are garbage collected when the loop is destroyed
 _loop_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, RedisBytes] = (
@@ -259,41 +254,12 @@ class BrowserTask(SwarmTask[..., object]):
                 logger.info(f"Creating browser engine for session {session_id}")
                 engine = BrowserEngine(headless=True, proxy=None, timeout_ms=60000)
                 await engine.start()
-                # Store the engine and enforce a hard cap on engines per worker
-                to_force_cleanup: list[str] = []
                 with _engines_lock:
                     _engines[session_id] = engine
                     engine_count = sum(1 for v in _engines.values() if isinstance(v, BrowserEngine))
                     logger.info(
                         f"Stored engine for session {session_id} (total engines: {engine_count})"
                     )
-                    if engine_count > MAX_ENGINES_PER_WORKER:
-                        try:
-                            # Identify oldest engines to reclaim until we're back at the limit
-                            engines_by_age: list[tuple[str, BrowserEngine]] = [
-                                (sid, eng)
-                                for sid, eng in _engines.items()
-                                if isinstance(eng, BrowserEngine)
-                            ]
-                            engines_by_age.sort(key=lambda x: getattr(x[1], "_started_at", 0.0))
-                            cleanup_count = engine_count - MAX_ENGINES_PER_WORKER
-                            # Select the oldest engines first (excluding the one we just stored if needed)
-                            for sid, _ in engines_by_age[:cleanup_count]:
-                                # Defer the actual stop/cleanup outside the lock
-                                to_force_cleanup.append(sid)
-                        except Exception as e:
-                            logger.warning(f"Failed to compute engines to reclaim: {e}")
-
-                # Perform cleanup outside the lock to avoid blocking other threads
-                for sid in to_force_cleanup:
-                    try:
-                        logger.warning(
-                            f"Engine limit exceeded ({engine_count} > {MAX_ENGINES_PER_WORKER}); force-cleaning session {sid}"
-                        )
-                        # Full cleanup clears registry and stops the engine on its own loop
-                        await self.cleanup_engine(sid)
-                    except Exception as e:
-                        logger.error(f"Failed to force-clean leaked engine for session {sid}: {e}")
 
                 # Register session with affinity registry
                 from swarm.distributed.session_registry import SessionRegistry
