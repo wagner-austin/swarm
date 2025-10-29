@@ -201,13 +201,14 @@ class DockerApiBackend(ScalingBackend):
                         "mode": "rw",
                     }
                 },
-                # Add health check for workers
+                # Health check: report healthy only when worker heartbeat key exists in Redis
                 "healthcheck": {
                     "test": [
                         "CMD",
-                        "curl",
-                        "-f",
-                        f"http://localhost:{self.worker_metrics_port}/metrics",
+                        "python",
+                        "-m",
+                        "swarm.health",
+                        "worker-heartbeat",
                     ],
                     "interval": 30000000000,  # 30s in nanoseconds
                     "timeout": 5000000000,  # 5s in nanoseconds
@@ -317,25 +318,38 @@ class DockerApiBackend(ScalingBackend):
             logger.error(f"Failed to cleanup worker containers: {e}")
 
     def _detect_compose_network(self) -> str:
-        """Auto-detect the Docker Compose network."""
+        """Return the deterministic Docker network for worker containers.
+
+        Contract (no guessing):
+        1) If DOCKER_NETWORK is set, use it exactly or raise.
+        2) Else require the project network: "{project_name}_default" or raise.
+        """
+        # 1) Explicit override wins
+        explicit = os.environ.get("DOCKER_NETWORK")
+        if explicit:
+            try:
+                self.client.networks.get(explicit)
+                logger.info("Using explicit Docker network: %s", explicit)
+                return explicit
+            except Exception as e:
+                raise RuntimeError(
+                    f"Configured DOCKER_NETWORK={explicit} not found or not accessible: {e}"
+                )
+
+        # 2) Project network is the only valid default
+        expected = f"{self.project_name}_default"
         try:
-            # List all networks and find one that matches compose pattern
-            networks = self.client.networks.list()
-
-            # Look for networks with _default suffix
-            for net in networks:
-                if net.name.endswith("_default") and net.name != "bridge_default":
-                    network_name: str = str(net.name)
-                    logger.info("Auto-detected Docker Compose network: %s", network_name)
-                    return network_name
-
-            # Fallback to common patterns
-            logger.warning("Could not auto-detect network, using discord_default")
-            return "discord_default"
-
+            self.client.networks.get(expected)
+            logger.info("Using project Docker network: %s", expected)
+            return expected
         except Exception as e:
-            logger.error(f"Failed to detect network: {e}, using discord_default")
-            return "discord_default"
+            raise RuntimeError(
+                "Expected project network not found. "
+                f"Required network: '{expected}'. "
+                "Ensure the stack was started with the same COMPOSE_PROJECT_NAME, "
+                "or set DOCKER_NETWORK explicitly to the correct network. "
+                f"Error: {e}"
+            )
 
     def _detect_app_path(self) -> str:
         """Auto-detect the application directory path by inspecting our own container."""
