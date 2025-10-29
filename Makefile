@@ -79,6 +79,7 @@ lint: install               ## ruff fix + ruff format + mypy strict type-check +
 	$(PYTHON) scripts/guard_no_redis_protocol_duplication.py
 	$(PYTHON) scripts/guard_no_any_usage.py scripts/celery_autoscaler.py swarm/distributed/backends/
 	$(PYTHON) scripts/guard_no_cast_usage.py swarm/
+	$(PYTHON) scripts/guard_no_inline_healthchecks.py docker-compose.yml docker-compose.test.yml
 	$(PYTHON) scripts/guard_no_pcalls.py swarm/
 
 format: lint               ## auto-format code base (ruff + black)
@@ -178,5 +179,4 @@ clean-all: ## DANGEROUS: system-wide wipe of ALL Docker data, then rebuild
 	@$(MAKE) -s docker-wipe-all
 	@echo "Rebuilding containers from scratch..."
 	@$(MAKE) -s rebuild
-
 
