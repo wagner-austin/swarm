@@ -1,25 +1,36 @@
 #!/usr/bin/env python3
 """
-Generate HAProxy configuration for Redis failover.
+Generate HAProxy configuration for Redis/Upstash backends.
 
-This script generates HAProxy configuration for multiple Redis backends
-using the same format as Celery for consistency.
+Contract (robust and explicit, prevents drift):
+- Input: ``CELERY_BROKER_URLS`` – semicolon‑separated list of Redis URLs in
+  the Celery format. The first URL is the primary, the rest are backups.
+- Uniform mode (all SSL or all non‑SSL):
+  - Enable backend‑level tcp‑check and, when a single password applies to all
+    servers, use AUTH + PING for health validation.
+- Mixed mode (some SSL, some non‑SSL):
+  - Do not use backend‑level tcp‑check (it cannot be expressed safely for mixed).
+  - Use per‑server checks:
+    * SSL servers: "ssl verify none check-ssl" so HAProxy performs a TLS handshake.
+    * Non‑SSL servers: plain "check" (TCP connect).
+  - This yields accurate health per server without ambiguous global behavior.
 
 Usage:
     python scripts/generate_haproxy_config.py
 
 Environment variables:
     CELERY_BROKER_URLS: Semicolon-separated list of Redis URLs
-        Example: "redis://primary:6379;redis://backup1:6379;redis://backup2:6379"
-        The first URL is treated as primary, all others as backups.
-
+        Example: "rediss://host:port;redis://backup:6379"
     MAXCONN: Maximum concurrent connections (default: 256)
     TIMEOUT_CLIENT: Client timeout (default: 50s)
     TIMEOUT_SERVER: Server timeout (default: 50s)
 """
 
+from __future__ import annotations
+
 import os
 import sys
+from typing import TypedDict
 from urllib.parse import urlparse
 
 # Note: No need for dotenv in Docker - environment variables are set by docker-compose
@@ -31,26 +42,32 @@ def log(message: str) -> None:
     print(f"[haproxy-config] {message}", flush=True)
 
 
-def parse_redis_url(url: str) -> dict[str, str | int | bool | None]:
-    """Parse a Redis URL into components."""
+class _ServerConfig(TypedDict):
+    name: str
+    host: str
+    port: int
+    is_ssl: bool
+    is_backup: bool
+    username: str
+    password: str | None
+
+
+def parse_redis_url(url: str) -> _ServerConfig:
+    """Parse a Redis URL into a typed server config."""
     parsed = urlparse(url)
-
-    # Determine if SSL is needed
-    is_ssl = parsed.scheme in ("rediss", "redis+ssl")
-
-    # Extract components
-    host = parsed.hostname or "localhost"
-    port = parsed.port or (6380 if is_ssl else 6379)
-    password = parsed.password
-    username = parsed.username or "default"
-
+    is_ssl: bool = parsed.scheme in ("rediss", "redis+ssl")
+    host: str = parsed.hostname or "localhost"
+    port: int = int(parsed.port or (6380 if is_ssl else 6379))
+    password: str | None = parsed.password
+    username: str = parsed.username or "default"
     return {
+        "name": "",
         "host": host,
         "port": port,
         "password": password,
         "username": username,
         "is_ssl": is_ssl,
-        "scheme": parsed.scheme,
+        "is_backup": False,
     }
 
 
@@ -71,10 +88,10 @@ def generate_haproxy_config(redis_urls: str) -> str:
     log(f"Configuring HAProxy for {len(url_list)} Redis backends")
 
     # Parse each URL into components
-    servers = []
+    servers: list[_ServerConfig] = []
     for i, url in enumerate(url_list):
         try:
-            server = parse_redis_url(url)
+            server: _ServerConfig = parse_redis_url(url)
             # Generate unique server name based on index
             server["name"] = f"redis_{i}"
             # First server is primary, others are backups
@@ -99,8 +116,8 @@ def generate_haproxy_config(redis_urls: str) -> str:
         maxconn = 256
 
     # Get timeout values from environment
-    timeout_client = os.getenv("TIMEOUT_CLIENT", "50s")
-    timeout_server = os.getenv("TIMEOUT_SERVER", "50s")
+    timeout_client: str = os.getenv("TIMEOUT_CLIENT", "50s")
+    timeout_server: str = os.getenv("TIMEOUT_SERVER", "50s")
 
     config = f"""global
     # No daemon mode - must run in foreground for Docker
@@ -146,35 +163,21 @@ backend redis_backend
 """
 
     # Check for mixed SSL/non-SSL servers
-    ssl_schemes = {s.get("is_ssl") for s in servers}
-    mixed_ssl = len(ssl_schemes) > 1
+    ssl_schemes = {bool(s["is_ssl"]) for s in servers}
+    mixed_ssl: bool = len(ssl_schemes) > 1
 
     if mixed_ssl:
-        log("WARNING: Mixed SSL and non-SSL Redis servers detected")
-        log("WARNING: Health checks disabled - using connection-only validation")
-        log("WARNING: Password changes won't be detected until traffic fails")
-        log("INFO: Upstash (SSL) as primary, Local Redis (non-SSL) as backup")
-
-        # List the servers for clarity
-        for server in servers:
-            scheme_type = "SSL" if server.get("is_ssl") else "non-SSL"
-            role = "primary" if not server.get("is_backup") else "backup"
-            log(f"  - {server['name']}: {server['host']}:{server['port']} ({scheme_type}, {role})")
-
-        # For mixed mode: no health checks, rely on passive connection monitoring
-        # ssl-hello-chk doesn't work with mixed SSL/non-SSL backends
-        config += "    # Mixed SSL/non-SSL mode - connection checks only, no health validation\n"
-        config += "    # WARNING: No active health checks - using passive checks only\n"
-        config += "    # NOTE: Clients must send AUTH themselves (transparent proxy mode)\n"
+        log("Mixed SSL and non-SSL Redis servers detected")
+        log("Using per-server checks: check-ssl (TLS handshake) for SSL, plain check for non-SSL")
+        config += "    # Mixed SSL/non-SSL mode – per-server health checks\n"
+        config += "    # SSL servers: TLS handshake via 'check-ssl'; non-SSL: TCP connect 'check'\n"
     else:
         # All servers have same SSL setting - can use full health checks
-        all_ssl = True in ssl_schemes  # True if all SSL, False if all non-SSL
+        all_ssl: bool = True in ssl_schemes  # True if all SSL, False if all non-SSL
 
         # Get password from first server (assuming all use same auth)
-        first_server = servers[0]
-        password_str = (
-            str(first_server.get("password", "")) if first_server.get("password") else None
-        )
+        first_server: _ServerConfig = servers[0]
+        password_str: str | None = first_server["password"] if first_server["password"] else None
 
         # Add tcp-check for full validation
         config += "    # Uniform SSL configuration - full AUTH+PING health checks enabled\n"
@@ -207,8 +210,8 @@ backend redis_backend
     # Add all servers dynamically
     for server in servers:
         # Build server line with appropriate options
-        check_inter = "5s" if server.get("is_backup") else "3s"
-        check_fall = 3 if server.get("is_backup") else 2
+        check_inter: str = "5s" if server["is_backup"] else "3s"
+        check_fall: int = 3 if server["is_backup"] else 2
 
         # Base server configuration
         server_line = f"    server {server['name']} {server['host']}:{server['port']}"
@@ -217,15 +220,10 @@ backend redis_backend
         server_line += f" check inter {check_inter} fall {check_fall} rise 2"
 
         # Add SSL options for SSL servers
-        if server.get("is_ssl"):
-            # Always need ssl verify none for data connections
+        if server["is_ssl"]:
             server_line += " ssl verify none"
-
-            # Only add check-ssl if NOT in mixed mode (where ssl-hello-chk handles it)
-            # Also don't add it if using tcp-check connect ssl (avoids double handshake)
-            if not mixed_ssl:
-                # In uniform mode with tcp-check connect ssl, check-ssl is redundant
-                # but HAProxy needs it to know to use SSL for the health check connection
+            # In mixed mode, ensure handshake for health check
+            if mixed_ssl:
                 server_line += " check-ssl"
 
         # Mark backup servers
