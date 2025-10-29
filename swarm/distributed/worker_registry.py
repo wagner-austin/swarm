@@ -179,45 +179,17 @@ class WorkerRegistry:
         return None
 
     def get_orphaned_sessions(self) -> list[str]:
-        """Find sessions whose workers are no longer healthy.
+        """Return sessions whose owning worker is no longer live (authoritative).
 
-        Returns:
-            List of orphaned session IDs
+        Delegates to the SessionRegistry's canonical logic to avoid drift.
         """
-        orphaned = []
-
         try:
-            # Get all session affinity keys
-            session_keys = self.redis.keys("browser:affinity:*")
+            from swarm.distributed.session_registry import SessionRegistry
 
-            # No capability detection or fallback: standardized heartbeat is authoritative
-
-            for key_str in session_keys:
-                session_id = key_str.split(":", 2)[-1]
-
-                worker_id = self.redis.hget(key_str, "worker_id")
-                if not worker_id:
-                    continue
-
-                # Primary: liveness via standardized heartbeat timestamp
-                alive = False
-                try:
-                    hb_key = f"worker:heartbeat:browser:{worker_id}"
-                    ts_raw = self.redis.hget(hb_key, "timestamp")
-                    if ts_raw:
-                        ts = float(ts_raw)
-                        if (time.time() - ts) <= 90.0:
-                            alive = True
-                except Exception:
-                    alive = False
-
-                if not alive:
-                    orphaned.append(session_id)
-
+            return SessionRegistry.find_orphaned_sessions_sync(self.redis)
         except Exception as e:
-            logger.error(f"Failed to find orphaned sessions: {e}")
-
-        return orphaned
+            logger.error(f"Failed to compute orphaned sessions: {e}")
+            return []
 
     def cleanup_orphaned_sessions(self) -> int:
         """Remove affinity for sessions whose workers are dead.

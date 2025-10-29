@@ -15,7 +15,11 @@ import redis.asyncio as redis_asyncio
 
 from swarm.core.settings import Settings
 from swarm.infra import async_close_redis
-from swarm.infra.redis_protocols import RedisAsyncProtocol, wrap_redis_async
+from swarm.infra.redis_protocols import (
+    RedisAsyncProtocol,
+    RedisSyncProtocol,
+    wrap_redis_async,
+)
 from swarm.utils.worker_identity import direct_queue_name
 
 logger = logging.getLogger(__name__)
@@ -172,6 +176,47 @@ class SessionRegistry:
         """Close Redis connection."""
         if self._redis:
             await async_close_redis(self._redis)
+
+    # -----------------
+    # Orphan detection (sync helper to avoid drift in registries)
+    # -----------------
+    @staticmethod
+    def find_orphaned_sessions_sync(
+        client: RedisSyncProtocol, *, stale_seconds: float = 90.0
+    ) -> list[str]:
+        """Return sessions whose owning worker heartbeat is missing or stale.
+
+        Scans authoritative affinity hashes and checks standardized heartbeat
+        liveness for each referenced worker. Keeps logic colocated with the
+        session registry contract to avoid drift across components.
+        """
+        try:
+            keys = client.keys("browser:affinity:*")
+            now = time.time()
+            orphaned: list[str] = []
+            for key in keys:
+                data = client.hgetall(key)
+                worker_id = data.get("worker_id") if data else None
+                if not worker_id:
+                    continue
+                ts_raw = client.hget(f"worker:heartbeat:browser:{worker_id}", "timestamp")
+                dead = False
+                if not ts_raw:
+                    dead = True
+                else:
+                    try:
+                        ts = float(ts_raw)
+                        dead = (now - ts) > stale_seconds
+                    except Exception:
+                        dead = True
+                if dead:
+                    # session_id suffix after last ':'
+                    sid = key.rsplit(":", 1)[-1]
+                    orphaned.append(sid)
+            return orphaned
+        except Exception as exc:
+            logger.error(f"Failed to compute orphaned sessions (sync): {exc}")
+            return []
 
 
 # Note on concurrency:
