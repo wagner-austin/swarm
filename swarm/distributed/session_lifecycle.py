@@ -46,6 +46,7 @@ class SessionLifecycleManager:
         self._stop_event: threading.Event = threading.Event()
         self._cleanup_task: asyncio.Task[None] | None = None
         self._lock: asyncio.Lock | None = None
+        self._stop_async: asyncio.Event | None = None
         # Metrics (typed wrappers, optional dependency behind a typed facade)
         from swarm.metrics.typed import Counter, Gauge, make_counter, make_gauge
 
@@ -75,7 +76,7 @@ class SessionLifecycleManager:
         self._loop_thread = threading.Thread(
             target=self._loop_main,
             name="SessionLifecycleLoop",
-            daemon=True,
+            daemon=False,
         )
         self._loop_thread.start()
         if not self._loop_ready.wait(timeout=5.0):
@@ -90,12 +91,10 @@ class SessionLifecycleManager:
 
         # Request full cleanup on the manager loop then stop it
         async def _shutdown() -> None:
+            # Signal cleanup loop to exit promptly
+            if self._stop_async is not None:
+                self._stop_async.set()
             await self._cleanup_all_sessions()
-            if self._cleanup_task:
-                try:
-                    self._cleanup_task.cancel()
-                except Exception:
-                    pass
 
         try:
             fut = asyncio.run_coroutine_threadsafe(_shutdown(), loop)
@@ -135,18 +134,21 @@ class SessionLifecycleManager:
         try:
             # Initialize async primitives on this loop
             self._lock = asyncio.Lock()
+            self._stop_async = asyncio.Event()
             # Start cleanup task
             self._cleanup_task = loop.create_task(self._cleanup_loop())
             loop.run_forever()
         finally:
-            try:
-                pending = asyncio.all_tasks(loop)
-                for task in pending:
-                    task.cancel()
-                if hasattr(loop, "shutdown_asyncgens"):
-                    loop.run_until_complete(loop.shutdown_asyncgens())
-            except Exception:
-                pass
+            # Drain tasks cooperatively, then shutdown async generators
+            pending = {t for t in asyncio.all_tasks(loop) if not t.done()}
+            if pending:
+
+                async def _drain() -> None:
+                    await asyncio.gather(*pending, return_exceptions=True)
+
+                loop.run_until_complete(_drain())
+            if hasattr(loop, "shutdown_asyncgens"):
+                loop.run_until_complete(loop.shutdown_asyncgens())
             try:
                 loop.close()
             except Exception:
@@ -228,21 +230,28 @@ class SessionLifecycleManager:
     # Internal coroutines (run on manager loop)
     # -----------------
     async def _cleanup_loop(self) -> None:
-        """Background loop that periodically cleans up expired sessions."""
-        while not self._stop_event.is_set():
-            try:
-                await asyncio.sleep(self._cleanup_interval)
-                await self._cleanup_expired_sessions()
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.error(f"Error in lifecycle cleanup loop: {exc}", exc_info=True)
-                try:
-                    from swarm.core import alerts
+        """Background loop that periodically cleans up expired sessions.
 
-                    alerts.alert(f"Lifecycle cleanup loop error: {exc}")
-                except Exception:
-                    pass
+        Uses an asyncio.Event to allow prompt shutdown without relying on task
+        cancellation. The event is set from the synchronous stop() method.
+        """
+        assert self._stop_async is not None
+        while True:
+            try:
+                # Wait for stop, or time out to run periodic cleanup
+                await asyncio.wait_for(self._stop_async.wait(), timeout=self._cleanup_interval)
+                break
+            except TimeoutError:
+                try:
+                    await self._cleanup_expired_sessions()
+                except Exception as exc:
+                    logger.error(f"Error in lifecycle cleanup loop: {exc}", exc_info=True)
+                    try:
+                        from swarm.core import alerts
+
+                        alerts.alert(f"Lifecycle cleanup loop error: {exc}")
+                    except Exception:
+                        pass
 
     async def _cleanup_expired_sessions(self) -> None:
         now = time.time()
