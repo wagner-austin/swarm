@@ -52,7 +52,8 @@
       "Bash(cut:*)",
       "Bash(timeout 120 poetry run pytest:*)",
       "Bash(timeout 3 curl -v telnet://13.57.166.49:80)",
-      "Bash(timeout 3 curl:*)"
+      "Bash(timeout 3 curl:*)",
+      "Bash(timeout 5 curl:*)"
     ],
     "deny": []
   }
