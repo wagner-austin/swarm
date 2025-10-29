@@ -440,12 +440,12 @@ class TestWorkerHeartbeatIntegration:
             # Simulate worker 1 crash
             workers[1].shutdown_event.set()
 
-            # Wait for TTL expiry using polling
+            # Wait for heartbeat TTL expiry using polling (authoritative liveness)
             poll_until_true(
-                lambda: not redis_client.exists("browser:worker:worker-001"),
+                lambda: not redis_client.exists("worker:heartbeat:browser:worker-001"),
                 timeout=5.0,
                 interval=0.05,
-                description="crashed worker key to expire",
+                description="crashed worker heartbeat to expire",
             )
 
             # Check orphaned sessions

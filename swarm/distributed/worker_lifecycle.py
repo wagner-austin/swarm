@@ -167,9 +167,9 @@ class WorkerLifecycle:
                     "worker_id": self.worker_id,
                 },
             )
-            heartbeat_ttl = int(3 * float(self.heartbeat_interval))
-            if heartbeat_ttl < 1:
-                heartbeat_ttl = 1
+            heartbeat_ttl = max(
+                int(3 * float(self.heartbeat_interval)), int(self.heartbeat_timeout), 2
+            )
             pipe.expire(heartbeat_key, heartbeat_ttl)
 
             pipe.execute()
@@ -308,9 +308,9 @@ class WorkerLifecycle:
                         "worker_id": self.worker_id,
                     }
                     pipe.hset(heartbeat_key, mapping=_hb_mapping(hb))
-                    heartbeat_ttl = int(3 * float(self.heartbeat_interval))
-                    if heartbeat_ttl < 1:
-                        heartbeat_ttl = 1
+                    heartbeat_ttl = max(
+                        int(3 * float(self.heartbeat_interval)), int(self.heartbeat_timeout), 2
+                    )
                     pipe.expire(heartbeat_key, heartbeat_ttl)
 
                     pipe.execute()
@@ -353,9 +353,9 @@ class WorkerLifecycle:
                 "worker_id": self.worker_id,
             }
             pipe.hset(heartbeat_key, mapping=_hb_mapping(hb))
-            heartbeat_ttl = int(3 * float(self.heartbeat_interval))
-            if heartbeat_ttl < 1:
-                heartbeat_ttl = 1
+            heartbeat_ttl = max(
+                int(3 * float(self.heartbeat_interval)), int(self.heartbeat_timeout), 2
+            )
             pipe.expire(heartbeat_key, heartbeat_ttl)
             pipe.execute()
 
