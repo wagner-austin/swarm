@@ -180,12 +180,9 @@ services:
       test:
         - CMD
         - python
-        - -c
-        - >
-          import urllib.request,sys;
-          sys.exit(0 if urllib.request.urlopen(
-            'http://localhost:9200/metrics', timeout=5
-          ).getcode() == 200 else 1)
+        - -m
+        - swarm.health
+        - http
       interval: 30s
       timeout: 5s
       retries: 3
@@ -319,8 +316,9 @@ services:
       test:
         - CMD
         - python
-        - -c
-        - "import sys; sys.exit(0)"
+        - -m
+        - swarm.health
+        - redis-ping
       interval: 30s
       timeout: 5s
       retries: 3
