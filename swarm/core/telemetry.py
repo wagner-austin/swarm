@@ -39,6 +39,10 @@ __all__ = [
     "BROWSER_HEALTHY_WORKERS",
     "BROWSER_DEGRADED",
     "BROWSER_HEALTH_LAST_CHECK_SECONDS",
+    "BROWSER_ENGINE_SHUTDOWN_TOTAL",
+    "BROWSER_ENGINE_DRAIN_TASKS_TOTAL",
+    "BROWSER_ENGINE_CANCEL_TASKS_TOTAL",
+    "BROWSER_ENGINE_DRAIN_SECONDS",
 ]
 
 _log = logging.getLogger(__name__)
@@ -132,6 +136,28 @@ BROWSER_DEGRADED = Gauge(
 BROWSER_HEALTH_LAST_CHECK_SECONDS = Gauge(
     "swarm_browser_health_last_check_seconds",
     "Unix timestamp of last browser health check",
+    registry=REGISTRY,
+)
+
+# --- Browser engine shutdown metrics ----------------------------------------
+BROWSER_ENGINE_SHUTDOWN_TOTAL = Counter(
+    "swarm_browser_engine_shutdown_total",
+    "Total BrowserEngine shutdowns performed",
+    registry=REGISTRY,
+)
+BROWSER_ENGINE_DRAIN_TASKS_TOTAL = Counter(
+    "swarm_browser_engine_drain_tasks_total",
+    "Total number of event-loop tasks drained during shutdown",
+    registry=REGISTRY,
+)
+BROWSER_ENGINE_CANCEL_TASKS_TOTAL = Counter(
+    "swarm_browser_engine_cancel_tasks_total",
+    "Total number of event-loop tasks canceled as fallback during shutdown",
+    registry=REGISTRY,
+)
+BROWSER_ENGINE_DRAIN_SECONDS = Histogram(
+    "swarm_browser_engine_drain_seconds",
+    "Time spent draining event-loop tasks during shutdown",
     registry=REGISTRY,
 )
 
