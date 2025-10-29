@@ -102,14 +102,23 @@ class BrowserEngine(ServiceABC):
         self._loop_ready: threading.Event = threading.Event()
         # Async-native RW-lock for concurrent reads and exclusive writes (created on engine loop)
         self._rwlock: AsyncRWLock | None = None
+        # Prevent new work once shutdown begins
+        self._shutting_down: bool = False
 
     # ------------------------------------------------------------------+
     # Readers-Writers helpers                                          #
     # ------------------------------------------------------------------+
-    async def _run_on_engine_loop(self, coro: Awaitable[T]) -> T:
-        """Execute coro in the engine's home loop, regardless of caller thread."""
+    async def _run_on_engine_loop(self, coro: Awaitable[T], *, allow_shutdown: bool = False) -> T:
+        """Execute coro in the engine's home loop, regardless of caller thread.
+
+        When ``allow_shutdown`` is True this method may be used during the
+        shutdown sequence to finish in-flight cleanup even after the engine has
+        signaled ``_shutting_down``. External callers should not set this flag.
+        """
         if self._loop is None:
             raise RuntimeError("BrowserEngine loop not initialized; call start() first")
+        if self._shutting_down and not allow_shutdown:
+            raise RuntimeError("BrowserEngine is shutting down; refusing to schedule work")
 
         current_loop = asyncio.get_running_loop()
         if current_loop is self._loop:
@@ -140,14 +149,38 @@ class BrowserEngine(ServiceABC):
         try:
             loop.run_forever()
         finally:
-            try:
-                pending = asyncio.all_tasks(loop)
-                for task in pending:
-                    task.cancel()
-                if hasattr(loop, "shutdown_asyncgens"):
-                    loop.run_until_complete(loop.shutdown_asyncgens())
-            except Exception as exc:
-                logger.debug(f"Error during engine loop shutdown: {exc}")
+            # Drain tasks (no fallback cancellation) to allow Playwright reapers to complete
+            from swarm.core.telemetry import (
+                BROWSER_ENGINE_DRAIN_SECONDS,
+                BROWSER_ENGINE_DRAIN_TASKS_TOTAL,
+                BROWSER_ENGINE_SHUTDOWN_TOTAL,
+            )
+
+            logger.info("Engine loop stopping: beginning drain phase (id=%s)", id(loop))
+            start = time.time()
+            pending = {t for t in asyncio.all_tasks(loop) if not t.done()}
+            drained = 0
+            if pending:
+                logger.debug("Engine loop: %d pending tasks before drain", len(pending))
+
+                async def _drain() -> None:
+                    await asyncio.gather(*pending, return_exceptions=True)
+
+                loop.run_until_complete(_drain())
+                drained = len(pending)
+            # After drain, ensure async generators shut down
+            if hasattr(loop, "shutdown_asyncgens"):
+                loop.run_until_complete(loop.shutdown_asyncgens())
+
+            elapsed = time.time() - start
+            BROWSER_ENGINE_DRAIN_TASKS_TOTAL.inc(drained)
+            BROWSER_ENGINE_DRAIN_SECONDS.observe(elapsed)
+            BROWSER_ENGINE_SHUTDOWN_TOTAL.inc()
+            logger.info(
+                "Engine loop drained tasks: drained=%d elapsed=%.3fs",
+                drained,
+                elapsed,
+            )
             try:
                 loop.close()
             except Exception as exc:
@@ -182,6 +215,8 @@ class BrowserEngine(ServiceABC):
         - page.content()
         """
         # If we're already on the engine's loop, run directly with the lock
+        if self._shutting_down:
+            raise RuntimeError("BrowserEngine is shutting down; refusing to run read operation")
         current_loop = asyncio.get_running_loop()
         if self._loop is None or current_loop is self._loop:
             return await self._read_inner(fn)
@@ -217,6 +252,8 @@ class BrowserEngine(ServiceABC):
         Future optimization: release lock after DOM mutation, await I/O outside lock.
         """
         # If we're already on the engine's loop, run directly with the lock
+        if self._shutting_down:
+            raise RuntimeError("BrowserEngine is shutting down; refusing to run write operation")
         current_loop = asyncio.get_running_loop()
         if self._loop is None or current_loop is self._loop:
             return await self._write_inner(fn)
@@ -253,7 +290,7 @@ class BrowserEngine(ServiceABC):
             self._loop_thread = threading.Thread(
                 target=self._engine_loop_main,
                 name=f"BrowserEngineLoop-{self._worker_id}",
-                daemon=True,
+                daemon=False,
             )
             self._loop_thread.start()
             if not self._loop_ready.wait(timeout=5.0):
@@ -413,6 +450,9 @@ class BrowserEngine(ServiceABC):
         return "running" if self.is_running() else "stopped"
 
     async def close(self) -> None:
+        # Enter shutdown – reject new operations
+        self._shutting_down = True
+
         async def _close_inner() -> None:
             # --- WSLogger shutdown ---
             ws_logger = self._ws_logger
@@ -452,10 +492,11 @@ class BrowserEngine(ServiceABC):
         except RuntimeError:
             current_loop = None
         if self._loop is not None and current_loop is not self._loop:
-            await self._run_on_engine_loop(_close_inner())
+            await self._run_on_engine_loop(_close_inner(), allow_shutdown=True)
         else:
             await _close_inner()
 
+        # Request the loop to stop after resources are closed, then join the thread
         if self._loop is not None:
             try:
                 self._loop.call_soon_threadsafe(self._loop.stop)
@@ -463,7 +504,7 @@ class BrowserEngine(ServiceABC):
                 logger.debug(f"Error submitting loop.stop(): {exc}")
         if self._loop_thread is not None and threading.current_thread() is not self._loop_thread:
             try:
-                self._loop_thread.join(timeout=5.0)
+                self._loop_thread.join(timeout=10.0)
             except Exception as exc:
                 logger.debug(f"Error joining loop thread: {exc}")
         self._loop_thread = None
