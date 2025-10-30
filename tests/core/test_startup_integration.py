@@ -5,8 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from swarm.core.containers import Container
 from swarm.core.lifecycle import LifecycleState, SwarmLifecycle
 from swarm.core.settings import Settings
+from swarm.history.in_memory import MemoryBackend
 
 
 @pytest.fixture
@@ -15,8 +17,8 @@ def test_settings() -> Settings:
     return Settings(
         discord_token="fake-token-for-test",
         owner_id=12345,
-        # Disable external services for this test
-        redis_enabled=False,
+        # Disable external services for this test via nested config
+        redis={"enabled": False},
         proxy_enabled=False,
     )
 
@@ -39,11 +41,23 @@ async def test_full_bot_startup_wiring(
         patch("swarm.core.discord.boot.MyBot.close", new_callable=AsyncMock),
         patch("swarm.core.discord.boot.MyBot.login", new_callable=AsyncMock),
     ):
-        lifecycle = SwarmLifecycle(settings=test_settings)
+        # Build a real container and override history backend when Redis is disabled
+        container = Container()
+        container.config.override(test_settings)
+        if not test_settings.redis.enabled:
+            container.history_backend.override(MemoryBackend())
+
+        lifecycle = SwarmLifecycle(settings=test_settings, container=container)
 
         # The `run` method normally blocks forever. We'll run it as a task and
         # cancel it once we've verified it has reached the connecting state.
         run_task = asyncio.create_task(lifecycle.run())
+
+        # Ensure extensions are loaded deterministically, then assert optional cog skipped
+        await asyncio.wait_for(lifecycle.extensions_loaded_event.wait(), timeout=5.0)
+        discord_bot = getattr(lifecycle, "_bot", None)
+        assert discord_bot is not None
+        assert discord_bot.get_cog("BrowserHealthMonitor") is None
 
         # Allow the lifecycle to progress. We expect it to stop at the `start()` call.
         # We use a helper function to wait until the desired state is reached or timeout.
