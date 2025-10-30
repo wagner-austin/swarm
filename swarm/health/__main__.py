@@ -9,6 +9,7 @@ from typing import Final
 
 import redis
 
+from swarm.infra.redis_keys import heartbeat_key
 from swarm.infra.redis_protocols import RedisSyncProtocol, wrap_redis_sync
 
 
@@ -40,9 +41,9 @@ def cmd_worker_heartbeat(args: argparse.Namespace) -> int:
     url = args.redis_url or _resolve_redis_url()
     worker_id = _resolve_worker_id(args.worker_id)
     client = _connect_redis(url)
-    key = f"worker:heartbeat:browser:{worker_id}"
-    ts = client.hget(key, "timestamp")
-    return 0 if isinstance(ts, str) and ts else 1
+    key = heartbeat_key(worker_id)
+    ttl = client.ttl(key)
+    return 0 if int(ttl) > 0 else 1
 
 
 def _default_metrics_url() -> str | None:
