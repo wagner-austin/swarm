@@ -21,6 +21,12 @@ else:
     # At runtime, Redis is not generic
     RedisSyncClient = redis.Redis
 
+from swarm.infra.redis_keys import (
+    heartbeat_key,
+    worker_key as rk_worker_key,
+    worker_sessions_key,
+)
+from swarm.infra.redis_lua import heartbeat_pulse_atomic_sync
 from swarm.infra.redis_protocols import RedisSyncProtocol, wrap_redis_sync
 
 logger = logging.getLogger(__name__)
@@ -131,8 +137,8 @@ class WorkerLifecycle:
             logger.warning(f"Worker {self.worker_id} already registered")
             return
 
-        worker_key = f"browser:worker:{self.worker_id}"
-        sessions_key = f"browser:worker_sessions:{self.worker_id}"
+        worker_key = rk_worker_key(self.worker_id)
+        sessions_key = worker_sessions_key(self.worker_id)
 
         # Use pipeline for atomic multi-field writes
         with self.redis.pipeline() as pipe:
@@ -158,9 +164,9 @@ class WorkerLifecycle:
             pipe.expire(sessions_key, self.heartbeat_timeout)
 
             # Initialize standardized heartbeat key for browser workers
-            heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
+            hb_key = heartbeat_key(self.worker_id)
             pipe.hset(
-                heartbeat_key,
+                hb_key,
                 mapping={
                     "timestamp": str(time.time()),
                     "worker_type": "browser",
@@ -170,7 +176,7 @@ class WorkerLifecycle:
             heartbeat_ttl = max(
                 int(3 * float(self.heartbeat_interval)), int(self.heartbeat_timeout), 2
             )
-            pipe.expire(heartbeat_key, heartbeat_ttl)
+            pipe.expire(hb_key, heartbeat_ttl)
 
             pipe.execute()
 
@@ -211,9 +217,9 @@ class WorkerLifecycle:
         self.shutdown_event.set()
 
         # Update worker status and cleanup
-        worker_key = f"browser:worker:{self.worker_id}"
-        sessions_key = f"browser:worker_sessions:{self.worker_id}"
-        heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
+        worker_key = rk_worker_key(self.worker_id)
+        sessions_key = worker_sessions_key(self.worker_id)
+        hb_key = heartbeat_key(self.worker_id)
 
         try:
             with self.redis.pipeline() as pipe:
@@ -224,14 +230,15 @@ class WorkerLifecycle:
                 sessions = self.redis.smembers(sessions_key)
 
                 # Clear ownership for each session
+                from swarm.infra.redis_keys import affinity_key as _ak
+
                 for session_id in sessions:
-                    affinity_key = f"browser:affinity:{session_id}"
-                    pipe.delete(affinity_key)
+                    pipe.delete(_ak(session_id))
 
                 # Remove worker data
                 pipe.delete(worker_key)
                 pipe.delete(sessions_key)
-                pipe.delete(heartbeat_key)
+                pipe.delete(hb_key)
 
                 pipe.execute()
 
@@ -252,7 +259,7 @@ class WorkerLifecycle:
 
     def add_session(self, session_id: str) -> None:
         """Add a session to this worker's session set."""
-        sessions_key = f"browser:worker_sessions:{self.worker_id}"
+        sessions_key = worker_sessions_key(self.worker_id)
         try:
             self.redis.sadd(sessions_key, session_id)
             # Refresh TTL on session set
@@ -262,7 +269,7 @@ class WorkerLifecycle:
 
     def remove_session(self, session_id: str) -> None:
         """Remove a session from this worker's session set."""
-        sessions_key = f"browser:worker_sessions:{self.worker_id}"
+        sessions_key = worker_sessions_key(self.worker_id)
         try:
             self.redis.srem(sessions_key, session_id)
         except Exception as e:
@@ -281,39 +288,26 @@ class WorkerLifecycle:
 
         while not self.shutdown_event.is_set():
             try:
-                worker_key = f"browser:worker:{self.worker_id}"
-                sessions_key = f"browser:worker_sessions:{self.worker_id}"
-                heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
+                worker_key = rk_worker_key(self.worker_id)
+                sessions_key = worker_sessions_key(self.worker_id)
+                hb_key = heartbeat_key(self.worker_id)
 
-                # Use pipeline for atomic updates
-                with self.redis.pipeline() as pipe:
-                    # Update heartbeat and session count
-                    session_count = self.redis.scard(sessions_key)
-                    pipe.hset(
-                        worker_key,
-                        mapping={
-                            "last_heartbeat": datetime.now(UTC).isoformat(),
-                            "current_sessions": str(session_count),
-                        },
-                    )
-
-                    # Extend TTLs
-                    pipe.expire(worker_key, self.heartbeat_timeout)
-                    pipe.expire(sessions_key, self.heartbeat_timeout)
-
-                    # Update standardized heartbeat
-                    hb: HeartbeatRecord = {
-                        "timestamp": str(time.time()),
-                        "worker_type": "browser",
-                        "worker_id": self.worker_id,
-                    }
-                    pipe.hset(heartbeat_key, mapping=_hb_mapping(hb))
-                    heartbeat_ttl = max(
-                        int(3 * float(self.heartbeat_interval)), int(self.heartbeat_timeout), 2
-                    )
-                    pipe.expire(heartbeat_key, heartbeat_ttl)
-
-                    pipe.execute()
+                # Atomic heartbeat pulse via Lua (no race, single round-trip)
+                heartbeat_ttl = max(
+                    int(3 * float(self.heartbeat_interval)), int(self.heartbeat_timeout), 2
+                )
+                session_count = heartbeat_pulse_atomic_sync(
+                    self.redis,
+                    worker_key=worker_key,
+                    sessions_key=sessions_key,
+                    heartbeat_key=hb_key,
+                    last_heartbeat_iso=datetime.now(UTC).isoformat(),
+                    heartbeat_timestamp=str(time.time()),
+                    worker_ttl=int(self.heartbeat_timeout),
+                    heartbeat_ttl=int(heartbeat_ttl),
+                    worker_id=self.worker_id,
+                    worker_type="browser",
+                )
 
                 logger.debug(
                     f"Heartbeat updated for worker {self.worker_id}",
@@ -330,34 +324,23 @@ class WorkerLifecycle:
 
     def _heartbeat_pulse(self) -> None:
         """Perform a single heartbeat update (synchronous)."""
-        worker_key = f"browser:worker:{self.worker_id}"
-        sessions_key = f"browser:worker_sessions:{self.worker_id}"
-        heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
+        worker_key = rk_worker_key(self.worker_id)
+        sessions_key = worker_sessions_key(self.worker_id)
+        hb_key = heartbeat_key(self.worker_id)
 
-        # Compute session count and write atomically
-        with self.redis.pipeline() as pipe:
-            session_count = self.redis.scard(sessions_key)
-            pipe.hset(
-                worker_key,
-                mapping={
-                    "last_heartbeat": datetime.now(UTC).isoformat(),
-                    "current_sessions": str(session_count),
-                },
-            )
-            pipe.expire(worker_key, self.heartbeat_timeout)
-            pipe.expire(sessions_key, self.heartbeat_timeout)
-
-            hb: HeartbeatRecord = {
-                "timestamp": str(time.time()),
-                "worker_type": "browser",
-                "worker_id": self.worker_id,
-            }
-            pipe.hset(heartbeat_key, mapping=_hb_mapping(hb))
-            heartbeat_ttl = max(
-                int(3 * float(self.heartbeat_interval)), int(self.heartbeat_timeout), 2
-            )
-            pipe.expire(heartbeat_key, heartbeat_ttl)
-            pipe.execute()
+        heartbeat_ttl = max(int(3 * float(self.heartbeat_interval)), int(self.heartbeat_timeout), 2)
+        _ = heartbeat_pulse_atomic_sync(
+            self.redis,
+            worker_key=worker_key,
+            sessions_key=sessions_key,
+            heartbeat_key=hb_key,
+            last_heartbeat_iso=datetime.now(UTC).isoformat(),
+            heartbeat_timestamp=str(time.time()),
+            worker_ttl=int(self.heartbeat_timeout),
+            heartbeat_ttl=int(heartbeat_ttl),
+            worker_id=self.worker_id,
+            worker_type="browser",
+        )
 
     def _has_gpu(self) -> bool:
         """Check if GPU is available."""
@@ -398,7 +381,7 @@ class WorkerLifecycle:
 
     def get_status(self) -> "WorkerStatus":
         """Get current worker status."""
-        worker_key = f"browser:worker:{self.worker_id}"
+        worker_key = rk_worker_key(self.worker_id)
         data = self.redis.hgetall(worker_key)
 
         if not data:
@@ -445,14 +428,11 @@ class WorkerLifecycle:
         return ws
 
     def is_healthy(self) -> bool:
-        """Check health based on authoritative heartbeat timestamp."""
-        heartbeat_key = f"worker:heartbeat:browser:{self.worker_id}"
+        """Check health via TTL on standardized heartbeat key (authoritative)."""
+        hb = heartbeat_key(self.worker_id)
         try:
-            ts_str = self.redis.hget(heartbeat_key, "timestamp")
-            if not ts_str:
-                return False
-            ts = float(ts_str)
-            return (time.time() - ts) <= 90.0
+            ttl = self.redis.ttl(hb)
+            return ttl > 0
         except Exception:
             return False
 
