@@ -18,6 +18,7 @@ import docker
 import pytest
 import redis
 
+from swarm.infra.redis_keys import heartbeat_scan_pattern
 from swarm.tasks.browser import goto, screenshot
 from tests.integration.utils import check_docker_services_running
 
@@ -43,7 +44,7 @@ def _wait_for_browser_worker(timeout: float = 30.0) -> None:
         while time.time() < deadline:
             now = time.time()
             fresh_seconds = 90.0
-            for key in client.scan_iter(match="worker:heartbeat:browser:*"):
+            for key in client.scan_iter(match=heartbeat_scan_pattern()):
                 data = client.hgetall(key)
                 ts_str = data.get("timestamp")
                 if not ts_str:
