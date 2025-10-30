@@ -17,6 +17,11 @@ import pytest
 import redis  # sync client for heartbeat gating
 
 from swarm.distributed.session_registry import SessionRegistry
+from swarm.infra.redis_keys import (
+    heartbeat_key,
+    heartbeat_scan_pattern,
+    worker_id_from_heartbeat_key,
+)
 from tests.integration.utils import EXAMPLE_LINK_SELECTOR, check_docker_services_running
 
 # Mark entire module as slow and requiring docker
@@ -47,7 +52,7 @@ def verify_docker_services() -> None:
 def _wait_for_browser_workers(min_workers: int = 1, timeout: float = 30.0) -> list[str]:
     """Block until at least min_workers browser workers are ready via heartbeats.
 
-    Uses authoritative heartbeat keys in Redis DB 0: worker:heartbeat:browser:{worker_id}
+    Uses authoritative heartbeat keys in Redis DB 0 (HEARTBEAT_PREFIX + worker_id)
     Returns list of worker_ids. Raises if no workers found within timeout.
     """
     deadline = time.time() + timeout
@@ -60,9 +65,10 @@ def _wait_for_browser_workers(min_workers: int = 1, timeout: float = 30.0) -> li
         while time.time() < deadline:
             try:
                 now = time.time()
-                fresh_seconds = 90.0
+                # Match production heartbeat_timeout (max of 3*interval, timeout, 2) = 60s
+                fresh_seconds = 60.0
                 worker_ids: list[str] = []
-                for key in client.scan_iter(match="worker:heartbeat:browser:*"):
+                for key in client.scan_iter(match=heartbeat_scan_pattern()):
                     data = client.hgetall(key)
                     ts_str = data.get("timestamp")
                     if not ts_str:
@@ -72,8 +78,8 @@ def _wait_for_browser_workers(min_workers: int = 1, timeout: float = 30.0) -> li
                     except Exception:
                         continue
                     if (now - ts) <= fresh_seconds:
-                        # worker_id is suffix after last ':'
-                        wid = data.get("worker_id") or key.rsplit(":", 1)[-1]
+                        # worker_id from authoritative key parser
+                        wid = data.get("worker_id") or worker_id_from_heartbeat_key(key)
                         worker_ids.append(str(wid))
 
                 # Deduplicate
@@ -204,7 +210,7 @@ def test_session_routing_after_registry_set() -> None:
             await registry.set_owner("test-session-2", "worker_example_com")
 
             # Create heartbeat key so router considers worker healthy
-            # Router's _is_worker_healthy() checks worker:heartbeat:browser:{worker_id}
+            # Router's _is_worker_healthy() checks TTL on heartbeat_key(worker_id)
             redis_url = Settings().redis.url
 
             # SAFETY CHECK: Prevent running against production
@@ -217,14 +223,14 @@ def test_session_routing_after_registry_set() -> None:
 
             redis_client = redis.from_url(redis_url, decode_responses=True)
             redis_client.hset(
-                "worker:heartbeat:browser:worker_example_com",
+                heartbeat_key("worker_example_com"),
                 mapping={
                     "timestamp": str(time.time()),
                     "worker_type": "browser",
                     "worker_id": "worker_example_com",
                 },
             )
-            redis_client.expire("worker:heartbeat:browser:worker_example_com", 60)
+            redis_client.expire(heartbeat_key("worker_example_com"), 60)
 
             # Router should route to direct queue
             route = router.route_for_task(
@@ -238,7 +244,7 @@ def test_session_routing_after_registry_set() -> None:
             # Cleanup
             await registry.clear_owner("test-session-2")
             if redis_client:
-                redis_client.delete("worker:heartbeat:browser:worker_example_com")
+                redis_client.delete(heartbeat_key("worker_example_com"))
         finally:
             await registry.close()
             if redis_client:

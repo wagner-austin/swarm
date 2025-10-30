@@ -16,6 +16,7 @@ import pytest
 import redis
 from celery.app.base import Celery
 
+from swarm.infra.redis_keys import heartbeat_scan_pattern, worker_id_from_heartbeat_key
 from tests.integration.utils import EXAMPLE_LINK_SELECTOR, check_docker_services_running
 
 
@@ -33,7 +34,7 @@ def verify_docker_services() -> None:
 
 
 def _wait_for_browser_worker(timeout: float = 20.0) -> None:
-    """Block until at least one browser worker is ready via heartbeat in DB 0."""
+    """Block until at least one browser worker is ready via heartbeat in DB 0 (see HEARTBEAT_PREFIX)."""
     deadline = time.time() + timeout
     pw = os.getenv("REDIS_PASSWORD", "")
     redis_url = f"redis://default:{pw}@localhost:6380/0" if pw else "redis://localhost:6380/0"
@@ -44,7 +45,7 @@ def _wait_for_browser_worker(timeout: float = 20.0) -> None:
             try:
                 now = time.time()
                 fresh_seconds = 90.0
-                for key in client.scan_iter(match="worker:heartbeat:browser:*"):
+                for key in client.scan_iter(match=heartbeat_scan_pattern()):
                     data = client.hgetall(key)
                     ts_str = data.get("timestamp")
                     if not ts_str:
@@ -54,7 +55,7 @@ def _wait_for_browser_worker(timeout: float = 20.0) -> None:
                     except Exception:
                         continue
                     if (now - ts) <= fresh_seconds:
-                        wid = data.get("worker_id") or key.rsplit(":", 1)[-1]
+                        wid = data.get("worker_id") or worker_id_from_heartbeat_key(key)
                         print(f"Found browser worker (heartbeat): {wid}")
                         time.sleep(1.0)
                         return
