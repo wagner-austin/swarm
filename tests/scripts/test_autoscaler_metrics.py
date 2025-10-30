@@ -1,9 +1,9 @@
-from unittest.mock import AsyncMock
-
 import pytest
 from prometheus_client import generate_latest
 
 from scripts.celery_autoscaler import CeleryAutoscaler
+from swarm.distributed.core.config import ScalingConfig, WorkerTypeConfig
+from swarm.distributed.protocols import ScalingBackend
 
 
 @pytest.mark.asyncio
@@ -21,50 +21,40 @@ async def test_autoscaler_metrics_updated_on_scale() -> None:
         (),
         {
             "worker_types": {
-                "browser": type(
-                    "W",
-                    (),
-                    {
-                        "enabled": True,
-                        "job_queue": "browser:jobs",
-                        "scaling": type(
-                            "S",
-                            (),
-                            {
-                                "min_workers": 1,
-                                "max_workers": 5,
-                                "scale_up_threshold": 1,
-                                "scale_down_threshold": 0,
-                            },
-                        )(),
-                    },
-                )()
+                "browser": WorkerTypeConfig(
+                    name="browser",
+                    job_queue="browser:jobs",
+                    scaling=ScalingConfig(
+                        min_workers=1,
+                        max_workers=5,
+                        scale_up_threshold=1,
+                        scale_down_threshold=0,
+                    ),
+                    enabled=True,
+                )
             }
         },
     )()
 
-    # Backend mock: current count 0, scale_to returns True
-    autoscaler.backend = AsyncMock()
-    autoscaler.backend.get_current_count.return_value = 0
-    autoscaler.backend.scale_to.return_value = True
+    class _FakeBackend(ScalingBackend):
+        def __init__(self) -> None:
+            self._current = 0
+            self.last_scaled_to: int | None = None
+
+        async def get_current_count(self, worker_type: str) -> int:  # noqa: ARG002
+            return int(self._current)
+
+        async def scale_to(self, worker_type: str, target_count: int) -> bool:  # noqa: ARG002
+            self.last_scaled_to = int(target_count)
+            self._current = int(target_count)
+            return True
+
+    autoscaler.backend = _FakeBackend()
 
     # No real broker needed; overridden queue_depth/discover_queues provide values
     # But get_queue_stats checks _conn presence; provide a dummy conn
-    class _DummyQ:
-        def qsize(self) -> int:
-            return 3
-
-        def close(self) -> None:
-            return None
-
-    class _DummyConn:
-        def SimpleQueue(self, name: str) -> _DummyQ:  # noqa: N802
-            return _DummyQ()
-
-        def close(self) -> None:
-            return None
-
-    autoscaler._conn = _DummyConn()
+    # Provide a non-None broker connection sentinel
+    autoscaler._conn = object()
 
     await autoscaler.check_and_scale()
 
