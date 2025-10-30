@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from io import BytesIO
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, TypedDict
 
 import discord
 from discord import app_commands
@@ -20,6 +20,14 @@ from swarm.browser.types import BrowserStatusAggregate
 from swarm.distributed.celery_browser import CeleryBrowserRuntime
 from swarm.frontends.discord.discord_interactions import safe_defer
 from swarm.frontends.discord.types import SafeSendFunc
+from swarm.infra.redis_keys import (
+    HEALTH_KEY,
+    affinity_key,
+    heartbeat_scan_pattern,
+    session_state_key,
+)
+from swarm.infra.redis_lua import count_ttl_healthy_by_scan
+from swarm.infra.redis_protocols import RedisAsyncProtocol
 from swarm.plugins.base_di import BaseDIClientCog
 from swarm.plugins.commands.decorators import background_app_command
 
@@ -38,7 +46,7 @@ class Web(
         safe_send_func: SafeSendFunc | None = None,
         validate_url_func: Callable[[str], str] | None = None,
     ) -> None:
-        BaseDIClientCog.__init__(self, discord_bot)
+        super().__init__(discord_bot)
         self.discord_bot = discord_bot
 
         from swarm.frontends.discord.discord_interactions import safe_send as default_safe_send
@@ -62,67 +70,55 @@ class Web(
         channel_part = str(interaction.channel_id)
         return f"discord:{guild_part}:{channel_part}"
 
+    # ---- Optional user-facing health helper ---------------------------------
+    class _HealthDisplay(TypedDict):
+        is_degraded: bool
+        healthy_workers: int
+        min_required: int
+        message: str
+
+    async def _get_health_display(self, redis: RedisAsyncProtocol) -> Web._HealthDisplay | None:
+        """Return a normalized health display payload based on the snapshot.
+
+        This is a convenience helper to keep UI code tidy if we need to surface
+        health status to users in the future.
+        """
+        from swarm.plugins.monitor.browser_health import read_health_snapshot
+
+        snapshot = await read_health_snapshot(redis)
+        if not snapshot:
+            return None
+        is_degraded = bool(snapshot.get("is_degraded", True))
+        hw = int(snapshot.get("healthy_workers", 0))
+        mr = int(snapshot.get("min_required", 1))
+        msg = (
+            f"Healthy: {hw}/{mr} browser workers"
+            if not is_degraded
+            else f"Degraded: {hw}/{mr} browser workers"
+        )
+        return {
+            "is_degraded": is_degraded,
+            "healthy_workers": hw,
+            "min_required": mr,
+            "message": msg,
+        }
+
     async def _check_browser_health(self) -> bool:
         """Check if browser workers are healthy before executing commands.
 
-        Uses fail-safe logic: only returns True if workers are confirmed healthy.
-        Returns False (degraded) if no health data, errors, or workers are down.
+        Uses live TTL count (server-side Lua) to avoid stale cached data.
+        Returns False (degraded) if no workers are healthy or errors occur.
         """
         try:
-            # Get health monitor cog
-            from swarm.plugins.monitor.browser_health import BrowserHealthMonitor
-
-            monitor = self.discord_bot.get_cog("BrowserHealthMonitor")
-            if not isinstance(monitor, BrowserHealthMonitor):
-                # Fallback to Redis-based health status if monitor is unavailable
-                try:
-                    redis_client = self.container.redis_client()
-                except Exception:
-                    logger.warning("Health monitor not available, treating as degraded")
-                    return False
-
-                try:
-                    raw = await redis_client.hgetall("browser:health")
-                except Exception as exc:
-                    logger.warning("Health check via Redis failed: %s", exc)
-                    return False
-
-                if not raw:
-                    return False
-
-                # Normalize bytes -> str
-                def _to_str(v: object) -> str:
-                    if isinstance(v, bytes):
-                        try:
-                            return v.decode()
-                        except Exception:
-                            return ""
-                    return str(v)
-
-                is_degraded_str = _to_str(
-                    raw.get(b"is_degraded") if isinstance(raw, dict) else None
-                )
-                is_degraded_norm = is_degraded_str.strip().lower()
-                is_degraded = is_degraded_norm in {"1", "true", "yes"}
-                return not is_degraded
-
-            status = monitor.get_health_status()  # Synchronous - no await needed
-
-            # Check for errors in health status
-            if "error" in status:
-                logger.warning(f"Health check error: {status['error']}, treating as degraded")
+            container_obj = getattr(self, "container", None)
+            if container_obj is None or not hasattr(container_obj, "redis_client"):
+                logger.warning("Health check: DI container not available; treating as degraded")
                 return False
-
-            # FAIL-SAFE: Only healthy if explicitly not degraded
-            is_healthy = not status.get("is_degraded", True)
-
-            if not is_healthy:
-                logger.debug(
-                    f"Browser pool degraded: {status.get('healthy_workers', 0)}/{status.get('min_required', 1)} workers"
-                )
-
-            return is_healthy
-
+            redis_client = container_obj.redis_client()
+            count = await count_ttl_healthy_by_scan(
+                redis_client, pattern=heartbeat_scan_pattern(), scan_count=1000
+            )
+            return count > 0
         except Exception as exc:
             # FAIL-SAFE: Health check errors = degraded
             logger.error(f"Health check failed: {exc}", exc_info=True)
@@ -148,9 +144,23 @@ class Web(
             else:
                 # Just start the browser without navigating anywhere specific
                 await self.browser.start(session_id=session_id)
-                await self.safe_send(
-                    interaction, "🟢 Browser started successfully.", ephemeral=True
-                )
+                # If a prior URL exists for this session, surface it to the user
+                resumed_msg = "🟢 Browser started successfully."
+                try:
+                    container_obj = getattr(self, "container", None)
+                    if container_obj is not None and hasattr(container_obj, "redis_client"):
+                        redis_client = container_obj.redis_client()
+                        st = await redis_client.hgetall(session_state_key(session_id))
+                        if isinstance(st, dict):
+                            last_url = st.get("url")
+                            if isinstance(last_url, str) and last_url:
+                                resumed_msg = (
+                                    f"🟢 Browser started. Resumed last URL: **{last_url}**"
+                                )
+                except Exception:
+                    # Best-effort hint only; keep the generic message on failure
+                    pass
+                await self.safe_send(interaction, resumed_msg, ephemeral=True)
 
         except ValueError as e:
             await self.safe_send(
@@ -322,15 +332,49 @@ class Web(
         try:
             session_id = self._session_id_for_interaction(interaction)
             status: BrowserStatusAggregate = await self.browser.status(session_id=session_id)
-            # Format status for display
-            if not status:
-                await self.safe_send(interaction, "No active browser workers.", ephemeral=True)
-                return
+            # Always build an informative embed (even for zero sessions)
             embed = discord.Embed(
                 title="Browser Worker Status",
                 description="Status for this channel",
                 colour=discord.Colour.blurple(),
             )
+
+            # Pool health (live TTL via Lua), best-effort
+            live_health_value = "Unavailable (no snapshot)"
+            try:
+                container_obj = getattr(self, "container", None)
+                if container_obj is not None and hasattr(container_obj, "redis_client"):
+                    try:
+                        redis_client = container_obj.redis_client()
+                    except Exception as exc:
+                        logger.warning("Pool health: failed to resolve DI redis client: %s", exc)
+                        raise
+
+                    try:
+                        count = await count_ttl_healthy_by_scan(
+                            redis_client, pattern=heartbeat_scan_pattern(), scan_count=1000
+                        )
+                    except Exception as exc:
+                        logger.warning("Pool health: live TTL eval failed: %s", exc)
+                        raise
+                    # Determine required minimum from monitor if available
+                    min_required = 1
+                    try:
+                        from swarm.plugins.monitor.browser_health import BrowserHealthMonitor
+
+                        monitor = self.discord_bot.get_cog("BrowserHealthMonitor")
+                        if isinstance(monitor, BrowserHealthMonitor):
+                            min_required = int(monitor.min_healthy_workers)
+                    except Exception:
+                        pass
+                    if count >= min_required:
+                        live_health_value = f"Healthy: {count}/{min_required} browser workers"
+                    else:
+                        live_health_value = f"Degraded: {count}/{min_required} browser workers"
+            except Exception:
+                # Keep default value; logging emitted above where possible
+                pass
+            embed.add_field(name="Pool Health", value=live_health_value, inline=False)
 
             # Active sessions summary
             active_sessions = 0
@@ -344,7 +388,7 @@ class Web(
 
             # Per-session details
             sessions = status.get("sessions") if isinstance(status, dict) else None
-            if isinstance(sessions, list) and sessions:
+            if isinstance(sessions, list) and sessions and active_sessions > 0:
                 for idx, sess in enumerate(sessions, start=1):
                     if not isinstance(sess, dict):
                         # If the payload is not a dict, render a safe string
@@ -361,9 +405,32 @@ class Web(
                     )
                     embed.add_field(name=f"Session {idx}", value=value, inline=False)
             else:
-                embed.add_field(
-                    name="Sessions", value="No session details available.", inline=False
-                )
+                # Provide helpful guidance and last-known context (best-effort)
+                detail_lines: list[str] = [
+                    "No active engine for this channel.",
+                    "Use /web start [url] to begin a session.",
+                ]
+                # Try to show last known URL and any affinity
+                try:
+                    container_obj = getattr(self, "container", None)
+                    if container_obj is not None and hasattr(container_obj, "redis_client"):
+                        redis_client = container_obj.redis_client()
+                        # Last known URL
+                        st = await redis_client.hgetall(session_state_key(session_id))
+                        last_url = st.get("url") if isinstance(st, dict) else None
+                        if isinstance(last_url, str) and last_url:
+                            detail_lines.append(f"Last Known URL: {last_url}")
+                        # Affinity (owner)
+                        aff = await redis_client.hgetall(affinity_key(session_id))
+                        wid = aff.get("worker_id") if isinstance(aff, dict) else None
+                        if isinstance(wid, str) and wid:
+                            detail_lines.append(f"Affinity: {wid}")
+                        else:
+                            detail_lines.append("Affinity: none")
+                except Exception:
+                    # Best-effort context only
+                    pass
+                embed.add_field(name="Sessions", value="\n".join(detail_lines), inline=False)
             await self.safe_send(interaction, embed=embed, ephemeral=True)
             return
         except Exception as exc:
@@ -396,10 +463,6 @@ class Web(
             return
 
 
-async def setup(discord_bot: Bot, container: Container | None = None) -> None:
-    await discord_bot.add_cog(
-        Web(
-            discord_bot=discord_bot,
-            browser=CeleryBrowserRuntime(),
-        )
-    )
+# Extension entrypoint intentionally removed.
+# Web cog is managed exclusively via the DI container in lifecycle
+# to avoid duplicate registrations and configuration drift.
