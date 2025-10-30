@@ -13,15 +13,15 @@ from swarm.distributed.core.config import DistributedConfig
 from swarm.frontends.discord.discord_interactions import safe_send
 from swarm.history.backends import HistoryBackend
 from swarm.history.factory import choose as history_backend_factory
+from swarm.infra.redis_protocols import RedisAsyncProtocol, wrap_redis_async
 from swarm.infra.tankpit import engine_factory as tankpit_engine_factory
 from swarm.plugins.commands.status import Status
-from swarm.types import RedisBytes
 
 # TankPit engine factory (netproxy and ws_addon removed)
 # DI cogs that must be referenced in providers.Factory at class-scope
 
 
-def _create_redis_client(settings: Settings | None = None) -> RedisBytes:
+def _create_redis_client(settings: Settings | None = None) -> RedisAsyncProtocol:
     """Create Redis client synchronously for DI container.
 
     Use URL from provided settings if present; otherwise, fall back to a fresh
@@ -35,7 +35,8 @@ def _create_redis_client(settings: Settings | None = None) -> RedisBytes:
         effective_url = Settings().redis.url
     if not effective_url:
         raise ValueError("Redis URL must be configured")
-    return redis_asyncio.from_url(effective_url)
+    inner = redis_asyncio.from_url(effective_url)
+    return wrap_redis_async(inner)
 
 
 class Container(containers.DeclarativeContainer):

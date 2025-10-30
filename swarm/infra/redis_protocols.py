@@ -29,6 +29,7 @@ class RedisAsyncProtocol(Protocol):
     ) -> int: ...  # number of fields added
 
     async def hget(self, name: str, key: str) -> str | None: ...
+    async def hgetall(self, name: str) -> dict[str, str]: ...
 
     # List operations
     async def rpush(self, key: str, *values: str) -> int: ...  # new length
@@ -43,6 +44,18 @@ class RedisAsyncProtocol(Protocol):
     # TTL operations
     async def ttl(self, name: str) -> int: ...
     async def expire(self, name: str, time: int) -> bool: ...
+
+    # Scripting
+    async def eval(
+        self,
+        script: str,
+        numkeys: int,
+        *keys_and_args: object,
+        keys: list[str] | None = None,
+        args: list[str] | None = None,
+    ) -> object: ...
+
+    async def ping(self) -> bool: ...
 
     # Set operations
     async def srem(self, name: str, *values: str) -> int: ...
@@ -75,6 +88,7 @@ class RedisSyncProtocol(Protocol):
     # Key operations
     def delete(self, *names: str) -> int: ...
     def keys(self, pattern: str) -> list[str]: ...
+    def scan_iter(self, *, match: str) -> Iterator[str]: ...
     def exists(self, name: str) -> int: ...
 
     # Set operations
@@ -85,6 +99,17 @@ class RedisSyncProtocol(Protocol):
 
     # TTL operations
     def expire(self, name: str, ttl: int) -> bool: ...
+    def ttl(self, name: str) -> int: ...
+
+    # Scripting
+    def eval(
+        self,
+        script: str,
+        numkeys: int,
+        *keys_and_args: object,
+        keys: list[str] | None = None,
+        args: list[str] | None = None,
+    ) -> object: ...
 
     # Pipeline
     def pipeline(self) -> _PipelineProtocol: ...
@@ -124,9 +149,11 @@ class _AioRedisLike(Protocol):
     ) -> int | bool: ...
 
     async def hget(self, name: str, key: str) -> _Scalar | None: ...
+    async def hgetall(self, name: str) -> Mapping[_Scalar, _Scalar] | dict[_Scalar, _Scalar]: ...
     async def rpush(self, key: str, *values: str) -> int | bool: ...
     async def ltrim(self, key: str, start: int, stop: int) -> int | bool: ...
     async def lrange(self, key: str, start: int, stop: int) -> list[_Scalar]: ...
+    async def eval(self, script: str, numkeys: int, *keys_and_args: object) -> object: ...
     async def delete(self, *names: str) -> int | bool: ...
     async def keys(self, pattern: str) -> list[_Scalar]: ...
     def scan_iter(self, *, match: str) -> AsyncIterator[_Scalar] | Iterator[_Scalar]: ...
@@ -134,6 +161,7 @@ class _AioRedisLike(Protocol):
     async def expire(self, name: str, time: int) -> bool | int: ...
     async def srem(self, name: str, *values: str) -> int | bool: ...
     async def aclose(self) -> None: ...
+    async def ping(self) -> int | bool | str | bytes: ...
 
 
 @runtime_checkable
@@ -152,12 +180,15 @@ class _SyncRedisLike(Protocol):
     def setex(self, name: str, time: int, value: str) -> bool | int: ...
     def delete(self, *names: str) -> int: ...
     def keys(self, pattern: str) -> list[_Scalar]: ...
+    def scan_iter(self, *, match: str) -> Iterator[_Scalar]: ...
     def exists(self, name: str) -> int | bool: ...
     def smembers(self, name: str) -> set[_Scalar]: ...
     def sadd(self, name: str, *values: str) -> int | bool: ...
     def srem(self, name: str, *values: str) -> int | bool: ...
     def scard(self, name: str) -> int: ...
     def expire(self, name: str, time: int) -> bool | int: ...
+    def ttl(self, name: str) -> int | float: ...
+    def eval(self, script: str, numkeys: int, *keys_and_args: object) -> object: ...
     def pipeline(self) -> object: ...
 
 
@@ -195,7 +226,42 @@ def wrap_redis_async(client: object) -> RedisAsyncProtocol:
             val = await self._c.hget(name, key)
             if val is None:
                 return None
-            return val if isinstance(val, str) else str(val)
+            if isinstance(val, str):
+                return val
+            if isinstance(val, bytes | bytearray):
+                try:
+                    return val.decode()
+                except Exception:
+                    return ""
+            return str(val)
+
+        async def hgetall(self, name: str) -> dict[str, str]:
+            d = await self._c.hgetall(name)
+            items = dict(d) if isinstance(d, dict) else dict(d or {})
+            out: dict[str, str] = {}
+            for k, v in items.items():
+                if isinstance(k, str):
+                    ks = k
+                elif isinstance(k, bytes | bytearray):
+                    try:
+                        ks = k.decode()
+                    except Exception:
+                        ks = ""
+                else:
+                    ks = str(k)
+
+                if isinstance(v, str):
+                    vs = v
+                elif isinstance(v, bytes | bytearray):
+                    try:
+                        vs = v.decode()
+                    except Exception:
+                        vs = ""
+                else:
+                    vs = str(v)
+
+                out[ks] = vs
+            return out
 
         # List operations
         async def rpush(self, key: str, *values: str) -> int:
@@ -215,7 +281,18 @@ def wrap_redis_async(client: object) -> RedisAsyncProtocol:
 
         async def keys(self, pattern: str) -> list[str]:
             data = await self._c.keys(pattern)
-            return [d if isinstance(d, str) else str(d) for d in data or []]
+            out: list[str] = []
+            for d in data or []:
+                if isinstance(d, str):
+                    out.append(d)
+                elif isinstance(d, bytes | bytearray):
+                    try:
+                        out.append(d.decode())
+                    except Exception:
+                        out.append("")
+                else:
+                    out.append(str(d))
+            return out
 
         def scan_iter(self, *, match: str) -> AsyncIterator[str]:
             async def _aiter() -> AsyncIterator[str]:
@@ -231,7 +308,16 @@ def wrap_redis_async(client: object) -> RedisAsyncProtocol:
 
         # TTL operations
         async def ttl(self, name: str) -> int:
-            return int(await self._c.ttl(name))
+            val = await self._c.ttl(name)
+            if isinstance(val, int | float):
+                return int(val)
+            if isinstance(val, bytes | str):
+                try:
+                    return int(val)
+                except Exception:
+                    pass
+            # Normalize unknown/None to Redis semantics for "no such key"
+            return -2
 
         async def expire(self, name: str, time: int) -> bool:
             res = await self._c.expire(name, time)
@@ -240,6 +326,28 @@ def wrap_redis_async(client: object) -> RedisAsyncProtocol:
         # Set operations
         async def srem(self, name: str, *values: str) -> int:
             return int(await self._c.srem(name, *values))
+
+        # Scripting
+        async def eval(
+            self,
+            script: str,
+            numkeys: int,
+            *keys_and_args: object,
+            keys: list[str] | None = None,
+            args: list[str] | None = None,
+        ) -> object:
+            # Support both varargs KEYS/ARGS and explicit keyword lists.
+            if keys_and_args:
+                return await self._c.eval(script, int(numkeys), *keys_and_args)
+            key_parts: list[object] = list(keys or [])
+            arg_parts: list[object] = list(args or [])
+            return await self._c.eval(script, int(numkeys), *[*(key_parts), *(arg_parts)])
+
+        async def ping(self) -> bool:
+            res = await self._c.ping()
+            if isinstance(res, bool):
+                return res
+            return bool(res)
 
         # Lifecycle
         async def close(self) -> None:
@@ -284,14 +392,41 @@ def wrap_redis_sync(client: object) -> RedisSyncProtocol:
             val = self._c.hget(name, key)
             if val is None:
                 return None
-            return val if isinstance(val, str) else str(val)
+            if isinstance(val, str):
+                return val
+            if isinstance(val, bytes | bytearray):
+                try:
+                    return val.decode()
+                except Exception:
+                    return ""
+            return str(val)
 
         def hgetall(self, name: str) -> dict[str, str]:
             d = self._c.hgetall(name)
-            return {
-                (k if isinstance(k, str) else str(k)): (v if isinstance(v, str) else str(v))
-                for k, v in (d or {}).items()
-            }
+            out: dict[str, str] = {}
+            for k, v in (d or {}).items():
+                if isinstance(k, str):
+                    ks = k
+                elif isinstance(k, bytes | bytearray):
+                    try:
+                        ks = k.decode()
+                    except Exception:
+                        ks = ""
+                else:
+                    ks = str(k)
+
+                if isinstance(v, str):
+                    vs = v
+                elif isinstance(v, bytes | bytearray):
+                    try:
+                        vs = v.decode()
+                    except Exception:
+                        vs = ""
+                else:
+                    vs = str(v)
+
+                out[ks] = vs
+            return out
 
         # Strings / keys / sets / ttl
         def setex(self, name: str, time: int, value: str) -> bool:
@@ -304,6 +439,11 @@ def wrap_redis_sync(client: object) -> RedisSyncProtocol:
         def keys(self, pattern: str) -> list[str]:
             data = self._c.keys(pattern)
             return [d if isinstance(d, str) else str(d) for d in data or []]
+
+        def scan_iter(self, *, match: str) -> Iterator[str]:
+            it = self._c.scan_iter(match=match)
+            for k in it or []:
+                yield k if isinstance(k, str) else str(k)
 
         def exists(self, name: str) -> int:
             return int(self._c.exists(name))
@@ -324,6 +464,32 @@ def wrap_redis_sync(client: object) -> RedisSyncProtocol:
         def expire(self, name: str, ttl: int) -> bool:
             res = self._c.expire(name, ttl)
             return bool(res)
+
+        def ttl(self, name: str) -> int:
+            val = self._c.ttl(name)
+            if isinstance(val, int | float):
+                return int(val)
+            if isinstance(val, bytes | str):
+                try:
+                    return int(val)
+                except Exception:
+                    pass
+            # Normalize unknown/None to Redis semantics for "no such key"
+            return -2
+
+        def eval(
+            self,
+            script: str,
+            numkeys: int,
+            *keys_and_args: object,
+            keys: list[str] | None = None,
+            args: list[str] | None = None,
+        ) -> object:
+            if keys_and_args:
+                return self._c.eval(script, int(numkeys), *keys_and_args)
+            key_parts: list[object] = list(keys or [])
+            arg_parts: list[object] = list(args or [])
+            return self._c.eval(script, int(numkeys), *[*(key_parts), *(arg_parts)])
 
         def pipeline(self) -> _PipelineProtocol:
             inner_obj = self._c.pipeline()
