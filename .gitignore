@@ -46,3 +46,4 @@ test_output.txt
 tests/integration/__tmp_view__.txt
 worker_logs.txt
 ull
+NUL
