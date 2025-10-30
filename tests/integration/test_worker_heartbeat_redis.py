@@ -14,7 +14,7 @@ import os
 import time
 from datetime import UTC, datetime
 from types import TracebackType
-from typing import Any, Callable, Generator, Protocol, cast, overload, runtime_checkable
+from typing import Any, Callable, Generator, Iterator, Protocol, cast, overload, runtime_checkable
 
 import pytest
 import redis as redis_mod
@@ -24,6 +24,12 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from swarm.distributed.browser_router import BrowserSessionRouter
 from swarm.distributed.worker_lifecycle import WorkerLifecycle
 from swarm.distributed.worker_registry import WorkerRegistry
+from swarm.infra.redis_keys import (
+    affinity_key as ak,
+    heartbeat_key as hb,
+    worker_key as wk,
+    worker_sessions_key as ws,
+)
 from swarm.infra.redis_protocols import (
     RedisSyncProtocol as ProdRedisSyncProtocol,
     RedisSyncProtocol as RegistryRedisSyncProtocol,
@@ -182,9 +188,12 @@ class RedisAdapter(ProdRedisSyncProtocol):
         val = self._inner.get(name)
         return val if isinstance(val, str) else None
 
+    def eval(self, script: str, numkeys: int, *keys_and_args: object) -> object:
+        return self._inner.eval(script, numkeys, *keys_and_args)
+
 
 class RedisAdapterForRegistry(RegistryRedisSyncProtocol):
-    def __init__(self, inner: Any) -> None:
+    def __init__(self, inner: redis_mod.Redis) -> None:
         self._inner = inner
 
     def keys(self, pattern: str) -> list[str]:
@@ -209,6 +218,13 @@ class RedisAdapterForRegistry(RegistryRedisSyncProtocol):
 
     def delete(self, *names: str) -> Any:
         return sum(self._inner.delete(n) for n in names)
+
+    def eval(self, script: str, numkeys: int, *keys_and_args: object) -> object:
+        return self._inner.eval(script, numkeys, *keys_and_args)
+
+    def scan_iter(self, *, match: str) -> Iterator[str]:
+        for k in self._inner.scan_iter(match=match):
+            yield str(k)
 
 
 @pytest.mark.integration
@@ -299,47 +315,61 @@ class TestWorkerHeartbeatIntegration:
         worker.start_heartbeat()
         # Wait for initial worker key to appear
         poll_until_true(
-            lambda: bool(redis_client.exists("browser:worker:test-worker")),
+            lambda: bool(redis_client.exists(wk("test-worker"))),
             timeout=3.0,
             interval=0.05,
             description="worker key to appear",
         )
 
         # Verify worker is registered
-        assert redis_client.exists("browser:worker:test-worker")
+        assert redis_client.exists(wk("test-worker"))
 
         # Stop heartbeat but don't cleanup (simulate crash)
         worker.shutdown_event.set()
         time.sleep(0.6)  # Wait for last heartbeat to pass
 
         # Worker should still exist (TTL not expired)
-        assert redis_client.exists("browser:worker:test-worker")
+        assert redis_client.exists(wk("test-worker"))
 
         # Wait for TTL to expire using polling
         poll_until_true(
-            lambda: not redis_client.exists("browser:worker:test-worker"),
+            lambda: not redis_client.exists(wk("test-worker")),
             timeout=5.0,
             interval=0.05,
             description="worker key to expire",
         )
 
     def test_heartbeat_extends_ttl_continuously(self, redis_client: RedisLike) -> None:
-        """Test that continuous heartbeats keep worker alive."""
+        """Test that continuous heartbeats keep worker alive beyond initial TTL."""
         worker = WorkerLifecycle("test-worker", redis_client=RedisAdapter(redis_client))
-        worker.heartbeat_interval = 0.2
+        worker.heartbeat_interval = 0.1
         worker.heartbeat_timeout = 1  # Short TTL
 
         worker.register()
         worker.start_heartbeat()
 
         try:
-            # Run for longer than TTL
-            for _ in range(10):
-                time.sleep(0.2)
-                # Worker should still be alive
-                assert redis_client.exists("browser:worker:test-worker")
-                ttl = redis_client.ttl("browser:worker:test-worker")
-                assert ttl > 0  # Should have some TTL remaining
+            # Sleep for 3x the TTL duration - worker should still be alive due to continuous heartbeats
+            time.sleep(worker.heartbeat_timeout * 3)
+
+            # Verify both worker key and heartbeat key are alive
+            worker_exists = redis_client.exists(wk("test-worker"))
+            hb_exists = redis_client.exists(hb("test-worker"))
+            worker_ttl = redis_client.ttl(wk("test-worker"))
+            hb_ttl = redis_client.ttl(hb("test-worker"))
+
+            assert worker_exists, (
+                f"Worker key missing (hb_exists={hb_exists}, worker_ttl={worker_ttl}, hb_ttl={hb_ttl})"
+            )
+            assert hb_exists, (
+                f"Heartbeat key missing (worker_exists={worker_exists}, worker_ttl={worker_ttl}, hb_ttl={hb_ttl})"
+            )
+
+            # Heartbeat key is authoritative for liveness - it MUST have TTL > 0
+            assert hb_ttl > 0, f"Heartbeat TTL expired: hb_ttl={hb_ttl}, worker_ttl={worker_ttl}"
+
+            # Worker key should also be alive (both get updated by Lua script)
+            assert worker_ttl > 0, f"Worker TTL expired: worker_ttl={worker_ttl}, hb_ttl={hb_ttl}"
         finally:
             worker.stop_heartbeat()
 
@@ -350,7 +380,7 @@ class TestWorkerHeartbeatIntegration:
 
         # Create worker metadata and heartbeat with short TTL (router uses heartbeat)
         redis_client.hset(
-            f"browser:worker:{worker_id}",
+            wk(worker_id),
             mapping={
                 "hostname": worker_id,
                 "status": "active",
@@ -359,13 +389,13 @@ class TestWorkerHeartbeatIntegration:
         )
         # Authoritative liveness for router: heartbeat timestamp
         redis_client.hset(
-            f"worker:heartbeat:browser:{worker_id}",
+            hb(worker_id),
             mapping={"timestamp": str(time.time())},
         )
-        redis_client.expire(f"worker:heartbeat:browser:{worker_id}", 1)  # 1 second TTL
-        redis_client.sadd(f"browser:worker_sessions:{worker_id}", "session-001")
+        redis_client.expire(hb(worker_id), 1)  # 1 second TTL
+        redis_client.sadd(ws(worker_id), "session-001")
         redis_client.hset(
-            "browser:affinity:session-001",
+            ak("session-001"),
             mapping={
                 "worker_id": worker_id,
                 "direct_queue": f"browser.direct.{worker_id}",
@@ -386,7 +416,7 @@ class TestWorkerHeartbeatIntegration:
 
         # Wait for heartbeat TTL to expire using polling (router health source)
         poll_until_true(
-            lambda: not redis_client.exists(f"worker:heartbeat:browser:{worker_id}"),
+            lambda: not redis_client.exists(hb(worker_id)),
             timeout=3.0,
             interval=0.05,
             description="heartbeat key to expire",
@@ -397,7 +427,7 @@ class TestWorkerHeartbeatIntegration:
         assert route is None
 
         # Affinity should be cleared
-        assert not redis_client.exists("browser:affinity:session-001")
+        assert not redis_client.exists(ak("session-001"))
 
     def test_concurrent_workers_with_real_redis(self, redis_client: RedisLike) -> None:
         """Test multiple workers with concurrent operations."""
@@ -420,7 +450,7 @@ class TestWorkerHeartbeatIntegration:
                     session_id = f"session-{i:03d}-{j:03d}"
                     worker.add_session(session_id)
                     redis_client.hset(
-                        f"browser:affinity:{session_id}",
+                        ak(session_id),
                         mapping={
                             "worker_id": worker.worker_id,
                             "direct_queue": f"browser.direct.{worker.worker_id}",
@@ -442,7 +472,7 @@ class TestWorkerHeartbeatIntegration:
 
             # Wait for heartbeat TTL expiry using polling (authoritative liveness)
             poll_until_true(
-                lambda: not redis_client.exists("worker:heartbeat:browser:worker-001"),
+                lambda: not redis_client.exists(hb("worker-001")),
                 timeout=5.0,
                 interval=0.05,
                 description="crashed worker heartbeat to expire",
@@ -475,7 +505,7 @@ class TestWorkerHeartbeatIntegration:
         worker.register()
 
         # All fields should be set atomically
-        data = redis_client.hgetall("browser:worker:test-worker")
+        data = redis_client.hgetall(wk("test-worker"))
         expected_fields = {
             "hostname",
             "capabilities",
@@ -498,7 +528,7 @@ class TestWorkerHeartbeatIntegration:
 
         try:
             # Verify worker is alive
-            assert redis_client.exists("browser:worker:test-worker")
+            assert redis_client.exists(wk("test-worker"))
 
             # Simulate connection drop by killing all client connections
             # (This would require admin access to Redis, so we simulate differently)
@@ -507,7 +537,7 @@ class TestWorkerHeartbeatIntegration:
             time.sleep(0.5)
 
             # Worker should still be registered
-            assert redis_client.exists("browser:worker:test-worker")
+            assert redis_client.exists(wk("test-worker"))
 
         finally:
             worker.stop_heartbeat()
@@ -519,7 +549,7 @@ class TestWorkerHeartbeatIntegration:
         # Create workers with different loads
         for i, load in enumerate([2, 5, 8]):
             redis_client.hset(
-                f"browser:worker:worker-{i:03d}",
+                wk(f"worker-{i:03d}"),
                 mapping={
                     "hostname": f"worker-{i:03d}",
                     "capabilities": json.dumps(["browser"]),
@@ -532,14 +562,24 @@ class TestWorkerHeartbeatIntegration:
                     "python_version": "3.11.0",
                 },
             )
-            redis_client.expire(f"browser:worker:worker-{i:03d}", 60)
+            redis_client.expire(wk(f"worker-{i:03d}"), 60)
+            # Authoritative liveness: heartbeat key with TTL
+            redis_client.hset(
+                hb(f"worker-{i:03d}"),
+                mapping={
+                    "timestamp": str(time.time()),
+                    "worker_type": "browser",
+                    "worker_id": f"worker-{i:03d}",
+                },
+            )
+            redis_client.expire(hb(f"worker-{i:03d}"), 60)
 
         # Should pick least loaded
         least_loaded = registry.find_least_loaded_worker()
         assert least_loaded == "worker-000"  # 20% load
 
         # Add load to worker-000
-        redis_client.hset("browser:worker:worker-000", "current_sessions", "6")
+        redis_client.hset(wk("worker-000"), "current_sessions", "6")
 
         # Now worker-001 should be least loaded
         least_loaded = registry.find_least_loaded_worker()
@@ -553,7 +593,7 @@ class TestWorkerHeartbeatIntegration:
         worker1.start_heartbeat()
         worker1.add_session("session-001")
         redis_client.hset(
-            "browser:affinity:session-001",
+            ak("session-001"),
             mapping={
                 "worker_id": "graceful-worker",
                 "direct_queue": "browser.direct.graceful-worker",
@@ -565,13 +605,13 @@ class TestWorkerHeartbeatIntegration:
 
         # Should clean up promptly (allow brief delay for pipeline)
         poll_until_true(
-            lambda: not redis_client.exists("browser:worker:graceful-worker"),
+            lambda: not redis_client.exists(wk("graceful-worker")),
             timeout=3.0,
             interval=0.05,
             description="graceful worker key removal",
         )
         poll_until_true(
-            lambda: not redis_client.exists("browser:affinity:session-001"),
+            lambda: not redis_client.exists(ak("session-001")),
             timeout=3.0,
             interval=0.05,
             description="graceful affinity removal",
@@ -584,7 +624,7 @@ class TestWorkerHeartbeatIntegration:
         worker2.start_heartbeat()
         worker2.add_session("session-002")
         redis_client.hset(
-            "browser:affinity:session-002",
+            ak("session-002"),
             mapping={
                 "worker_id": "crash-worker",
                 "direct_queue": "browser.direct.crash-worker",
@@ -596,13 +636,13 @@ class TestWorkerHeartbeatIntegration:
         worker2.shutdown_event.set()  # Stop heartbeat without cleanup
 
         # Should still exist initially (worker key) and affinity key
-        assert redis_client.exists("browser:worker:crash-worker")
-        assert redis_client.exists("browser:affinity:session-002")
+        assert redis_client.exists(wk("crash-worker"))
+        assert redis_client.exists(ak("session-002"))
 
         # Heartbeat determines liveness; simulate death by deleting heartbeat
-        redis_client.delete("worker:heartbeat:browser:crash-worker")
+        redis_client.delete(hb("crash-worker"))
         # Worker hash may remain, but liveness is gone; affinity remains orphaned
-        assert redis_client.exists("browser:affinity:session-002")
+        assert redis_client.exists(ak("session-002"))
 
         # Registry should detect as orphaned
         registry = WorkerRegistry(redis_client=RedisAdapterForRegistry(redis_client))
