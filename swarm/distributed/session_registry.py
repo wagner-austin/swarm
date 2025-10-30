@@ -1,8 +1,9 @@
 """
-Minimal Browser Session Registry for Phase 1
+Browser Session Registry
 
-Simple session-to-worker mapping for deterministic routing.
-No Lua scripts, no complexity - just what's needed to fix test flakiness.
+Deterministic session-to-worker mapping using straightforward Redis primitives
+for writes and reads. Delegates batch TTL liveness checks to a shared, typed
+Lua helper to avoid drift and reduce round-trips.
 """
 
 from __future__ import annotations
@@ -15,6 +16,16 @@ import redis.asyncio as redis_asyncio
 
 from swarm.core.settings import Settings
 from swarm.infra import async_close_redis
+from swarm.infra.redis_keys import (
+    AFFINITY_PREFIX,
+    HEARTBEAT_PREFIX,
+    affinity_key,
+    affinity_scan_pattern,
+    heartbeat_key,
+    session_id_from_affinity_key,
+    worker_sessions_key,
+)
+from swarm.infra.redis_lua import orphaned_sessions_by_scan_sync
 from swarm.infra.redis_protocols import (
     RedisAsyncProtocol,
     RedisSyncProtocol,
@@ -24,24 +35,22 @@ from swarm.utils.worker_identity import direct_queue_name
 
 logger = logging.getLogger(__name__)
 
-# Affinity key prefix - separate from session metadata
-AFFINITY_PREFIX = "browser:affinity:"
-
-# Session TTL in seconds (1 hour)
-SESSION_TTL = 3600
+# TTL and intervals are sourced from Settings at instance creation to avoid drift.
 
 
 class SessionRegistry:
     """
-    Minimal session registry for browser session affinity.
+    Session registry for browser session affinity.
 
-    Phase 1: Simple session-to-worker mapping with basic Redis operations.
-    Uses one key per session with built-in expiry to avoid memory leaks.
+    Uses one key per session with built-in expiry to avoid memory leaks and
+    ensures deterministic routing across workers.
     """
 
     def __init__(self, redis_client: RedisAsyncProtocol | None = None) -> None:
         """Initialize session registry with Redis client."""
         self._redis: RedisAsyncProtocol | None = redis_client
+        cfg = Settings()
+        self._ttl: int = int(cfg.sessions.ttl_seconds)
 
     async def _get_redis(self) -> RedisAsyncProtocol:
         """Get or create Redis client."""
@@ -82,7 +91,7 @@ class SessionRegistry:
 
         try:
             # One key per session: authoritative hash with TTL
-            session_key = f"{AFFINITY_PREFIX}{session_id}"
+            session_key = affinity_key(session_id)
 
             # Canonical direct queue naming (host-only id)
             direct_queue = direct_queue_name(worker_id)
@@ -93,7 +102,7 @@ class SessionRegistry:
                 "timestamp": str(time.time()),
             }
             await redis.hset(session_key, mapping=_affinity_mapping(record))
-            await redis.expire(session_key, SESSION_TTL)
+            await redis.expire(session_key, self._ttl)
 
             logger.debug(
                 f"Set session {session_id} owner to worker {worker_id} with {direct_queue}"
@@ -117,12 +126,13 @@ class SessionRegistry:
         redis = await self._get_redis()
 
         try:
-            session_key = f"{AFFINITY_PREFIX}{session_id}"
+            session_key = affinity_key(session_id)
 
             # Best-effort: try to remove from session set, but ignore errors
-            owner = await redis.hget(session_key, "worker_id")
+            data = await redis.hgetall(session_key)
+            owner = data.get("worker_id") if data else None
             if owner:
-                sessions_key = f"browser:worker_sessions:{owner}"
+                sessions_key = worker_sessions_key(owner)
                 try:
                     await redis.srem(sessions_key, session_id)
                 except Exception:
@@ -154,7 +164,7 @@ class SessionRegistry:
         redis = await self._get_redis()
 
         try:
-            session_key = f"{AFFINITY_PREFIX}{session_id}"
+            session_key = affinity_key(session_id)
 
             # Get current owner
             worker_id = await redis.hget(session_key, "worker_id")
@@ -163,8 +173,8 @@ class SessionRegistry:
 
             # Refresh TTL only if less than half remaining
             ttl = await redis.ttl(session_key)
-            if 0 < ttl < SESSION_TTL // 2 or ttl == -1:
-                await redis.expire(session_key, SESSION_TTL)
+            if 0 < ttl < self._ttl // 2 or ttl == -1:
+                await redis.expire(session_key, self._ttl)
 
             return str(worker_id)
 
@@ -181,39 +191,21 @@ class SessionRegistry:
     # Orphan detection (sync helper to avoid drift in registries)
     # -----------------
     @staticmethod
-    def find_orphaned_sessions_sync(
-        client: RedisSyncProtocol, *, stale_seconds: float = 90.0
-    ) -> list[str]:
-        """Return sessions whose owning worker heartbeat is missing or stale.
+    def find_orphaned_sessions_sync(client: RedisSyncProtocol) -> list[str]:
+        """Return sessions whose owning worker heartbeat is missing.
 
-        Scans authoritative affinity hashes and checks standardized heartbeat
-        liveness for each referenced worker. Keeps logic colocated with the
-        session registry contract to avoid drift across components.
+        Uses TTL on standardized heartbeat keys (authoritative). A worker is
+        live iff TTL(key) > 0.
         """
         try:
-            keys = client.keys("browser:affinity:*")
-            now = time.time()
-            orphaned: list[str] = []
-            for key in keys:
-                data = client.hgetall(key)
-                worker_id = data.get("worker_id") if data else None
-                if not worker_id:
-                    continue
-                ts_raw = client.hget(f"worker:heartbeat:browser:{worker_id}", "timestamp")
-                dead = False
-                if not ts_raw:
-                    dead = True
-                else:
-                    try:
-                        ts = float(ts_raw)
-                        dead = (now - ts) > stale_seconds
-                    except Exception:
-                        dead = True
-                if dead:
-                    # session_id suffix after last ':'
-                    sid = key.rsplit(":", 1)[-1]
-                    orphaned.append(sid)
-            return orphaned
+            pattern = affinity_scan_pattern()
+            return orphaned_sessions_by_scan_sync(
+                client,
+                affinity_match_pattern=pattern,
+                heartbeat_prefix=HEARTBEAT_PREFIX,
+                affinity_prefix=AFFINITY_PREFIX,
+                scan_count=1000,
+            )
         except Exception as exc:
             logger.error(f"Failed to compute orphaned sessions (sync): {exc}")
             return []
