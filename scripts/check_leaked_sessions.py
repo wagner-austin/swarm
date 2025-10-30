@@ -6,6 +6,8 @@ import os
 import redis
 from dotenv import load_dotenv
 
+from swarm.infra.redis_keys import affinity_scan_pattern, session_id_from_affinity_key
+
 load_dotenv()
 
 password = os.getenv("REDIS_PASSWORD", "")
@@ -17,8 +19,8 @@ print(f"Connecting to Redis at {redis_url.replace(password, '***') if password e
 try:
     client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=5)
 
-    # Check for browser:affinity:* keys (session affinity mappings)
-    affinity_keys = list(client.scan_iter(match="browser:affinity:*", count=100))
+    # Check for session affinity mappings
+    affinity_keys = list(client.scan_iter(match=affinity_scan_pattern(), count=100))
 
     print("\n=== Browser Session Check ===")
     print(f"Active browser sessions (affinity keys): {len(affinity_keys)}")
@@ -26,11 +28,9 @@ try:
     if affinity_keys:
         print("\n[WARNING] Leaked session IDs:")
         for key in affinity_keys:
-            parts = key.split(":", 2)
-            if len(parts) == 3:
-                session_id = parts[2]
-                ttl = client.ttl(key)
-                print(f"  - {session_id} (TTL: {ttl}s)")
+            session_id = session_id_from_affinity_key(key)
+            ttl = client.ttl(key)
+            print(f"  - {session_id} (TTL: {ttl}s)")
     else:
         print("\n[OK] No leaked sessions found - Redis is clean!")
 
