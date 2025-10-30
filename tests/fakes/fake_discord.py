@@ -258,6 +258,11 @@ class FakeBot:
         """Simulate waiting until ready."""
         await asyncio.sleep(0.001)
 
+    # Minimal API used by cogs
+    def get_cog(self, name: str) -> object | None:
+        # Tests can stub richer behavior if needed
+        return None
+
     def add_guild(self, guild: FakeGuild) -> None:
         """Add a guild to the swarm."""
         self.guilds.append(guild)
