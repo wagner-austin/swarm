@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 
+from swarm.core.settings import Settings
+
 from .backends import HistoryBackend, Turn
 
 
 class MemoryBackend(HistoryBackend):
     """Simple in-process ring-buffer implementation of :class:`HistoryBackend`."""
 
-    def __init__(self, max_turns: int) -> None:
-        self._max_turns = max_turns
+    def __init__(self, max_turns: int | None = None) -> None:
+        # Default to Settings.conversation_max_turns to avoid drift with Redis backend configuration.
+        # No fallbacks: if Settings() fails, propagate the error to the caller.
+        self._max_turns: int = Settings().conversation_max_turns if max_turns is None else max_turns
         # channel_id -> persona -> deque[Turn]
         self._store: dict[int, dict[str, deque[Turn]]] = defaultdict(
             lambda: defaultdict(lambda: deque(maxlen=self._max_turns))

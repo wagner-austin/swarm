@@ -37,8 +37,14 @@ class SessionLifecycleManager:
     to avoid interfering with caller loops (e.g., Celery worker thread loops).
     """
 
-    def __init__(self, cleanup_interval: float = 60.0) -> None:
-        self._cleanup_interval: float = cleanup_interval
+    def __init__(self, cleanup_interval: float | None = None) -> None:
+        from swarm.core.settings import Settings
+
+        cfg = Settings()
+        self._cleanup_interval: float = (
+            cfg.sessions.cleanup_interval_seconds if cleanup_interval is None else cleanup_interval
+        )
+        self._default_ttl_seconds: float = float(cfg.sessions.ttl_seconds)
         self._sessions: dict[str, SessionMetadata] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
@@ -158,7 +164,7 @@ class SessionLifecycleManager:
     # Public API (awaitable, proxies to internal loop)
     # --------------
     async def register_session(
-        self, session_id: str, worker_id: str, ttl_seconds: float = 3600
+        self, session_id: str, worker_id: str, ttl_seconds: float | None = None
     ) -> None:
         loop = self._ensure_loop()
 
@@ -170,7 +176,9 @@ class SessionLifecycleManager:
                     worker_id=worker_id,
                     created_at=time.time(),
                     last_activity=time.time(),
-                    ttl_seconds=ttl_seconds,
+                    ttl_seconds=float(
+                        self._default_ttl_seconds if ttl_seconds is None else ttl_seconds
+                    ),
                 )
             # Update metrics while holding lock for consistent count
             try:

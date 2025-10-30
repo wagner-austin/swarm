@@ -44,6 +44,13 @@ class QueueConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class SessionsConfig(BaseModel):
+    ttl_seconds: int = 3600  # Affinity/session TTL for Redis + in-memory lifecycle
+    cleanup_interval_seconds: float = 60.0  # Background cleanup cadence for in-memory lifecycle
+
+    model_config = {"extra": "ignore"}
+
+
 class Settings(BaseSettings):
     if TYPE_CHECKING:  # pragma: no cover
 
@@ -94,6 +101,7 @@ class Settings(BaseSettings):
 
     browser: BrowserConfig = BrowserConfig()
     queues: QueueConfig = QueueConfig()
+    sessions: SessionsConfig = SessionsConfig()
 
     # --- URL guard-rails ---
     allowed_hosts: list[str] = []  # e.g. ["github.com", "docs.python.org"]
@@ -153,5 +161,6 @@ __all__ = [
     "BrowserConfig",
     "QueueConfig",
     "RedisConfig",
+    "SessionsConfig",
     "DISCORD_LIMIT",
 ]
