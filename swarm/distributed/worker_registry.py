@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import TYPE_CHECKING, TypedDict
 
 import redis
@@ -18,6 +18,17 @@ else:
     # At runtime, Redis is not generic
     RedisSyncClient = redis.Redis
 
+from swarm.infra.redis_keys import (
+    HEARTBEAT_PREFIX,
+    WORKER_PREFIX,
+    affinity_key as ak,
+    heartbeat_key,
+    worker_id_from_worker_key,
+    worker_key as rk_worker_key,
+    worker_sessions_key,
+    workers_scan_pattern,
+)
+from swarm.infra.redis_lua import worker_hashes_for_alive_ids_sync
 from swarm.infra.redis_protocols import RedisSyncProtocol, wrap_redis_sync
 
 logger = logging.getLogger(__name__)
@@ -40,6 +51,15 @@ class WorkerInfo:
     load_percentage: float  # current_sessions / max_sessions * 100
 
 
+class WorkerStaticFields(TypedDict, total=False):
+    hostname: str
+    capabilities: list[str]
+    max_sessions: int
+    platform: str
+    python_version: str
+    started_at_iso: str
+
+
 class WorkerRegistry:
     """Query and manage worker information."""
 
@@ -58,6 +78,9 @@ class WorkerRegistry:
         else:
             self.redis = wrap_redis_sync(redis.from_url(settings.redis.url, decode_responses=True))
 
+        # In-process cache for static worker metadata to reduce repeated decoding/parsing
+        self._static_cache: dict[str, WorkerStaticFields] = {}
+
     def get_all_workers(self) -> list[WorkerInfo]:
         """Get all registered workers (healthy and unhealthy).
 
@@ -67,8 +90,8 @@ class WorkerRegistry:
         workers = []
 
         try:
-            # Find all worker keys
-            worker_keys = self.redis.keys("browser:worker:*")
+            # Find all worker keys via SCAN (non-blocking)
+            worker_keys = list(self.redis.scan_iter(match=workers_scan_pattern()) or [])
 
             for key in worker_keys:
                 worker_data = self.redis.hgetall(key)
@@ -93,24 +116,31 @@ class WorkerRegistry:
         Returns:
             List of healthy WorkerInfo objects
         """
-        all_workers = self.get_all_workers()
-        healthy_workers = []
+        healthy_workers: list[WorkerInfo] = []
 
-        for worker in all_workers:
-            # Authoritative liveness from heartbeat timestamp freshness
-            hb_key = f"worker:heartbeat:browser:{worker.worker_id}"
-            ts_raw = self.redis.hget(hb_key, "timestamp")
-            is_alive = False
-            try:
-                if ts_raw:
-                    ts = float(ts_raw)
-                    is_alive = (time.time() - ts) <= 90.0
-            except Exception:
-                is_alive = False
-            if is_alive:
-                # Apply capability filter if specified
-                if capability is None or capability in worker.capabilities:
-                    healthy_workers.append(worker)
+        try:
+            # Discover worker ids from registry keys via SCAN (non-blocking)
+            keys = list(self.redis.scan_iter(match=workers_scan_pattern()) or [])
+            worker_ids: list[str] = [worker_id_from_worker_key(k) for k in keys]
+            if not worker_ids:
+                return []
+
+            # Server-side: filter by heartbeat TTL and return worker hashes
+            maps = worker_hashes_for_alive_ids_sync(
+                self.redis,
+                worker_ids=worker_ids,
+                worker_prefix=WORKER_PREFIX,
+                heartbeat_prefix=HEARTBEAT_PREFIX,
+            )
+            for d in maps:
+                info = self._parse_worker_data(d)
+                if info is None:
+                    continue
+                if capability is None or capability in info.capabilities:
+                    healthy_workers.append(info)
+        except Exception as e:
+            logger.error(f"Failed to get healthy workers: {e}")
+            return []
 
         return healthy_workers
 
@@ -124,7 +154,7 @@ class WorkerRegistry:
             Number of sessions owned by the worker
         """
         try:
-            sessions_key = f"browser:worker_sessions:{worker_id}"
+            sessions_key = worker_sessions_key(worker_id)
             return int(self.redis.scard(sessions_key))
         except Exception as e:
             logger.error(f"Failed to get worker load for {worker_id}: {e}")
@@ -143,12 +173,7 @@ class WorkerRegistry:
 
         candidates = healthy_workers
         if not candidates:
-            # Fallback to all known workers if no healthy set (e.g., tests without heartbeats)
-            candidates = self.get_all_workers()
-            if capability is not None:
-                candidates = [w for w in candidates if capability in w.capabilities]
-
-        if not candidates:
+            # No fallbacks: require heartbeat-backed liveness
             return None
 
         # Sort by load percentage
@@ -167,7 +192,7 @@ class WorkerRegistry:
             WorkerInfo if found, None otherwise
         """
         try:
-            worker_key = f"browser:worker:{worker_id}"
+            worker_key = rk_worker_key(worker_id)
             worker_data = self.redis.hgetall(worker_key)
 
             if worker_data:
@@ -202,8 +227,7 @@ class WorkerRegistry:
 
         for session_id in orphaned:
             try:
-                affinity_key = f"browser:affinity:{session_id}"
-                self.redis.delete(affinity_key)
+                self.redis.delete(ak(session_id))
                 cleaned += 1
                 logger.info(f"Cleaned up orphaned session: {session_id}")
             except Exception as e:
@@ -220,28 +244,59 @@ class WorkerRegistry:
             decoded = data
 
             # Parse specific fields
-            capabilities = json.loads(decoded.get("capabilities", "[]"))
+            worker_id = decoded.get("hostname", "unknown")
+
+            # Static fields with cache
+            static = self._static_cache.get(worker_id)
+            started_at_iso = decoded.get("started_at", "")
+            if (
+                static is None
+                or static.get("started_at_iso") != started_at_iso
+                or "capabilities" not in static
+            ):
+                # Refresh cache when worker restarts or cache miss
+                caps = json.loads(decoded.get("capabilities", "[]"))
+                static = {
+                    "hostname": decoded.get("hostname", "unknown"),
+                    "capabilities": caps if isinstance(caps, list) else [],
+                    "max_sessions": int(decoded.get("max_sessions", "10")),
+                    "platform": decoded.get("platform", "unknown"),
+                    "python_version": decoded.get("python_version", "unknown"),
+                    "started_at_iso": started_at_iso,
+                }
+                self._static_cache[worker_id] = static
+
+            capabilities = static.get("capabilities", [])
+            max_sessions = int(static.get("max_sessions", 10))
             current_sessions = int(decoded.get("current_sessions", "0"))
-            max_sessions = int(decoded.get("max_sessions", "10"))
 
             # Calculate load percentage
             load_percentage = (current_sessions / max_sessions * 100) if max_sessions > 0 else 0.0
 
             # Parse timestamps
-            started_at = datetime.fromisoformat(decoded.get("started_at", ""))
-            last_heartbeat = datetime.fromisoformat(decoded.get("last_heartbeat", ""))
+            started_at = (
+                datetime.fromisoformat(started_at_iso)
+                if started_at_iso
+                else datetime.fromtimestamp(0, tz=UTC)
+            )
+            last_heartbeat_iso = decoded.get("last_heartbeat", "")
+            last_heartbeat = (
+                datetime.fromisoformat(last_heartbeat_iso)
+                if last_heartbeat_iso
+                else datetime.fromtimestamp(0, tz=UTC)
+            )
 
             return WorkerInfo(
-                worker_id=decoded.get("hostname", "unknown"),
-                hostname=decoded.get("hostname", "unknown"),
+                worker_id=worker_id,
+                hostname=static.get("hostname", worker_id),
                 capabilities=capabilities,
                 status=decoded.get("status", "unknown"),
                 current_sessions=current_sessions,
                 max_sessions=max_sessions,
                 started_at=started_at,
                 last_heartbeat=last_heartbeat,
-                platform=decoded.get("platform", "unknown"),
-                python_version=decoded.get("python_version", "unknown"),
+                platform=static.get("platform", "unknown"),
+                python_version=static.get("python_version", "unknown"),
                 load_percentage=load_percentage,
             )
 
