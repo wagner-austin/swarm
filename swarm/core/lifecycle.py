@@ -11,12 +11,19 @@ from discord import Intents
 from discord.ext import commands  # For extension loading exceptions
 
 from swarm.core import telemetry
+from swarm.core.cogs_registry import (
+    STANDARD_EXTENSIONS,
+    di_skip_plugin_keys,
+    iter_enabled_di_cog_specs,
+    validate_registry,
+)
 
 # from swarm.core.containers import Container # Forward ref
 from swarm.core.discord.boot import MyBot
 from swarm.core.discord.di import initialize_and_wire_container
 from swarm.core.discord.events import register_event_handlers
 from swarm.core.settings import Settings
+from swarm.types import CogFactory, ContainerFactory
 from swarm.utils.module_discovery import iter_submodules
 
 if TYPE_CHECKING:
@@ -38,17 +45,26 @@ class LifecycleState(Enum):
 
 
 class SwarmLifecycle:
-    def __init__(self, settings: Settings, *, swarm_factory: Callable[..., MyBot] | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        swarm_factory: Callable[..., MyBot] | None = None,
+        container: Container | None = None,
+        container_factory: ContainerFactory | None = None,
+    ):
         self._settings: Settings = settings
         self._bot_factory = swarm_factory
-        self._swarm_factory = swarm_factory  # If both are needed for backward compatibility
-        # ... other init code ...
+        self._swarm_factory = swarm_factory
         self._state: LifecycleState = LifecycleState.IDLE
         self._swarm: MyBot | None = None
-        self._container: Container | None = None
+        self._container: Container | None = container
+        self._container_factory: ContainerFactory | None = container_factory
         self._shutdown_event = asyncio.Event()
         # Bounded queue for runtime alerts that should be forwarded to the swarm owner.
         self.alerts_q: asyncio.Queue[str] = asyncio.Queue(maxsize=settings.queues.alerts)
+        # Signal when all extensions are loaded
+        self._extensions_loaded: asyncio.Event = asyncio.Event()
 
     @property
     def state(self) -> LifecycleState:
@@ -140,10 +156,20 @@ class SwarmLifecycle:
         # Start Prometheus exporter before other services spin up
         telemetry.start_exporter(self._settings.metrics_port)
 
-        self._container = initialize_and_wire_container(
-            app_settings=self._settings,
-            runner_module_name=self.__module__,
-        )
+        if self._container is None:
+            if self._container_factory is not None:
+                self._container = self._container_factory(self._settings)
+            else:
+                self._container = initialize_and_wire_container(
+                    app_settings=self._settings,
+                    runner_module_name=self.__module__,
+                )
+        # Guardrail: validate cogs registry vs DI providers to prevent drift
+        try:
+            validate_registry(self._container)
+        except Exception as e:
+            logger.critical("Cogs registry validation failed: %s", e)
+            raise
 
         intents = Intents.default()
         if self._bot_factory:
@@ -170,47 +196,22 @@ class SwarmLifecycle:
         # --- DI-Managed Cogs --- #
         # Load specific cogs directly from the container
         logger.info("Loading DI-managed cogs from container...")
-        # MetricsTracker
-        metrics_tracker_cog = self._container.metrics_tracker_cog(discord_bot=self._bot)
-        await self._bot.add_cog(metrics_tracker_cog)
-        # LoggingAdmin
-        logging_admin_cog = self._container.logging_admin_cog(discord_bot=self._bot)
-        await self._bot.add_cog(logging_admin_cog)
-        # PersonaAdmin
-        persona_admin_cog = self._container.persona_admin_cog(discord_bot=self._bot)
-        await self._bot.add_cog(persona_admin_cog)
-        # About
-        about_cog = self._container.about_cog(discord_bot=self._bot)
-        await self._bot.add_cog(about_cog)
-        # AlertPump
-        alert_pump_cog = self._container.alert_pump_cog(discord_bot=self._bot, lifecycle=self)
-        await self._bot.add_cog(alert_pump_cog)
-        # Status (DI-managed)
-        status_cog = self._container.status_cog(discord_bot=self._bot)
-        await self._bot.add_cog(status_cog)
-        # Chat
-        chat_cog = self._container.chat_cog(discord_bot=self._bot)
-        await self._bot.add_cog(chat_cog)
-        # Web (DI-managed)
-        web_cog = self._container.web_cog(discord_bot=self._bot)
-        await self._bot.add_cog(web_cog)
-        # Shutdown (DI-managed)
-        shutdown_cog = self._container.shutdown_cog(discord_bot=self._bot, lifecycle=self)
-        await self._bot.add_cog(shutdown_cog)
-        # BrowserHealthMonitor (DI-managed) - wait for Redis before adding to avoid startup blips
-        if getattr(self._settings, "redis_enabled", True):
-            await self._await_redis_ready()
-        browser_health_monitor_cog = self._container.browser_health_monitor_cog(
-            discord_bot=self._bot
-        )
-        await self._bot.add_cog(browser_health_monitor_cog)
-        logger.info(
-            "DI cogs added: MetricsTracker, LoggingAdmin, PersonaAdmin, About, AlertPump, Status, Chat, Web, Shutdown, BrowserHealthMonitor."
-        )
+        di_cogs: list[str] = []
+        for spec in iter_enabled_di_cog_specs(self._settings):
+            if spec.requires_redis_ready:
+                await self._await_redis_ready()
+            factory: CogFactory = getattr(self._container, spec.provider_attr)
+            if spec.needs_lifecycle:
+                cog = factory(discord_bot=self._bot, lifecycle=self)
+            else:
+                cog = factory(discord_bot=self._bot)
+            await self._bot.add_cog(cog)
+            di_cogs.append(spec.display_name)
+        logger.info("DI cogs added: %s", ", ".join(di_cogs))
 
         # --- Standard Cogs --- #
         # Use an allow-list to control which standard cogs are loaded.
-        keep = {"browser", "chat", "help"}
+        keep = STANDARD_EXTENSIONS
         discovered_extensions = list(iter_submodules("swarm.plugins"))
         extensions_to_load = [
             ext for ext in discovered_extensions if ext.rsplit(".", 1)[-1] in keep
@@ -224,20 +225,12 @@ class SwarmLifecycle:
             "alert_pump",
             "status",
             "chat",
+            "web",
             "shutdown",
         ]
         failed: list[str] = []
 
-        di_cogs_to_skip = {
-            "metrics_tracker",
-            "logging_admin",
-            "persona_admin",
-            "about",
-            "alert_pump",
-            "status",
-            "chat",
-            "shutdown",
-        }
+        di_cogs_to_skip = di_skip_plugin_keys(self._settings)
         for ext_name in extensions_to_load:
             # DI-managed cogs are loaded above, so we skip them here
             if any(di_cog in ext_name for di_cog in di_cogs_to_skip):
@@ -257,9 +250,12 @@ class SwarmLifecycle:
             except Exception as e:
                 failed.append(ext_name.rsplit(".", 1)[-1])
                 logger.error(f"Unexpected error loading {ext_name}: {e}")
-        summary_loaded = ", ".join(sorted(loaded)) if loaded else "<none>"
-        summary_failed = f" | failed: {', '.join(failed)}" if failed else ""
-        logger.info(f"Cogs loaded: {summary_loaded}{summary_failed}")
+        # Signal that all extensions have been loaded
+        self._extensions_loaded.set()
+
+    @property
+    def extensions_loaded_event(self) -> asyncio.Event:
+        return self._extensions_loaded
 
     def _register_event_handlers(self) -> None:
         if not self._bot:
