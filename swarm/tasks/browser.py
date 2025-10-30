@@ -43,8 +43,9 @@ from swarm.browser.types import (
 from swarm.celery_app import app
 from swarm.core.settings import Settings
 from swarm.distributed.worker_lifecycle import WorkerLifecycle
+from swarm.infra.redis_keys import session_state_key
+from swarm.infra.redis_protocols import RedisAsyncProtocol, wrap_redis_async
 from swarm.tasks._base import SwarmTask
-from swarm.types import RedisBytes
 from swarm.utils.worker_identity import canonical_worker_id, direct_queue_name
 
 """Task protocol for functions that only need Celery's request.id."""
@@ -149,7 +150,7 @@ _engines_lock = threading.Lock()
 
 # Weak reference dictionary to store Redis clients per event loop
 # This ensures clients are garbage collected when the loop is destroyed
-_loop_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, RedisBytes] = (
+_loop_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, RedisAsyncProtocol] = (
     weakref.WeakKeyDictionary()
 )
 
@@ -203,7 +204,7 @@ def action_as_plain(a: Action) -> dict[str, object]:
 class BrowserTask(SwarmTask[..., object]):
     """Base task for browser operations with session management."""
 
-    async def get_redis(self) -> RedisBytes:
+    async def get_redis(self) -> RedisAsyncProtocol:
         """Get or create Redis client for the current event loop."""
         loop = asyncio.get_running_loop()
         client = _loop_clients.get(loop)
@@ -215,14 +216,18 @@ class BrowserTask(SwarmTask[..., object]):
 
             # Create client with limited connection pool for thread pool workers
             # Each thread gets its own loop and client, so we don't need many connections
-            client = redis_asyncio.from_url(
+            inner = redis_asyncio.from_url(
                 settings.redis.url,
                 max_connections=2,  # Limit connections per event loop
             )
-            _loop_clients[loop] = client
+            client_wrapped = wrap_redis_async(inner)
+            _loop_clients[loop] = client_wrapped
             logger.debug(f"Created new Redis client for event loop {id(loop)}")
 
-        return client
+        # Return the protocol-typed client from cache
+        proto_client = _loop_clients.get(loop)
+        assert proto_client is not None
+        return proto_client
 
     async def get_or_create_engine(self, session_id: str) -> BrowserEngine:
         """Return the BrowserEngine for session_id, creating it once in a thread-safe way."""
@@ -406,7 +411,7 @@ async def goto(
 
         # Update session metadata with current URL
         redis = await self.get_redis()
-        await redis.hset(f"browser:session:{session_id}", "url", url)
+        await redis.hset(session_state_key(session_id), "url", url)
 
         return {"success": True, "session_id": session_id, "url": url}
     finally:
@@ -680,39 +685,20 @@ async def status(
                 pass
             return {"success": True, "data": engine_status}
         else:
-            redis = await self.get_redis()
-            session_data = await redis.hgetall(f"browser:session:{session_id}")
-
-            if session_data:
-                # Decode bytes to strings
-                decoded_data: dict[str, str] = {
-                    k.decode(): v.decode() for k, v in session_data.items()
-                }
-                # Compose a complete typed payload with sensible defaults for unknowns
-                data: BrowserEngineStatus = {
-                    "worker_id": "unknown",
-                    "status": "unknown",
-                    "browser_active": False,
-                    "page_active": False,
-                    "url": decoded_data.get("url"),
-                    "sessions": 0,
-                    "uptime": 0.0,
-                    "error": None,
-                    "session_id": str(session_id),
-                }
-                return {"success": True, "data": data}
-            else:
-                data_nf: BrowserEngineStatus = {
-                    "session_id": str(session_id),
-                    "status": "not_found",
-                    "browser_active": False,
-                    "page_active": False,
-                    "sessions": 0,
-                    "worker_id": "unknown",
-                    "url": None,
-                    "uptime": 0.0,
-                }
-                return {"success": True, "data": data_nf}
+            # No active engine for this session: treat as not_found to avoid
+            # rendering stale URL or unknown worker details.
+            # so callers don't render confusing partial details.
+            data_nf: BrowserEngineStatus = {
+                "session_id": str(session_id),
+                "status": "not_found",
+                "browser_active": False,
+                "page_active": False,
+                "sessions": 0,
+                "worker_id": "unknown",
+                "url": None,
+                "uptime": 0.0,
+            }
+            return {"success": True, "data": data_nf}
     finally:
         if auto_cleanup:
             await self.auto_cleanup_session(session_id)
@@ -735,6 +721,23 @@ async def start(
 
     try:
         engine = await self.get_or_create_engine(session_id)
+        # Resume last known URL for this session if present (best-effort)
+        try:
+            redis = await self.get_redis()
+            sdata = await redis.hgetall(session_state_key(session_id))
+            last_url = sdata.get("url") if isinstance(sdata, dict) else None
+            if isinstance(last_url, str) and last_url:
+                try:
+                    await engine.goto(last_url)
+                except Exception as nav_exc:
+                    logger.warning(
+                        "Resume navigation failed for session %s to %s: %r",
+                        session_id,
+                        last_url,
+                        nav_exc,
+                    )
+        except Exception as st_exc:
+            logger.debug("No prior session URL to resume for %s: %r", session_id, st_exc)
         await engine.health_check()
         try:
             from swarm.distributed.session_lifecycle import lifecycle_manager
