@@ -21,8 +21,9 @@ from swarm.core.telemetry import (
     BROWSER_HEALTH_LAST_CHECK_SECONDS,
     BROWSER_HEALTHY_WORKERS,
 )
+from swarm.infra.redis_keys import HEALTH_KEY, heartbeat_scan_pattern
+from swarm.infra.redis_protocols import RedisAsyncProtocol
 from swarm.plugins.base_di import BaseDIClientCog
-from swarm.types import RedisBytes
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +39,81 @@ class BrowserHealthStatus(TypedDict):
     error: NotRequired[str]
 
 
-STALE_WINDOW_SECONDS: float = 90.0
+# Liveness via TTL on standardized heartbeat keys.
+
+
+async def write_health_snapshot(redis: RedisAsyncProtocol, status: BrowserHealthStatus) -> None:
+    """Persist browser health snapshot as a Redis hash.
+
+    Converts values to strings and stores under HEALTH_KEY.
+    """
+    await redis.hset(
+        HEALTH_KEY,
+        mapping={
+            "healthy_workers": str(int(status.get("healthy_workers", 0))),
+            "is_degraded": "true" if bool(status.get("is_degraded", True)) else "false",
+            "last_check": str(float(status.get("last_check", 0.0))),
+            "min_required": str(int(status.get("min_required", 1))),
+        },
+    )
+
+
+async def read_health_snapshot(redis: RedisAsyncProtocol) -> BrowserHealthStatus | None:
+    """Read and normalize the browser health snapshot.
+
+    Returns a BrowserHealthStatus dict or None if not present.
+    """
+    raw = await redis.hgetall(HEALTH_KEY)
+    if not raw:
+        return None
+
+    def _to_str(v: object) -> str:
+        if isinstance(v, bytes | bytearray):
+            try:
+                return v.decode()
+            except Exception:
+                return ""
+        return str(v)
+
+    # Normalize keys to strings to handle clients that return bytes keys
+    raw_norm: dict[str, object] = {
+        (_to_str(k)): v for k, v in (raw.items() if isinstance(raw, dict) else [])
+    }
+
+    healthy_workers_s = _to_str(raw_norm.get("healthy_workers", "0"))
+    is_degraded_s = _to_str(raw_norm.get("is_degraded", "true"))
+    last_check_s = _to_str(raw_norm.get("last_check", "0.0"))
+    min_required_s = _to_str(raw_norm.get("min_required", "1"))
+
+    try:
+        healthy_workers = int(healthy_workers_s)
+    except Exception:
+        healthy_workers = 0
+    is_degraded = is_degraded_s.strip().lower() in {"1", "true", "yes"}
+    try:
+        last_check = float(last_check_s)
+    except Exception:
+        last_check = 0.0
+    try:
+        min_required = int(min_required_s)
+    except Exception:
+        min_required = 1
+
+    return {
+        "healthy_workers": healthy_workers,
+        "is_degraded": is_degraded,
+        "last_check": last_check,
+        "min_required": min_required,
+        "healthy": not is_degraded,
+    }
 
 
 class BrowserHealthMonitor(BaseDIClientCog):
     """Monitors browser worker health via Redis heartbeats only."""
 
-    def __init__(self, *, discord_bot: commands.Bot, redis: RedisBytes | None = None) -> None:
+    def __init__(
+        self, *, discord_bot: commands.Bot, redis: RedisAsyncProtocol | None = None
+    ) -> None:
         super().__init__(discord_bot)
         self.bot = discord_bot
         self.monitoring_task: asyncio.Task[None] | None = None
@@ -52,7 +121,7 @@ class BrowserHealthMonitor(BaseDIClientCog):
         self.min_healthy_workers = 1
 
         # Expose Redis client from DI for snapshot persistence (optional)
-        self.redis: RedisBytes | None = redis
+        self.redis: RedisAsyncProtocol | None = redis
 
         # Cached status
         self._cached_status: BrowserHealthStatus = {
@@ -66,6 +135,11 @@ class BrowserHealthMonitor(BaseDIClientCog):
     async def cog_load(self) -> None:
         """Start background health monitoring when cog loads."""
         logger.info("Starting browser health monitoring")
+        # Immediate first check to avoid warm-up window
+        try:
+            await self._check_worker_health()
+        except Exception as exc:
+            logger.warning(f"Initial browser health check failed: {exc}")
         self.monitoring_task = asyncio.create_task(self._monitoring_loop())
 
     async def cog_unload(self) -> None:
@@ -101,21 +175,12 @@ class BrowserHealthMonitor(BaseDIClientCog):
             if self.redis is None:
                 raise RuntimeError("Redis client unavailable for health aggregation")
 
-            keys: list[bytes] = await self.redis.keys("worker:heartbeat:browser:*")
-            fresh = 0
-            for k in keys:
-                key_str = k.decode()
-                ts_raw = await self.redis.hget(key_str, "timestamp")
-                if ts_raw is None:
-                    continue
-                ts_str = ts_raw.decode() if isinstance(ts_raw, (bytes | bytearray)) else str(ts_raw)
-                try:
-                    ts = float(ts_str)
-                except Exception:
-                    continue
-                if current_time - ts <= STALE_WINDOW_SECONDS:
-                    fresh += 1
-            healthy_workers = fresh
+            from swarm.infra.redis_lua import count_ttl_healthy_by_scan
+
+            # Single server-side scan + TTL count via Lua (one command)
+            healthy_workers = await count_ttl_healthy_by_scan(
+                self.redis, pattern=heartbeat_scan_pattern(), scan_count=1000
+            )
 
             is_degraded = healthy_workers < self.min_healthy_workers
 
@@ -129,13 +194,14 @@ class BrowserHealthMonitor(BaseDIClientCog):
             }
 
             # Persist health snapshot for fast reads
-            await self.redis.hset(
-                "browser:health",
-                mapping={
-                    "healthy_workers": str(healthy_workers),
-                    "is_degraded": "true" if is_degraded else "false",
-                    "last_check": str(current_time),
-                    "min_required": str(self.min_healthy_workers),
+            await write_health_snapshot(
+                self.redis,
+                {
+                    "healthy_workers": healthy_workers,
+                    "is_degraded": is_degraded,
+                    "last_check": current_time,
+                    "min_required": self.min_healthy_workers,
+                    "healthy": not is_degraded,
                 },
             )
 
