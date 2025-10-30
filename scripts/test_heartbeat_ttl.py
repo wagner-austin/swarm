@@ -6,6 +6,7 @@ import time
 import redis
 
 from swarm.distributed.worker_lifecycle import WorkerLifecycle
+from swarm.infra.redis_keys import heartbeat_key as hb, worker_key as wk, worker_sessions_key as ws
 
 
 def test_heartbeat_extends_ttl():
@@ -20,9 +21,9 @@ def test_heartbeat_extends_ttl():
     redis_client = redis.from_url(test_redis_url, decode_responses=True)
 
     # Clear any existing data
-    worker_key = "browser:worker:test-worker"
-    sessions_key = "browser:worker_sessions:test-worker"
-    heartbeat_key = "worker:heartbeat:browser:test-worker"
+    worker_key = wk("test-worker")
+    sessions_key = ws("test-worker")
+    heartbeat_key = hb("test-worker")
 
     redis_client.delete(worker_key, sessions_key, heartbeat_key)
 
@@ -72,7 +73,7 @@ def test_heartbeat_extends_ttl():
             worker.stop_heartbeat()
             return False
 
-    print("\n✓ SUCCESS: Worker key remained alive")
+    print("\nSUCCESS: Worker key remained alive")
     worker.stop_heartbeat()
 
     # Cleanup
@@ -147,6 +148,6 @@ if __name__ == "__main__":
     success = test_heartbeat_extends_ttl()
 
     if success:
-        print("\n✓ Heartbeat test passed")
+        print("\nSUCCESS: Heartbeat test passed")
     else:
-        print("\n✗ Heartbeat test failed")
+        print("\nFAILURE: Heartbeat test failed")
