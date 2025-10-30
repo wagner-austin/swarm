@@ -13,12 +13,12 @@ import redis
 
 from swarm.core.logger_setup import bootstrap_logging
 from swarm.core.settings import Settings
+from swarm.infra.redis_keys import affinity_key, heartbeat_key
 from swarm.infra.redis_protocols import RedisSyncProtocol, wrap_redis_sync
 
 logger = logging.getLogger(__name__)
 
-# Key prefix for affinity storage - separate from session metadata
-SESSION_KEY_PREFIX = "browser:affinity:"
+# Affinity keys and heartbeat handled via redis_keys builders
 
 
 class Routing(TypedDict, total=False):
@@ -98,27 +98,18 @@ class BrowserSessionRouter:
         return self._redis
 
     def _is_worker_healthy(self, worker_id: str, redis_client: RedisSyncProtocol) -> bool:
-        """Check worker liveness via Redis heartbeats (authoritative).
+        """Check worker liveness using TTL on standardized heartbeat keys.
 
-        Healthy iff heartbeat timestamp is fresh within the staleness window.
+        Healthy iff TTL on heartbeat_key(id) is positive (key exists and not expired).
         """
-        heartbeat_key = f"worker:heartbeat:browser:{worker_id}"
+        hb_key = heartbeat_key(worker_id)
         attempts = 0
         while attempts < 3:
             attempts += 1
             try:
-                ts_str = redis_client.hget(heartbeat_key, "timestamp")
-                if not ts_str:
-                    return False
-                try:
-                    ts = float(ts_str)
-                except Exception:
-                    return False
-                now = time.time()
-                stale_window = 90.0
-                return (now - ts) <= stale_window
+                ttl = redis_client.ttl(hb_key)
+                return ttl > 0
             except Exception as e:
-                # Retry on transient timeouts
                 if "Timeout" in str(e) and attempts < 3:
                     time.sleep(0.02)
                     continue
@@ -162,9 +153,10 @@ class BrowserSessionRouter:
                 redis_client2 = self._get_redis()
                 if redis_client2 is not None:
                     try:
-                        session_key2 = "browser:affinity:" + sid_obj2
-                        worker_id2 = redis_client2.hget(session_key2, "worker_id")
-                        direct_queue2 = redis_client2.hget(session_key2, "direct_queue")
+                        session_key2 = affinity_key(sid_obj2)
+                        data2 = redis_client2.hgetall(session_key2)
+                        worker_id2 = data2.get("worker_id") if data2 else None
+                        direct_queue2 = data2.get("direct_queue") if data2 else None
                         if worker_id2 and direct_queue2:
                             if self._is_worker_healthy(worker_id2, redis_client2):
                                 dq2 = direct_queue2
@@ -190,10 +182,11 @@ class BrowserSessionRouter:
             return None
 
         try:
-            session_key = "browser:affinity:" + sid_obj
+            session_key = affinity_key(sid_obj)
             logger.info(f"BrowserSessionRouter: Looking up key={session_key}")
 
-            # Authoritative fields written by the session registry (with tiny retry on timeout)
+            # Authoritative fields written by the session registry.
+            # Use individual HGETs to match client error semantics in tests.
             attempts2 = 0
             worker_id = None
             direct_queue = None
@@ -254,7 +247,7 @@ class BrowserSessionRouter:
 #   before any worker claims the session
 # - Workers register sessions AFTER receiving the task, avoiding most races
 # - If two tasks for the same new session arrive simultaneously, both may
-#   route to different workers - one will fail fast (acceptable for Phase 1)
+#   route to different workers; one will fail fast and be retried
 # - TTL refresh happens in the worker when it actually uses the session
 # NOTE: The Routing TypedDict is defined above the class to avoid
 # undefined-name checks in tools that don't postpone annotation evaluation.
