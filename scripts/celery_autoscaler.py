@@ -266,12 +266,15 @@ class CeleryAutoscaler:
         if not CeleryAutoscaler._is_redis_channel(ch):
             raise RuntimeError("Redis broker/transport is required for autoscaler queue depth")
 
-        total = 0
+        # Compute all priority keys
+        keys: list[str] = []
         for pri in self.priority_steps:
-            key = ch._q_for_pri(name, pri)
-            total += int(ch.client.llen(key))
+            keys.append(ch._q_for_pri(name, pri))
 
-        return int(total)
+        # Server-side LLEN sum via a single Lua EVAL
+        from swarm.infra.redis_lua import sum_llen_via_eval
+
+        return int(sum_llen_via_eval(ch.client, keys))
 
     async def get_worker_stats(self) -> dict[str, int]:
         """Get worker statistics via Celery Inspect (optional)."""
