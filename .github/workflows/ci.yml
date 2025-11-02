@@ -45,9 +45,11 @@ jobs:
       - name: Enforce no casts/ignores in app code
         run: |
           set -e
-          if grep -RIn "cast\(" swarm scripts | grep -v "^$"; then
+          # Disallow typing.cast usages in app code (fixed-string match to avoid regex issues)
+          if grep -RIn -F "cast(" swarm | grep -v "^$"; then
             echo "Forbidden typing.cast found in app code" >&2; exit 1; fi
-          if grep -RIn "#\s*type:\s*ignore" swarm scripts | grep -v "^$"; then
+          # Disallow `# type: ignore` in app code
+          if grep -RIn -F "# type: ignore" swarm | grep -v "^$"; then
             echo "Forbidden type: ignore found in app code" >&2; exit 1; fi
 
       - name: Run mypy
@@ -93,6 +95,18 @@ jobs:
         if: steps.cached-poetry-dependencies.outputs.cache-hit == 'true'
         run: poetry install --with dev --no-root
 
+      - name: Generate CI Redis password (unit tests)
+        run: |
+          echo "REDIS_PASSWORD=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
+
+      - name: Create minimal .env for unit tests
+        run: |
+          printf "REDIS_PASSWORD=%s\n" "$REDIS_PASSWORD" > .env
+          printf "REDIS__ENABLED=true\n" >> .env
+          printf "REDIS__URL=redis://default:%s@localhost:6380/0\n" "$REDIS_PASSWORD" >> .env
+          printf "REDIS_URL=redis://default:%s@localhost:6380/0\n" "$REDIS_PASSWORD" >> .env
+          printf "CELERY_BROKER_URLS=redis://default:%s@localhost:6380/0\n" "$REDIS_PASSWORD" >> .env
+
       - name: Run unit tests (no Docker/Redis required)
         run: poetry run pytest tests/ -v --cov=swarm --cov-report=term-missing -m "not integration"
 
@@ -116,6 +130,14 @@ jobs:
       - name: Generate CI Redis password
         run: |
           echo "REDIS_PASSWORD=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
+
+      - name: Create minimal .env for Compose
+        run: |
+          printf "REDIS_PASSWORD=%s\n" "$REDIS_PASSWORD" > .env
+          printf "REDIS__ENABLED=true\n" >> .env
+          printf "REDIS__URL=redis://default:%s@haproxy-redis:6380/0\n" "$REDIS_PASSWORD" >> .env
+          printf "REDIS_URL=redis://default:%s@haproxy-redis:6380/0\n" "$REDIS_PASSWORD" >> .env
+          printf "CELERY_BROKER_URLS=redis://default:%s@haproxy-redis:6380/0\n" "$REDIS_PASSWORD" >> .env
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
