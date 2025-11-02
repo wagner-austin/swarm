@@ -24,7 +24,9 @@ class TestScalingBackendProtocol:
     @pytest.mark.parametrize(
         "backend_class,kwargs",
         [
-            (DockerApiBackend, {}),
+            # Provide a deterministic network so the backend doesn't need to
+            # auto-detect a Compose project network during simple instantiation.
+            (DockerApiBackend, {"network": "bridge"}),
             (FlyIOBackend, {"app_name": "test-app"}),
             (KubernetesBackend, {}),
         ],
