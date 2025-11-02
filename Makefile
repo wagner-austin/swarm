@@ -31,7 +31,7 @@ PYTHON  := $(RUN) python
 PIP     := $(RUN) pip
 RUFF    := $(RUN) ruff
 MYPY    := $(RUN) mypy
-PYTEST  := $(RUN) python -c "import scripts.guard_flushdb_runtime as _g, pytest, sys; _g.install(); sys.exit(pytest.main(['-rsxv']))"
+PYTEST  := $(RUN) python -c "import scripts.guard_flushdb_runtime as _g, pytest, sys; _g.install(); sys.exit(pytest.main(['-rsxv','--cov=swarm','--cov-report=term-missing']))"
 SWARM_TEST_MODE  := $(RUN) pytest -rsxv
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ check: lint test docker-status  ## run all checks (lint, test, show docker statu
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-test: install  ## run pytest suite (uses local Redis via TEST_COMPOSE_FILES in CI)
+test: install  ## run all tests (unit + integration) - requires docker services running
 	$(PYTEST)
 
 # ---------------------------------------------------------------------------
@@ -98,6 +98,9 @@ test: install  ## run pytest suite (uses local Redis via TEST_COMPOSE_FILES in C
 # ---------------------------------------------------------------------------
 start: install ## start ALL services and containers (default + test + profiles)
 	docker compose $(COMPOSE_FILES) $(START_PROFILE_FLAGS) up -d
+
+local: install ## start services using local Redis only (for dev when Upstash unreachable)
+	docker compose $(TEST_COMPOSE_FILES) $(START_PROFILE_FLAGS) up -d
 
 stop: ## stop ALL services and containers (keep volumes)
 	docker compose $(COMPOSE_FILES) $(START_PROFILE_FLAGS) down --remove-orphans
@@ -179,4 +182,3 @@ clean-all: ## DANGEROUS: system-wide wipe of ALL Docker data, then rebuild
 	@$(MAKE) -s docker-wipe-all
 	@echo "Rebuilding containers from scratch..."
 	@$(MAKE) -s rebuild
-
