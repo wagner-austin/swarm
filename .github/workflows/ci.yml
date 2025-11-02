@@ -98,16 +98,30 @@ jobs:
 
   integration-test:
     runs-on: ubuntu-latest
-    env:
-      REDIS_PASSWORD: testpass
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.7.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Generate CI Redis password
+        run: |
+          echo "REDIS_PASSWORD=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Validate docker-compose config
-        run: docker compose config --quiet
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml config --quiet
 
       - name: Build test images
         run: docker compose -f docker-compose.yml -f docker-compose.test.yml build
@@ -117,21 +131,23 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.test.yml up -d redis haproxy-redis
           sleep 5  # Wait for Redis to be ready
 
-      - name: Run integration tests with pytest
+      - name: Run integration tests with pytest (host)
+        run: |
+          poetry install --with dev
+          poetry run pytest tests/ -v -m "integration"
+
+      - name: Run Celery integration tests (in container)
         run: |
           docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm \
-            -e REDIS_PASSWORD=${REDIS_PASSWORD:-testpass} \
-            swarm poetry run pytest tests/ -v -m "integration"
+            --entrypoint "" \
+            -e REDIS_PASSWORD=${REDIS_PASSWORD} \
+            swarm python /app/scripts/test_celery_integration.py
 
-      - name: Run Celery integration tests
+      - name: Check monitoring health (in container)
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm swarm \
-            python /app/scripts/test_celery_integration.py
-
-      - name: Check monitoring health
-        run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm swarm \
-            python /app/scripts/check_monitoring.py || echo "Monitoring not critical for CI"
+          docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm \
+            --entrypoint "" \
+            swarm python /app/scripts/check_monitoring.py || echo "Monitoring not critical for CI"
 
       - name: Tear down test stack
         if: always()
