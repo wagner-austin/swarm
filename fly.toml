@@ -32,7 +32,7 @@ kill_timeout = 30
   autoscaler = "python -m scripts.celery_autoscaler --orchestrator=fly.io --fly-api-token=$FLY_API_TOKEN"
 
 # Health checks for each process type
-[[checks]]
+[checks.swarm]
   processes = ["swarm"]
   type = "http"
   port = 9200
@@ -41,7 +41,7 @@ kill_timeout = 30
   timeout = "5s"
   grace_period = "10s"
 
-[[checks]]
+[checks.worker]
   processes = ["worker"]
   type = "http"
   port = 9100
