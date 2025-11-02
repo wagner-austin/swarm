@@ -13,7 +13,7 @@ rules:
     max: 120
     level: warning
   new-lines:
-    type: platform  # Accept the platform's default line endings (unix on Linux/macOS, dos on Windows)
+    type: unix  # Enforce LF across platforms for consistent CI/CD and local dev
 
   truthy:
     allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
