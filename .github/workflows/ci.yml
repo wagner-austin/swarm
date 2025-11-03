@@ -154,7 +154,17 @@ jobs:
                 echo "Celery integration reported failures."
                 exit 1
               fi
-              poetry run python -m scripts.check_monitoring || echo "Monitoring not critical for CI"
+              # Standardized health checks via swarm.health (non-blocking in CI)
+              poetry run python -m swarm.health http --url http://prometheus:9090/-/ready \
+                || echo "Prometheus not reachable (non-critical)"
+              poetry run python -m swarm.health http --url http://grafana:3000/api/health \
+                || echo "Grafana not reachable (non-critical)"
+              poetry run python -m swarm.health http --url http://loki:3100/ready \
+                || echo "Loki not reachable (non-critical)"
+              poetry run python -m swarm.health http --url http://celery-exporter:9808/health \
+                || echo "Celery Exporter not reachable (non-critical)"
+              poetry run python -m swarm.health redis-ping --redis-url "$REDIS_URL" \
+                || echo "Redis ping failed (non-critical)"
             '
 
       - name: Tear down test stack
