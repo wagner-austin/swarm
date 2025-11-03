@@ -73,6 +73,7 @@ lint: install               ## ruff fix + ruff format + mypy strict type-check +
 	$(RUFF) format .
 	- $(RUFF) check . --select D401 --fix
 	$(MYPY) --strict swarm
+	$(PYTHON) scripts/guard_no_await_persona_visible_in_autocomplete.py swarm/
 	- fly config validate
 	$(PYTHON) scripts/guard_test_redis_safety.py
 	$(PYTHON) scripts/ruff_no_direct_discord_response.py swarm/ tests/
