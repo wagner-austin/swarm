@@ -154,16 +154,18 @@ jobs:
       - name: Create config directory for HAProxy
         run: mkdir -p config && chmod 777 config
 
-      - name: Start test stack (redis, haproxy, autoscaler)
+      - name: Start full test stack (redis, haproxy, autoscaler, monitoring)
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml --profile monitoring up -d redis haproxy-redis autoscaler
+          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+            --profile monitoring --profile observability \
+            up -d redis haproxy-redis autoscaler celery-exporter prometheus grafana loki alloy
           echo "Waiting for HAProxy to be healthy..."
           timeout 60 sh -c 'until docker compose -f docker-compose.yml -f docker-compose.test.yml ps | grep -q "haproxy-redis.*healthy"; do sleep 2; done' || {
             echo "HAProxy failed to become healthy, showing logs:"
             docker compose -f docker-compose.yml -f docker-compose.test.yml logs haproxy-redis
             exit 1
           }
-          echo "Waiting for autoscaler to create browser workers (30s)..."
+          echo "Waiting for autoscaler to stabilize (30s)..."
           sleep 30
 
       - name: Run integration tests (in container)
