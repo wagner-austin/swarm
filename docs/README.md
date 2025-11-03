@@ -30,7 +30,6 @@ Use this index to navigate project documentation.
   - `service-cleanup-tasks.md` â€” Cleanup plan and verification steps
 
 
-- docs/architecture-audit.md — Architecture audit findings
-- docs/security-audit-report.md — Security audit summary
-- docs/celery-migration.md — Celery migration notes
-
+- docs/architecture-audit.md - Architecture audit findings
+- docs/security-audit-report.md - Security audit summary
+- docs/celery-migration.md - Celery migration notes
