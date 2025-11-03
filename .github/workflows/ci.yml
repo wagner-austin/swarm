@@ -91,6 +91,7 @@ jobs:
           HP_URL="redis://default:${REDIS_PASSWORD}@redis:6379/0"
           printf "HAPROXY_REDIS_URLS=%s;%s\n" "$HP_URL" "$HP_URL" >> .env
           printf "USERPROFILE=%s\n" "$HOME" >> .env
+          printf "DOCKER_GID=%s\n" "$(stat -c '%g' /var/run/docker.sock)" >> .env
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
