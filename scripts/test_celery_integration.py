@@ -13,6 +13,7 @@ This script tests the complete Celery flow:
 """
 
 import asyncio
+import os
 import sys
 import time
 from datetime import datetime
@@ -34,7 +35,17 @@ async def test_redis_connection() -> bool:
     """Test Redis connectivity."""
     print("\n1. Testing Redis connection...")
     try:
-        r = redis_asyncio.from_url("redis://redis:6379/0")
+        # Prefer env-configured URLs; fall back to local with password if provided
+        url = (
+            os.getenv("REDIS_URL")
+            or os.getenv("REDIS__URL")
+            or (
+                f"redis://default:{os.getenv('REDIS_PASSWORD')}@redis:6379/0"
+                if os.getenv("REDIS_PASSWORD")
+                else "redis://redis:6379/0"
+            )
+        )
+        r = redis_asyncio.from_url(url)
 
         # Ping Redis using async method
         await r.ping()
