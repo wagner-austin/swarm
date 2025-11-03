@@ -66,13 +66,14 @@ install:            ## resolve & install all dependencies (incl. dev)
 # ---------------------------------------------------------------------------
 # Code quality
 # ---------------------------------------------------------------------------
-lint: install               ## ruff fix + ruff format + mypy strict type-check + yamllint
+lint: install               ## ruff fix + ruff format + mypy strict type-check + yamllint + fly.toml validation
 	$(PIP) install --quiet --disable-pip-version-check types-requests types-PyYAML
 	- $(RUN) yamllint .
 	- $(RUFF) check --fix .
 	$(RUFF) format .
 	- $(RUFF) check . --select D401 --fix
 	$(MYPY) --strict swarm
+	- fly config validate
 	$(PYTHON) scripts/guard_test_redis_safety.py
 	$(PYTHON) scripts/ruff_no_direct_discord_response.py swarm/ tests/
 	$(PYTHON) scripts/guard_no_direct_redis_refs.py swarm/
