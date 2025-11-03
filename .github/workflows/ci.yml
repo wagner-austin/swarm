@@ -58,57 +58,7 @@ jobs:
       - name: Check YAML files
         run: poetry run yamllint -c .yamllint .
 
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: 1.7.1
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v3
-        with:
-          path: .venv
-          key: venv-${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
-          restore-keys: venv-${{ matrix.python-version }}-
-
-      - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --with dev
-
-      - name: Install dependencies (cache hit)
-        if: steps.cached-poetry-dependencies.outputs.cache-hit == 'true'
-        run: poetry install --with dev --no-root
-
-      - name: Generate CI Redis password (unit tests)
-        run: |
-          echo "REDIS_PASSWORD=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
-
-      - name: Create minimal .env for unit tests
-        run: |
-          printf "REDIS_PASSWORD=%s\n" "$REDIS_PASSWORD" > .env
-          printf "REDIS__ENABLED=true\n" >> .env
-          printf "REDIS__URL=redis://default:%s@localhost:6380/0\n" "$REDIS_PASSWORD" >> .env
-          printf "REDIS_URL=redis://default:%s@localhost:6380/0\n" "$REDIS_PASSWORD" >> .env
-          printf "CELERY_BROKER_URLS=redis://default:%s@localhost:6380/0\n" "$REDIS_PASSWORD" >> .env
-
-      - name: Run unit tests (no Docker/Redis required)
-        run: poetry run pytest tests/ -v --cov=swarm --cov-report=term-missing -m "not integration"
+  # Removed separate 'test' job to avoid duplication. Full suite runs in integration-test.
 
   integration-test:
     runs-on: ubuntu-latest
