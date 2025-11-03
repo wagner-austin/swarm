@@ -92,6 +92,7 @@ jobs:
           printf "HAPROXY_REDIS_URLS=%s;%s\n" "$HP_URL" "$HP_URL" >> .env
           printf "USERPROFILE=%s\n" "$HOME" >> .env
           printf "DOCKER_GID=%s\n" "$(stat -c '%g' /var/run/docker.sock)" >> .env
+          echo "DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}" >> .env
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -102,14 +103,17 @@ jobs:
       - name: Build test images
         run: docker compose -f docker-compose.yml -f docker-compose.test.yml build
 
+      - name: Build worker image
+        run: docker build --target runtime-worker -t swarm-worker:latest .
+
       - name: Create config directory for HAProxy
         run: mkdir -p config && chmod 777 config
 
-      - name: Start full test stack (redis, haproxy, autoscaler, monitoring)
+      - name: Start full test stack (redis, haproxy, autoscaler, swarm, monitoring)
         run: |
           docker compose -f docker-compose.yml -f docker-compose.test.yml \
             --profile monitoring --profile observability \
-            up -d redis haproxy-redis autoscaler celery-exporter prometheus grafana loki alloy
+            up -d redis haproxy-redis autoscaler swarm celery-exporter prometheus grafana loki alloy
           echo "Waiting for HAProxy to be healthy..."
           timeout 60 sh -c 'until docker compose -f docker-compose.yml -f docker-compose.test.yml ps | grep -q "haproxy-redis.*healthy"; do sleep 2; done' || {
             echo "HAProxy failed to become healthy, showing logs:"
@@ -123,14 +127,16 @@ jobs:
         run: |
           docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm \
             --entrypoint "" \
-            -e REDIS_PASSWORD=${REDIS_PASSWORD} \
-            -e REDIS__URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
-            -e REDIS_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
-            -e CELERY_BROKER_URLS=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
             -e POETRY_VIRTUALENVS_CREATE=true \
             -e POETRY_VIRTUALENVS_IN_PROJECT=false \
             -e POETRY_VIRTUALENVS_PATH=/tmp/poetry-venvs \
-            swarm bash -lc "set -e; poetry install --with dev; poetry run pytest -v --cov=swarm --cov-report=term-missing; poetry run python -m scripts.test_celery_integration; poetry run python -m scripts.check_monitoring || echo 'Monitoring not critical for CI'"
+            swarm bash -lc "\
+              set -e; \
+              poetry install --with dev; \
+              poetry run pytest -v --cov=swarm --cov-report=term-missing; \
+              poetry run python -m scripts.test_celery_integration; \
+              poetry run python -m scripts.check_monitoring || echo 'Monitoring not critical for CI'\
+            "
 
       - name: Tear down test stack
         if: always()
