@@ -12,6 +12,9 @@ kill_timeout = 30
   LOG_FORMAT = "json"
   LOG_TO_FILE = "0"
   REDIS__ENABLED = "true"
+  # Explicitly provide app name for autoscaler backend safety
+  FLY_APP_NAME = "corvis-ai"
+  DEPLOYMENT_ENV = "production"
   
   # Metrics ports
   METRICS_PORT = "9200"         # Main swarm process
@@ -20,9 +23,9 @@ kill_timeout = 30
 
 # Required secrets - set these via `fly secrets set`:
 # - REDIS__URL: Full Redis URL including password (points to swarm-redis-proxy.internal:6380)
-# - CELERY_BROKER_URL: Same as REDIS__URL
+# - CELERY_BROKER_URLS: Same as REDIS__URL (or semicolon‑separated list for failover)
 # - DISCORD_TOKEN: Your Discord bot token
-# - FLY_API_TOKEN: For autoscaler to manage Fly machines
+# - FLY_API_TOKEN: For deploys and autoscaler backend access
 
 [processes]
   # Main Discord bot
@@ -30,7 +33,12 @@ kill_timeout = 30
   # Celery worker for browser automation
   worker = "/usr/local/bin/entrypoint.worker.sh"
   # Autoscaler using Fly.io backend (Flower-free)
-  autoscaler = "python -m scripts.celery_autoscaler --orchestrator=fly.io --fly-api-token=$FLY_API_TOKEN"
+  autoscaler = "python -m scripts.celery_autoscaler --orchestrator=fly"
+
+# VM resources per process group
+[[vm]]
+  memory = "1gb"
+  processes = ["worker"]
 
 # Health checks for each process type
 [checks.swarm]
@@ -59,15 +67,6 @@ kill_timeout = 30
   interval = "30s"
   timeout = "5s"
   grace_period = "10s"
-
-# Internal service for metrics/health - no public exposure needed
-[[services]]
-  processes = ["swarm"]
-  internal_port = 9200
-  protocol = "tcp"
-  
-  # No public ports - this is a Discord bot, not a web service
-  # Fly internal network allows metrics scraping
 
 [metrics]
   port = 9200
