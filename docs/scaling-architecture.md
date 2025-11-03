@@ -25,11 +25,11 @@ User -> Discord -> Swarm -> CeleryBrowserRuntime -> Celery -> Redis (via HAProxy
 The autoscaler service must be running for workers to be created:
 
 ```
-Autoscaler -> ScalingService -> Redis (check queues) -> ScalingBackend -> Docker/K8s/Fly
+Autoscaler -> Redis/Celery (queue depth) -> ScalingBackend -> Docker/K8s/Fly
 ```
 
 1. Autoscaler runs continuously (default: every 30s)
-2. `ScalingService.check_and_scale_all()` checks queue depths
+2. Reads Celery queue depth (via Kombu/Redis transport)
 3. Makes scaling decisions based on thresholds
 4. Executes scaling via the configured backend
 
@@ -84,7 +84,7 @@ Each worker type has scaling thresholds in `DistributedConfig`:
 
 All services connect to Redis through HAProxy (port 6380) which provides:
 - Automatic failover between Upstash (primary) and local Redis (backup)
-- Health checks every 3 seconds
+- Health checks every few seconds (per-server intervals)
 - Transparent to all services — they just connect to `haproxy-redis:6380`
 
 ### Workers Are NOT Created Automatically!
@@ -157,4 +157,3 @@ XRANGE scaling:events - +
 ### Integration Test Example
 
 See `tests/distributed/test_discord_to_worker_flow.py` for a complete example.
-
