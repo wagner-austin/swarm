@@ -154,7 +154,12 @@ jobs:
       - name: Start test stack
         run: |
           docker compose -f docker-compose.yml -f docker-compose.test.yml up -d redis haproxy-redis
-          sleep 5  # Wait for Redis to be ready
+          echo "Waiting for services to be healthy..."
+          timeout 60 sh -c 'until docker compose -f docker-compose.yml -f docker-compose.test.yml ps | grep -q "haproxy-redis.*healthy"; do sleep 2; done' || {
+            echo "HAProxy failed to become healthy, showing logs:"
+            docker compose -f docker-compose.yml -f docker-compose.test.yml logs haproxy-redis
+            exit 1
+          }
 
       - name: Run integration tests with pytest (host)
         run: |
