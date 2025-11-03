@@ -1,6 +1,6 @@
-# AI Task Execution System
+# Distributed Discord Automation System
 
-A distributed, AI-powered task execution platform that decomposes complex requests into subtasks and orchestrates specialized workers (browser automation, LLMs, etc.) to complete them.
+A Celery-powered Discord bot for Playwright browser automation with autoscaling, Redis high availability via HAProxy, and observability (Prometheus, Grafana, Loki). An optional LLM chat command is available via pluggable providers.
 
 ## What This Is
 
@@ -11,11 +11,13 @@ An intelligent assistant that can handle requests like:
 
 ## Key Features
 
-- Task decomposition into manageable subtasks
-- Distributed workers that scale from 1 to 1000+
-- Multiple frontends (Discord today; more can be added)
-- Capability-based routing and session affinity
-- Strict typing (mypy --strict) and safety guards
+- Slash-command Discord frontend
+- Playwright browser automation with session affinity
+- Distributed Celery workers; scale from 1 to 1000+
+- Autoscaling driven by queue depth (Flower-free)
+- Redis HA via HAProxy (Upstash + local)
+- Strict typing (mypy --strict) and guard scripts
+- Optional LLM chat command via providers
 
 ## Quick Start
 
@@ -56,11 +58,9 @@ docker compose logs -f swarm  # View swarm logs
 docker compose logs -f autoscaler
 ```
 
-Production (Kubernetes):
-```bash
-kubectl apply -f k8s/
-kubectl scale deployment/worker --replicas=50
-```
+Production (Fly.io):
+- See `docs/fly-deployment.md` for deployment to Fly.io.
+- Kubernetes manifests are not included in this repository yet.
 
 ## Architecture
 
