@@ -146,15 +146,6 @@ class CeleryAutoscaler:
             except NotImplementedError:
                 pass
 
-    def _make_signal_handler(self, sig: signal.Signals) -> "Callable[[], None]":
-        """Return a zero-arg callback that schedules async shutdown for `sig`."""
-
-        def _handler() -> None:
-            # Schedule the async shutdown task and return immediately
-            asyncio.create_task(self._on_signal(sig))
-
-        return _handler
-
         # Optional Prometheus metrics endpoint for autoscaler
         port_str = os.getenv("AUTOSCALER_METRICS_PORT")
         if port_str:
@@ -164,6 +155,15 @@ class CeleryAutoscaler:
                 logger.info(f"Autoscaler metrics server started on :{port}")
             except Exception as e:
                 logger.warning(f"Failed to start autoscaler metrics endpoint: {e}")
+
+    def _make_signal_handler(self, sig: signal.Signals) -> "Callable[[], None]":
+        """Return a zero-arg callback that schedules async shutdown for `sig`."""
+
+        def _handler() -> None:
+            # Schedule the async shutdown task and return immediately
+            asyncio.create_task(self._on_signal(sig))
+
+        return _handler
 
     async def _on_signal(self, sig: signal.Signals) -> None:
         """Handle shutdown signals."""
