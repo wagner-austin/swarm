@@ -138,7 +138,8 @@ jobs:
           printf "REDIS__URL=redis://default:%s@haproxy-redis:6380/0\n" "$REDIS_PASSWORD" >> .env
           printf "REDIS_URL=redis://default:%s@haproxy-redis:6380/0\n" "$REDIS_PASSWORD" >> .env
           printf "CELERY_BROKER_URLS=redis://default:%s@haproxy-redis:6380/0\n" "$REDIS_PASSWORD" >> .env
-          printf "HAPROXY_REDIS_URLS=redis://default:%s@redis:6379/0;redis://default:%s@redis:6379/0\n" "$REDIS_PASSWORD" "$REDIS_PASSWORD" >> .env
+          HP_URL="redis://default:${REDIS_PASSWORD}@redis:6379/0"
+          printf "HAPROXY_REDIS_URLS=%s;%s\n" "$HP_URL" "$HP_URL" >> .env
           printf "USERPROFILE=%s\n" "$HOME" >> .env
 
       - name: Set up Docker Buildx
