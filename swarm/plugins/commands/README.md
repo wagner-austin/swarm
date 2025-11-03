@@ -20,16 +20,14 @@ The browser automation plugin provides a set of commands for controlling a Chrom
 
 | Command | Arguments | Description |
 |---------|-----------|-------------|
-| `!browser` | - | Shows usage information for browser commands |
-| `!browser start` | `<url> [visible]` | Starts a browser session, optionally navigates to a URL and makes it visible |
-| `!browser open` | `<url>` | Navigates to a URL in the active browser session (per-channel session affinity) |
-| `!browser close` | - | Closes the active browser session |
-| `!browser screenshot` | `[filename]` | Takes a screenshot and sends it in the chat (uses the channel’s session) |
-| `!browser status` | - | Checks if the browser is running |
+| `/web start` | `[url]` | Starts a browser session and optionally navigates to a URL |
+| `/web open` | `<url>` | Navigates to a URL in the active session (per-channel affinity) |
+| `/web screenshot` | `[filename]` | Takes a screenshot and sends it in chat (channel session) |
+| `/web status` | - | Shows browser status for the channel session |
 
 #### Implementation Notes
 
-- Commands are defined in `browser.py`
+- Commands are defined in `web.py`
 - Error handling for unknown commands is implemented
 - Timeout mechanism prevents hanging during browser initialization
 - Close and stop functionalities are implemented by the same method
@@ -37,7 +35,7 @@ The browser automation plugin provides a set of commands for controlling a Chrom
 #### Example Usage
 
 ```
-!browser start https://example.com visible
-!browser screenshot
-!browser close
+/web start https://example.com
+/web screenshot
+/web status
 ```
