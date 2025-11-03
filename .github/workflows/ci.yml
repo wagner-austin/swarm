@@ -119,7 +119,7 @@ jobs:
           echo "Waiting for autoscaler to stabilize (30s)..."
           sleep 30
 
-      - name: Run full test suite (in container)
+      - name: Run full test suite and checks (in container)
         run: |
           docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm \
             --entrypoint "" \
@@ -130,20 +130,7 @@ jobs:
             -e POETRY_VIRTUALENVS_CREATE=true \
             -e POETRY_VIRTUALENVS_IN_PROJECT=false \
             -e POETRY_VIRTUALENVS_PATH=/tmp/poetry-venvs \
-            swarm bash -lc "poetry install --with dev && poetry run pytest -v"
-
-      - name: Run Celery integration tests (in container)
-        run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm \
-            --entrypoint "" \
-            -e REDIS_PASSWORD=${REDIS_PASSWORD} \
-            swarm python /app/scripts/test_celery_integration.py
-
-      - name: Check monitoring health (in container)
-        run: |
-          docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm \
-            --entrypoint "" \
-            swarm python /app/scripts/check_monitoring.py || echo "Monitoring not critical for CI"
+            swarm bash -lc "set -e; poetry install --with dev; poetry run pytest -v --cov=swarm --cov-report=term-missing; poetry run python -m scripts.test_celery_integration; poetry run python -m scripts.check_monitoring || echo 'Monitoring not critical for CI'"
 
       - name: Tear down test stack
         if: always()
