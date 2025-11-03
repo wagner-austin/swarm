@@ -56,7 +56,9 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app /app
 
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY scripts/entrypoint.worker.sh /usr/local/bin/entrypoint.worker.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
+ && chmod +x /usr/local/bin/entrypoint.worker.sh \
  && useradd -u 1001 -ms /bin/bash pwuser \
  && mkdir -p /app/logs \
  && chown -R pwuser:pwuser /app/logs
@@ -90,7 +92,9 @@ RUN chmod -R 755 /opt/ms-playwright
 # Entrypoint and user
 COPY scripts/entrypoint.worker.sh /usr/local/bin/entrypoint.worker.sh
 RUN chmod +x /usr/local/bin/entrypoint.worker.sh \
- && useradd -u 1001 -ms /bin/bash pwuser
+ && useradd -u 1001 -ms /bin/bash pwuser \
+ && mkdir -p /app/logs \
+ && chown -R pwuser:pwuser /app/logs
 USER pwuser
 
 # Tell Playwright where to find browsers
@@ -132,3 +136,12 @@ RUN pip uninstall -y playwright pyppeteer pyee greenlet playwright-stealth 2>/de
 
 WORKDIR /app
 CMD ["python", "-m", "scripts.celery_autoscaler"]
+
+###############################################################################
+# 7. RELEASE – default image for Fly (worker superset)
+###############################################################################
+# Make the final image include Playwright + Chromium so both the swarm and
+# worker processes can import and run browser code. Fly will build the final
+# stage by default unless a target is specified.
+FROM runtime-worker AS release
+ENTRYPOINT []
