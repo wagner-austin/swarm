@@ -7,7 +7,7 @@ This document outlines a production-grade solution for browser session affinity 
 Implementation notes (current state):
 - Session affinity is identified by a `session_id` kwarg on all `browser.*` tasks.
 - The affinity router uses Redis key `browser:affinity:{session_id}` to route to a worker’s direct queue `browser.direct.{worker_id}`.
-- Worker liveness is tracked by the WorkerLifecycle heartbeat in Redis keys `browser:worker:{worker_id}`. The Discord BrowserHealthMonitor counts these keys to determine pool health (no Celery control ping is used for gating).
+- Worker liveness is tracked by standardized heartbeat keys `worker:heartbeat:browser:{worker_id}` (TTL denotes liveness). The BrowserHealthMonitor counts TTL-healthy heartbeats via server-side Lua; no Celery control ping is used for gating.
 
 ## Key Improvements Over Initial Design
 
