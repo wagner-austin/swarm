@@ -1,16 +1,12 @@
+import asyncio
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands  # For commands.Bot, commands.Cog
 
-from swarm.ai import providers as _providers
+from swarm.ai import personas as personas, providers as _providers
 from swarm.ai.contracts import Message
-from swarm.ai.personas import (
-    PERSONALITIES,
-    prompt as persona_prompt,
-    visible as persona_visible,
-)
 from swarm.core.exceptions import ModelOverloaded
 from swarm.core.settings import DISCORD_LIMIT, settings  # fully typed alias
 
@@ -23,8 +19,8 @@ INTERNAL_ERROR = "An internal error occurred. Please try again later."
 
 logger = logging.getLogger(__name__)
 
-# Static fallback list for autocomplete defaults
-_ALL_CHOICES = [app_commands.Choice(name=k.capitalize(), value=k) for k in PERSONALITIES.keys()]
+# Note: Avoid binding mutable persona registries at import time to prevent
+# stale references across module reloads in tests.
 
 # Global system instruction applied to every persona
 DEFAULT_SYSTEM_PROMPT = "Always include your name at the beginning of a response."
@@ -39,6 +35,18 @@ class Chat(commands.Cog):
         # Conversation history backend (DI required – no fallback)
         self._history: HistoryBackend = history_backend
         logger.info("[Chat] Using history backend: %s", type(self._history).__name__)
+
+    async def cog_load(self) -> None:
+        """Warm minimal caches to avoid first-hit latency during autocomplete."""
+        try:
+            # Owner cache warmup is best-effort and strictly time-bounded.
+            from swarm.frontends.discord.discord_owner import get_owner
+
+            await asyncio.wait_for(get_owner(self.bot), timeout=1.5)
+        except Exception:
+            # Non-fatal: if owner cannot be resolved quickly, autocomplete will
+            # simply omit owner-only personas until later.
+            pass
 
     async def cog_unload(self) -> None:
         """Clean up resources when the cog is unloaded."""
@@ -64,7 +72,7 @@ class Chat(commands.Cog):
         # Handle clearing history first
         if clear:
             chan_id_clear: int = interaction.channel_id or 0
-            if personality is not None and not await persona_visible(
+            if personality is not None and not await personas.visible(
                 personality, interaction.user.id, self.bot
             ):
                 await safe_send(
@@ -107,7 +115,7 @@ class Chat(commands.Cog):
             or 0
         )
 
-        if personality is not None and await persona_visible(
+        if personality is not None and await personas.visible(
             personality, interaction.user.id, self.bot
         ):
             # Explicit valid choice – remember it for this channel
@@ -116,15 +124,15 @@ class Chat(commands.Cog):
             # Either no choice or invalid/stale choice – fall back
             # Fallback to default persona
             personality = self._channel_persona.get(channel_id_int, "Default")
-            if personality not in PERSONALITIES:
+            if personality not in personas.PERSONALITIES:
                 personality = "Default"
 
         # Visibility check
-        if not await persona_visible(personality, interaction.user.id, self.bot):
+        if not await personas.visible(personality, interaction.user.id, self.bot):
             await safe_send(interaction, "You are not allowed to use that persona.", ephemeral=True)
             return
 
-        persona_prompt_str: str = persona_prompt(personality)
+        persona_prompt_str: str = personas.prompt(personality)
 
         final_system_prompt = DEFAULT_SYSTEM_PROMPT + "\n\n" + persona_prompt_str
 
@@ -231,16 +239,20 @@ class Chat(commands.Cog):
     async def personality_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        visible_choices = []
-        for k in PERSONALITIES:
-            if await persona_visible(k, interaction.user.id, self.bot):
-                visible_choices.append(app_commands.Choice(name=k.capitalize(), value=k))
+        # Zero I/O fast path: compute visibility locally to meet Discord's ~3s autocomplete SLA.
+        user_id: int = interaction.user.id
+        owner_id: int | None = self.bot.owner_id if getattr(self.bot, "owner_id", None) else None
 
-        if not current:
-            return visible_choices[:25]
+        names: list[str] = []
+        for name in personas.PERSONALITIES.keys():
+            if personas.visible_local(name, user_id, owner_id=owner_id):
+                names.append(name)
 
-        lowered = current.lower()
-        return [c for c in visible_choices if lowered in c.name.lower()][:25]
+        if current:
+            lowered = current.lower()
+            names = [n for n in names if lowered in n.lower()]
+
+        return [app_commands.Choice(name=n.capitalize(), value=n) for n in names][:25]
 
     # ------------------------------------------------------------------
     # /chat round-table
