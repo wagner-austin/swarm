@@ -183,6 +183,7 @@ async def safe_send(
                 content or "",
                 embed=embed,
                 file=file,
+                ephemeral=ephemeral,
                 suppress_embeds=suppress_embeds,
                 silent=silent,
                 tts=tts,
@@ -191,6 +192,7 @@ async def safe_send(
             await interaction.followup.send(
                 content or "",
                 embed=embed,
+                ephemeral=ephemeral,
                 suppress_embeds=suppress_embeds,
                 silent=silent,
                 tts=tts,
@@ -199,6 +201,7 @@ async def safe_send(
             await interaction.followup.send(
                 content or "",
                 file=file,
+                ephemeral=ephemeral,
                 suppress_embeds=suppress_embeds,
                 silent=silent,
                 tts=tts,
@@ -206,6 +209,7 @@ async def safe_send(
         else:
             await interaction.followup.send(
                 content or "",
+                ephemeral=ephemeral,
                 suppress_embeds=suppress_embeds,
                 silent=silent,
                 tts=tts,
@@ -218,6 +222,10 @@ async def safe_send(
         # last resort fall back to the interaction's channel.
         chan = getattr(interaction, "channel", None)
         target = chan if isinstance(chan, discord.abc.Messageable) else None
+
+    # If ephemerality was requested, do not leak via channel sends.
+    if ephemeral:
+        return
 
     if target is None:  # DM or unknown channel; nothing more we can do.
         return

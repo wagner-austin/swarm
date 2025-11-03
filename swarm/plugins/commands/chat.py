@@ -53,7 +53,7 @@ class Chat(commands.Cog):
         clear="If true, reset conversation history instead",
         personality="Pick a persona",
     )
-    @background_app_command(defer_ephemeral=False)
+    @background_app_command(defer_ephemeral=True)
     async def chat(
         self,
         interaction: discord.Interaction,
@@ -198,7 +198,7 @@ class Chat(commands.Cog):
         # Wrap response in Discord code blocks and chunk if necessary
         if len(response_text) + 10 <= DISCORD_CHAR_LIMIT:
             # Single-message response – simple code block
-            await safe_send(interaction, f"```text\n{response_text}\n```")
+            await safe_send(interaction, f"```text\n{response_text}\n```", ephemeral=True)
         else:
             # Determine the maximum prefix length (e.g. "[Part 10/10]\n") so we can
             # make sure each chunk, plus its prefix *inside* the code-block fence, is
@@ -221,6 +221,7 @@ class Chat(commands.Cog):
                 await safe_send(
                     interaction,
                     f"```text\n{part_prefix}{chunk}\n```",
+                    ephemeral=True,
                 )
 
         # Record the turn in history
