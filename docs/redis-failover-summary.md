@@ -35,11 +35,16 @@ make start
 - HAProxy Stats: http://localhost:8080/stats — Redis backend health
 - Check failover: `redis-cli -h localhost -p 6380 ping`
 
-### Environment Variables (HAProxy-only)
-Use HAProxy as the single ingress for all services:
+### Environment Variables
+
+1) HAProxy backends (set in `.env`, mapped to the container as `CELERY_BROKER_URLS`):
+```bash
+HAPROXY_REDIS_URLS="rediss://default:${REDIS_PASSWORD}@your-upstash-host.upstash.io:6379/0;redis://default:${REDIS_PASSWORD}@redis:6379/0"
+```
+
+2) App services (connect to HAProxy at 6380):
 ```bash
 REDIS__URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
-HAPROXY_REDIS_URLS="rediss://default:${REDIS_PASSWORD}@your-upstash-host.upstash.io:6379/0;redis://default:${REDIS_PASSWORD}@redis:6379/0"
 CELERY_BROKER_URLS=${REDIS__URL}
 ```
 
@@ -90,4 +95,3 @@ Supports resilience, scalability, platform-agnostic design, and production-grade
 
 ### Observability
 Use HAProxy stats and Prometheus/Grafana dashboards to verify system health.
-
