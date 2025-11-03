@@ -115,7 +115,13 @@ jobs:
             --profile monitoring --profile observability \
             up -d redis haproxy-redis autoscaler swarm celery-exporter prometheus grafana loki alloy
           echo "Waiting for HAProxy to be healthy..."
-          timeout 60 sh -c 'until docker compose -f docker-compose.yml -f docker-compose.test.yml ps | grep -q "haproxy-redis.*healthy"; do sleep 2; done' || {
+          timeout 60 bash -lc '
+            set -e
+            until docker compose -f docker-compose.yml -f docker-compose.test.yml ps |
+                 grep -q "haproxy-redis.*healthy"; do
+              sleep 2
+            done
+          ' || {
             echo "HAProxy failed to become healthy, showing logs:"
             docker compose -f docker-compose.yml -f docker-compose.test.yml logs haproxy-redis
             exit 1
@@ -130,13 +136,13 @@ jobs:
             -e POETRY_VIRTUALENVS_CREATE=true \
             -e POETRY_VIRTUALENVS_IN_PROJECT=false \
             -e POETRY_VIRTUALENVS_PATH=/tmp/poetry-venvs \
-            swarm bash -lc "\
-              set -e; \
-              poetry install --with dev; \
-              poetry run pytest -v --cov=swarm --cov-report=term-missing; \
-              poetry run python -m scripts.test_celery_integration; \
-              poetry run python -m scripts.check_monitoring || echo 'Monitoring not critical for CI'\
-            "
+            swarm bash -lc '
+              set -e
+              poetry install --with dev
+              poetry run pytest -v --cov=swarm --cov-report=term-missing
+              poetry run python -m scripts.test_celery_integration
+              poetry run python -m scripts.check_monitoring || echo "Monitoring not critical for CI"
+            '
 
       - name: Tear down test stack
         if: always()
