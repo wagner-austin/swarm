@@ -168,7 +168,7 @@ jobs:
           echo "Waiting for autoscaler to stabilize (30s)..."
           sleep 30
 
-      - name: Run integration tests (in container)
+      - name: Run full test suite (in container)
         run: |
           docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm \
             --entrypoint "" \
@@ -176,7 +176,7 @@ jobs:
             -e REDIS__URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
             -e REDIS_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
             -e CELERY_BROKER_URLS=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
-            swarm bash -lc "poetry install --with dev && poetry run pytest tests/ -v -m 'integration'"
+            swarm bash -lc "poetry install --with dev && poetry run pytest -v"
 
       - name: Run Celery integration tests (in container)
         run: |
