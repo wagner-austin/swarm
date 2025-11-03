@@ -53,7 +53,7 @@ jobs:
             echo "Forbidden type: ignore found in app code" >&2; exit 1; fi
 
       - name: Run mypy
-        run: poetry run mypy --strict .
+        run: poetry run mypy --strict
 
       - name: Check YAML files
         run: poetry run yamllint -c .yamllint .
