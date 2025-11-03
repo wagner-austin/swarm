@@ -125,10 +125,6 @@ This project uses production-grade standards:
 - Integration tests prioritized over mocks
 - Clear documentation for decisions
 
-## License
-
-See `LICENSE`.
-
 ---
 
 ## Contracts
