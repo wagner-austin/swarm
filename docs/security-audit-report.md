@@ -55,7 +55,7 @@ Out of scope (accepted risk per stakeholder): application-level rate limiting.
 
 ## 2. Screenshot Saving and Filenames
 
-- Prior reportâ€™s path traversal concern on user-supplied `filename` is not applicable.
+- Prior reportÃ¢â‚¬â„¢s path traversal concern on user-supplied `filename` is not applicable.
   - The Discord `filename` parameter is used only as the attachment filename in the reply; it is not used to write server-side files.
   - Worker writes screenshots to a temp path derived from `session_id` and `pid`, not from the user-supplied name:
     - Evidence: `swarm/tasks/browser.py:380`
@@ -82,7 +82,7 @@ Out of scope (accepted risk per stakeholder): application-level rate limiting.
   - Owner-only check: `swarm/plugins/commands/shutdown.py:55`
   - Admin-only via default permissions: `swarm/plugins/commands/persona_admin.py: @app_commands.default_permissions(administrator=True)`
   - `/web` commands (`start`, `open`, `screenshot`, `status`) are open to channel members; session id is tied to the current channel, not user.
-- The earlier claim that â€œany channelâ€™s session can be accessed arbitrarilyâ€ is not accurate; commands do not accept cross-channel session ids.
+- The earlier claim that Ã¢â‚¬Å“any channelÃ¢â‚¬â„¢s session can be accessed arbitrarilyÃ¢â‚¬Â is not accurate; commands do not accept cross-channel session ids.
 - However, because `/web open` is public, file:// risk (Section 1.2) applies to any channel where the bot is present.
 - Recommendation: Define a consistent policy for `/web` usage (e.g., restrict to admins, specific roles, or dedicated channels) and/or gate risky schemes.
 
@@ -188,7 +188,7 @@ Out of scope (accepted risk per stakeholder): application-level rate limiting.
 
 - Removed the path traversal finding on screenshot filenames (not applicable: server writes do not use user-supplied names).
 - Corrected claim about cross-channel session access: `/web` commands are tied to the current channel; no parameter to target arbitrary channels.
-- Redis key â€œinjectionâ€ remains theoretical for current `/web` entry points; severity lowered to Low with a future risk note.
+- Redis key Ã¢â‚¬Å“injectionÃ¢â‚¬Â remains theoretical for current `/web` entry points; severity lowered to Low with a future risk note.
 - Rate limiting is explicitly marked out-of-scope per stakeholder direction.
 
 ### Issue Location
@@ -226,7 +226,7 @@ Direct string conversion of complex data structures without proper formatting.
 
 ## 2. Input Validation & Sanitization
 
-### 2.1 URL Validation âœ… GOOD
+### 2.1 URL Validation Ã¢Å“â€¦ GOOD
 **Location:** `swarm/utils/urls.py:13-52`
 
 **Strengths:**
@@ -252,7 +252,7 @@ def validate_and_normalise_web_url(raw: str, *, allowed_hosts: Iterable[str] | N
 
 ---
 
-### 2.2 Session ID Validation âŒ CRITICAL GAP
+### 2.2 Session ID Validation Ã¢ÂÅ’ CRITICAL GAP
 
 **Location:** Multiple files (`web.py`, `tasks/browser.py`, `tasks/_base.py`)
 
@@ -302,7 +302,7 @@ If `session_id` could be manipulated to contain `:` characters or be set to a di
 
 ---
 
-### 2.3 Filename Validation âš ï¸ MODERATE RISK
+### 2.3 Filename Validation Ã¢Å¡Â Ã¯Â¸Â MODERATE RISK
 
 **Location:** `web.py:199-209`
 
@@ -345,9 +345,9 @@ Unlike SQL, Redis doesn't have traditional injection, but key manipulation is po
 - Wildcards (`*`, `?`) - if used in key scanning operations
 
 **Current Safety:**
-âœ… Session IDs from Discord are safe (integers)
-âœ… Worker hostnames are from system, not user input
-âŒ No validation layer prevents unsafe strings
+Ã¢Å“â€¦ Session IDs from Discord are safe (integers)
+Ã¢Å“â€¦ Worker hostnames are from system, not user input
+Ã¢ÂÅ’ No validation layer prevents unsafe strings
 
 ---
 
@@ -359,7 +359,7 @@ Unlike SQL, Redis doesn't have traditional injection, but key manipulation is po
 - `redis.delete()` - Safe (parameterized)
 - `redis.hget()` - Safe (parameterized)
 
-**No Lua eval()** - âœ… GOOD (checked, none found in production code)
+**Lua usage present** - OK with guardrails (typed helpers only). Redis Lua is used in `swarm/infra/redis_lua.py` for TTL counting, heartbeat pulse, and batch LLEN. Usage is centralized and typed; no ad-hoc EVAL in application logic.
 
 **Severity: MEDIUM**
 - Current implementation is safe
@@ -370,7 +370,7 @@ Unlike SQL, Redis doesn't have traditional injection, but key manipulation is po
 
 ## 4. Rate Limiting Analysis
 
-### 4.1 Command-Level Rate Limiting âŒ MISSING
+### 4.1 Command-Level Rate Limiting Ã¢ÂÅ’ MISSING
 
 **Discord Commands Analyzed:**
 - `/web start` - No rate limit
@@ -407,15 +407,15 @@ Result: 60 browser screenshot operations, potential resource exhaustion
    - **NOT used for limiting users**
 
 **What's Missing:**
-1. âŒ Per-user rate limiting
-2. âŒ Per-IP rate limiting (N/A for Discord, but critical for future HTTP API)
-3. âŒ Per-endpoint rate limiting
-4. âŒ Concurrent operation limiting (e.g., max 5 browser sessions per user)
-5. âŒ Resource quotas (e.g., max 100 screenshots per day)
+1. Ã¢ÂÅ’ Per-user rate limiting
+2. Ã¢ÂÅ’ Per-IP rate limiting (N/A for Discord, but critical for future HTTP API)
+3. Ã¢ÂÅ’ Per-endpoint rate limiting
+4. Ã¢ÂÅ’ Concurrent operation limiting (e.g., max 5 browser sessions per user)
+5. Ã¢ÂÅ’ Resource quotas (e.g., max 100 screenshots per day)
 
 ---
 
-### 4.3 Celery Task Rate Limiting âš ï¸ PARTIAL
+### 4.3 Celery Task Rate Limiting Ã¢Å¡Â Ã¯Â¸Â PARTIAL
 
 **Celery Queue Configuration:**
 - Tasks queued to `"browser"` queue
@@ -439,10 +439,10 @@ Single user can flood the task queue, causing DoS for other users.
 # swarm/plugins/commands/shutdown.py:55-57
 owner = await self.get_owner(self.discord_bot)
 if interaction.user.id != owner.id:
-    await self.safe_send(interaction, "âŒ Owner only.", ephemeral=True)
+    await self.safe_send(interaction, "Ã¢ÂÅ’ Owner only.", ephemeral=True)
     return
 ```
-âœ… **Used in:** `/shutdown`
+Ã¢Å“â€¦ **Used in:** `/shutdown`
 
 #### Pattern 2: Decorator-Based Permissions
 ```python
@@ -450,7 +450,7 @@ if interaction.user.id != owner.id:
 @app_commands.command(name="list", description="Show all personas")
 @app_commands.default_permissions(administrator=True)
 ```
-âœ… **Used in:** `/persona` commands
+Ã¢Å“â€¦ **Used in:** `/persona` commands
 
 #### Pattern 3: No Authorization (Public)
 ```python
@@ -459,7 +459,7 @@ if interaction.user.id != owner.id:
 async def start(self, interaction: discord.Interaction, url: str | None = None) -> None:
     # Anyone can use this
 ```
-âŒ **Used in:** `/web start`, `/web open`, `/web screenshot`, `/web status`
+Ã¢ÂÅ’ **Used in:** `/web start`, `/web open`, `/web screenshot`, `/web status`
 
 ---
 
@@ -518,7 +518,7 @@ session_id = f"discord:{guild_id}:{channel_id}"
 
 ## 6. Type Safety & Strong Typing
 
-### âœ… Strengths
+### Ã¢Å“â€¦ Strengths
 
 1. **MyPy Strict Mode** - `make check` runs mypy
 2. **Type annotations everywhere** - Functions, parameters, returns
@@ -532,7 +532,7 @@ async def status(
 ) -> dict[str, Any]:
 ```
 
-### âš ï¸ Limitations
+### Ã¢Å¡Â Ã¯Â¸Â Limitations
 
 1. **Runtime validation missing**
    - MyPy checks types, not values
@@ -550,7 +550,7 @@ async def status(
 
 ## 7. Prepared Statements (N/A - No SQL)
 
-âœ… **GOOD NEWS:** No SQL database in use.
+Ã¢Å“â€¦ **GOOD NEWS:** No SQL database in use.
 
 **Current Database:**
 - Redis only (key-value store)
@@ -567,20 +567,20 @@ If SQL is added later, ensure:
 
 ## 8. Error Handling & Information Disclosure
 
-### 8.1 Comprehensive Error Handling âœ…
+### 8.1 Comprehensive Error Handling Ã¢Å“â€¦
 
 **Example from `web.py:113-139`:**
 ```python
 except ValueError as e:
-    await self.safe_send(interaction, f"âŒ Invalid URL: {e}. ...", ephemeral=True)
+    await self.safe_send(interaction, f"Ã¢ÂÅ’ Invalid URL: {e}. ...", ephemeral=True)
 except WorkerUnavailableError:
-    await self.safe_send(interaction, "âš ï¸ Browser workers temporarily unavailable...", ephemeral=True)
+    await self.safe_send(interaction, "Ã¢Å¡Â Ã¯Â¸Â Browser workers temporarily unavailable...", ephemeral=True)
 except OperationTimeoutError:
-    await self.safe_send(interaction, "â±ï¸ Browser startup timed out...", ephemeral=True)
+    await self.safe_send(interaction, "Ã¢ÂÂ±Ã¯Â¸Â Browser startup timed out...", ephemeral=True)
 except BrowserError:
-    await self.safe_send(interaction, "ðŸŒ Browser error occurred...", ephemeral=True)
+    await self.safe_send(interaction, "Ã°Å¸Å’Â Browser error occurred...", ephemeral=True)
 else:
-    await self.safe_send(interaction, f"âŒ Failed to start browser: {exc}", ephemeral=True)
+    await self.safe_send(interaction, f"Ã¢ÂÅ’ Failed to start browser: {exc}", ephemeral=True)
 ```
 
 **Strengths:**
@@ -588,11 +588,11 @@ else:
 - User-friendly error messages
 - Logging for debugging
 
-### âš ï¸ Information Disclosure Risk
+### Ã¢Å¡Â Ã¯Â¸Â Information Disclosure Risk
 
 **Line 137:**
 ```python
-await self.safe_send(interaction, f"âŒ Failed to start browser: {exc}", ephemeral=True)
+await self.safe_send(interaction, f"Ã¢ÂÅ’ Failed to start browser: {exc}", ephemeral=True)
 ```
 
 **Issue:** Fallback handler leaks raw exception message to user
@@ -630,7 +630,7 @@ await self.safe_send(interaction, f"âŒ Failed to start browser: {exc}", ephe
 
 ---
 
-### 9.3 Secrets Management âœ… GOOD
+### 9.3 Secrets Management Ã¢Å“â€¦ GOOD
 
 **From `alert_pump.py` and `celery_app.py`:**
 - Uses environment variables for secrets
@@ -725,7 +725,7 @@ async def start(self, interaction: discord.Interaction, url: str | None = None):
     if not await rate_limiter.check(interaction.user.id):
         await self.safe_send(
             interaction,
-            "â±ï¸ Rate limit exceeded. Please wait before using this command again.",
+            "Ã¢ÂÂ±Ã¯Â¸Â Rate limit exceeded. Please wait before using this command again.",
             ephemeral=True
         )
         return
@@ -795,12 +795,12 @@ def require_permission(permission: str = "user"):
             if permission == "owner":
                 owner = await get_owner(self.discord_bot)
                 if interaction.user.id != owner.id:
-                    await safe_send(interaction, "âŒ Owner only.", ephemeral=True)
+                    await safe_send(interaction, "Ã¢ÂÅ’ Owner only.", ephemeral=True)
                     return
 
             elif permission == "admin":
                 if not interaction.user.guild_permissions.administrator:
-                    await safe_send(interaction, "âŒ Administrator only.", ephemeral=True)
+                    await safe_send(interaction, "Ã¢ÂÅ’ Administrator only.", ephemeral=True)
                     return
 
             # permission == "user" allows everyone
@@ -852,7 +852,7 @@ except Exception as exc:
     # Send generic error to user
     await self.safe_send(
         interaction,
-        "âŒ An unexpected error occurred. Please try again later.",
+        "Ã¢ÂÅ’ An unexpected error occurred. Please try again later.",
         ephemeral=True
     )
 ```
@@ -863,7 +863,7 @@ except Exception as exc:
 @app_commands.describe(url="URL (max 2048 chars)")
 async def open(self, interaction: discord.Interaction, url: str) -> None:
     if len(url) > 2048:
-        await self.safe_send(interaction, "âŒ URL too long (max 2048 chars)", ephemeral=True)
+        await self.safe_send(interaction, "Ã¢ÂÅ’ URL too long (max 2048 chars)", ephemeral=True)
         return
     # ... rest of command
 ```
@@ -969,15 +969,15 @@ def test_filename_sanitization():
 
 | Standard | Requirement | Status | Gap |
 |----------|-------------|--------|-----|
-| OWASP Top 10 | Input validation | âš ï¸ Partial | Session IDs not validated |
-| OWASP Top 10 | Authentication | âœ… Good | Discord handles auth |
-| OWASP Top 10 | Authorization | âŒ Poor | Inconsistent, no RBAC |
-| OWASP Top 10 | Rate limiting | âŒ Missing | No application-level limits |
-| OWASP Top 10 | Error handling | âš ï¸ Partial | Some info disclosure |
+| OWASP Top 10 | Input validation | Ã¢Å¡Â Ã¯Â¸Â Partial | Session IDs not validated |
+| OWASP Top 10 | Authentication | Ã¢Å“â€¦ Good | Discord handles auth |
+| OWASP Top 10 | Authorization | Ã¢ÂÅ’ Poor | Inconsistent, no RBAC |
+| OWASP Top 10 | Rate limiting | Ã¢ÂÅ’ Missing | No application-level limits |
+| OWASP Top 10 | Error handling | Ã¢Å¡Â Ã¯Â¸Â Partial | Some info disclosure |
 | CWE-89 | SQL Injection | N/A | No SQL database |
 | CWE-79 | XSS | N/A | No web UI (yet) |
-| CWE-22 | Path Traversal | âš ï¸ Risk | Filename sanitization weak |
-| CWE-862 | Missing Auth | âŒ Found | `/web` commands public |
+| CWE-22 | Path Traversal | Ã¢Å¡Â Ã¯Â¸Â Risk | Filename sanitization weak |
+| CWE-862 | Missing Auth | Ã¢ÂÅ’ Found | `/web` commands public |
 
 ---
 
