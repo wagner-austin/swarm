@@ -28,6 +28,7 @@ __all__ = [
     "PERSONALITIES",
     "prompt",
     "visible",
+    "visible_local",
     "Persona",
     # internal helpers exposed for tests / admin cog
     "_CUSTOM_DIR",
@@ -245,6 +246,37 @@ async def visible(name: str, user_id: int, bot: commands.Bot) -> bool:
             allowed_ids.add(str(uid))
 
     return str(user_id) in allowed_ids
+
+
+def visible_local(name: str, user_id: int, *, owner_id: int | None = None) -> bool:
+    """Compute persona visibility without I/O.
+
+    This is a efficient synchronous predicate intended for UI paths that must
+    respond within strict time limits (e.g., Discord autocomplete). It mirrors
+    :func:`visible` semantics using only the already-available inputs.
+
+    Rules:
+    - If the persona does not exist, return False.
+    - If ``allowed_users`` is missing, the persona is public.
+    - If ``allowed_users`` is present, allow when ``user_id`` matches, or when
+      ``${OWNER_ID}`` is present and ``owner_id`` matches ``user_id``.
+    """
+
+    persona = PERSONALITIES.get(name)
+    if not persona:
+        return False
+
+    allowed = persona.get("allowed_users")
+    if allowed is None:
+        return True
+
+    user = str(user_id)
+    allowed_strs = {str(x) for x in allowed}
+    if user in allowed_strs:
+        return True
+    if owner_id is not None and "${OWNER_ID}" in allowed_strs and user == str(owner_id):
+        return True
+    return False
 
 
 __all__ = ["PERSONALITIES", "prompt", "visible", "Persona"]
