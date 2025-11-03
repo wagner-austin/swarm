@@ -126,6 +126,9 @@ jobs:
             -e REDIS__URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
             -e REDIS_URL=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
             -e CELERY_BROKER_URLS=redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0 \
+            -e POETRY_VIRTUALENVS_CREATE=true \
+            -e POETRY_VIRTUALENVS_IN_PROJECT=false \
+            -e POETRY_VIRTUALENVS_PATH=/tmp/poetry-venvs \
             swarm bash -lc "poetry install --with dev && poetry run pytest -v"
 
       - name: Run Celery integration tests (in container)
