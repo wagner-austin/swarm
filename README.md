@@ -1,4 +1,4 @@
-# Distributed Discord Automation System
+﻿# Distributed Discord Automation System
 
 A Celery-powered Discord bot for Playwright browser automation with autoscaling, Redis high availability via HAProxy, and observability (Prometheus, Grafana, Loki). An optional LLM chat command is available via pluggable providers.
 
@@ -29,24 +29,35 @@ An intelligent assistant that can handle requests like:
 ### Installation
 
 ```bash
-git clone <repository-url>
-cd swarm
+# From the repository root
 poetry install --with dev
 poetry run playwright install chromium
-cp .env.example .env
 ```
 
 ### Configuration
 
-Edit `.env` with your settings. For local development, everything connects to Redis through HAProxy (port 6380):
+Create a `.env` (UTF-8) for local development. These concrete values work with the included Docker Compose stack and HAProxy on port 6380:
 
 ```ini
-# App configuration (nested env for pydantic)
+# Local development defaults
+REDIS_PASSWORD=localdev
+
+# App configuration (pydantic nested env style)
 REDIS__URL=redis://default:${REDIS_PASSWORD}@localhost:6380/0
 CELERY_BROKER_URLS=${REDIS__URL}
 
-# Frontend configuration
-DISCORD_TOKEN=your-token-here
+# Optional: internal HAProxy local URL list (Compose services)
+# Uncomment if your compose expects it
+# HAPROXY_REDIS_URLS=redis://default:${REDIS_PASSWORD}@redis:6379/0
+```
+
+Note: provide your Discord bot token at runtime via the shell (do not commit it):
+
+```bash
+# macOS/Linux
+export DISCORD_TOKEN=your_token_here
+# Windows PowerShell
+$Env:DISCORD_TOKEN = "your_token_here"
 ```
 
 ### Running the System
@@ -64,8 +75,13 @@ Production (Fly.io):
 
 ## Architecture
 
-Monitoring: Celery Exporter (9808), Grafana (3000), Prometheus (9090)
-Autoscaling: Celery Autoscaler (driven by queue depth)
+Monitoring:
+- Celery Exporter (9808)
+- Grafana (3000)
+- Prometheus (9090)
+
+Autoscaling:
+- Celery Autoscaler (driven by queue depth)
 
 ### Port Configuration
 
@@ -91,13 +107,13 @@ make clean-all # DANGEROUS: system-wide Docker wipe (containers/images/volumes/n
 
 ## Documentation
 
-- docs/plan.md – Implementation roadmap
-- docs/claude.md – Collaboration guidelines and architecture notes
-- docs/scaling-architecture.md – Distributed system design
+- docs/plan.md - Implementation roadmap
+- docs/claude.md - Collaboration guidelines and architecture notes
+- docs/scaling-architecture.md - Distributed system design
 
 ## Current Status & Roadmap
 
-✅ Celery migration complete
+- Celery migration complete
 - Celery broker and typed browser runtime
 - Session affinity via Redis + router
 - Autoscaler-driven worker creation
@@ -111,7 +127,7 @@ This project uses production-grade standards:
 
 ## License
 
-[Your license here]
+See `LICENSE`.
 
 ---
 
@@ -121,4 +137,3 @@ Authoritative contract for health, routing, typing, and testing (see `docs/contr
 - Health derives exclusively from Redis heartbeats using a freshness rule; no control-plane calls in decision loops.
 - Session affinity is stored as a Redis hash with `worker_id`, `direct_queue`, and `timestamp`; consumers never derive queue names.
 - Strict typing is enforced via Protocols and TypedDicts; casts are avoided by using typed boundary wrappers.
-
