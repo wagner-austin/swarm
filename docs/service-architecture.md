@@ -34,7 +34,7 @@ These are started when the main Swarm application launches.
 | **Alloy** | `grafana/alloy` | 12345 | Log collection from Docker |
 | [removed] Flower |  |  |  |
 | **Celery-Exporter** | `danihodovic/celery-exporter` | 9808 | Celery metrics for Prometheus |
-| **Autoscaler** | Custom image | - | Scales workers based on queue depth |
+| **Autoscaler** | Custom image | 9809 (metrics) | Scales workers based on queue depth |
 
 ### 4. Orphaned/Unused Services
 
@@ -86,14 +86,11 @@ graph TD
 Located in `swarm/core/containers.py`:
 
 ```python
-# Registered but unused:
-- scaling_service (ScalingService)
-- redis_client (used by some services)
-- distributed_config
-- scaling_backend
-
 # Active registrations:
 - config (Settings)
+- redis_client (async)
+- distributed_config
+- scaling_backend (selected backend)
 - history_backend
 - llm_providers
 - metrics_helper
@@ -113,7 +110,7 @@ Located in `swarm/core/containers.py`:
 1. **Redis**: 
    - Celery broker (queues)
    - Session state (`browser:session:*`)
-   - Worker heartbeats (old system)
+   - Worker heartbeats (standardized heartbeat keys)
 
 2. **Prometheus**: Time-series metrics
 3. **Loki**: Log aggregation
@@ -124,7 +121,6 @@ Located in `swarm/core/containers.py`:
 - Swarm main: `http://localhost:9200/metrics`
 - Workers: `http://localhost:9100/metrics`
 - Celery Exporter: `http://localhost:9808/health`
-- Celery-Exporter: `http://localhost:9808/health`
 - Prometheus: `http://localhost:9090/-/ready`
 - Loki: `http://localhost:3100/ready`
 - Grafana: `http://localhost:3000/api/health`
