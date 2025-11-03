@@ -16,6 +16,7 @@ kill_timeout = 30
   # Metrics ports
   METRICS_PORT = "9200"         # Main swarm process
   WORKER_METRICS_PORT = "9100"  # Worker processes
+  AUTOSCALER_METRICS_PORT = "9809"  # Autoscaler process
 
 # Required secrets - set these via `fly secrets set`:
 # - REDIS__URL: Full Redis URL including password (points to swarm-redis-proxy.internal:6380)
@@ -49,6 +50,15 @@ kill_timeout = 30
   interval = "30s"
   timeout = "5s"  
   grace_period = "60s"  # Workers need time to start browser
+
+[checks.autoscaler]
+  processes = ["autoscaler"]
+  type = "http"
+  port = 9809
+  path = "/metrics"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
 
 # Internal service for metrics/health - no public exposure needed
 [[services]]
