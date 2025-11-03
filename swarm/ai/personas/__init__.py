@@ -150,7 +150,8 @@ def _populate(target: dict[str, Persona]) -> None:
         target.update(_load(_file))
 
     # secrets from env before file so file wins (operator preference)
-    _secret_env: str | None = os.getenv("SWARM_SECRET_PERSONAS")
+    # Check both SWARM_SECRET_PERSONAS and BOT_SECRET_PERSONAS (backward compatibility)
+    _secret_env: str | None = os.getenv("SWARM_SECRET_PERSONAS") or os.getenv("BOT_SECRET_PERSONAS")
     if _secret_env:
         try:
             loaded_env: object = yaml.safe_load(_secret_env) or {}
