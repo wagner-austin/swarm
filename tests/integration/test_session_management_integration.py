@@ -87,8 +87,12 @@ def patch_settings_for_modules(monkeypatch: pytest.MonkeyPatch) -> None:
             ttl_seconds = 3600
             cleanup_interval_seconds = 0.5
 
+    # Ensure all modules under test use the isolated local Redis DB 15
     monkeypatch.setattr("swarm.distributed.session_registry.Settings", lambda: MockSettings())
     monkeypatch.setattr("swarm.distributed.browser_router.Settings", lambda: MockSettings())
+    # SessionLifecycleManager resolves Settings from swarm.core at runtime
+    monkeypatch.setattr("swarm.core.settings.Settings", lambda: MockSettings())
+    monkeypatch.setattr("swarm.distributed.worker_lifecycle.Settings", lambda: MockSettings())
 
 
 def test_registry_finds_orphans(redis_client: redis_mod.Redis[str]) -> None:
