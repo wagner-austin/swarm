@@ -142,25 +142,7 @@ jobs:
               set -e
               poetry install --with dev
               poetry run pytest -v --cov=swarm --cov-report=term-missing
-              # Run Celery integration with a patched Redis URL (no repo changes)
-              poetry run python - <<'PY'
-import os, asyncio
-import redis.asyncio as redis_asyncio
-
-password = os.environ.get("REDIS_PASSWORD", "")
-ha_url = f"redis://default:{password}@haproxy-redis:6380/0"
-
-_orig_from_url = redis_asyncio.from_url
-def _patched_from_url(url, *a, **kw):
-    if url == "redis://redis:6379/0":
-        url = ha_url
-    return _orig_from_url(url, *a, **kw)
-
-redis_asyncio.from_url = _patched_from_url
-
-from scripts import test_celery_integration as t
-asyncio.run(t.main())
-PY
+              poetry run python -m scripts.test_celery_integration
               poetry run python -m scripts.check_monitoring || echo "Monitoring not critical for CI"
             '
 
