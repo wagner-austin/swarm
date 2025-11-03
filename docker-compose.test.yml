@@ -37,7 +37,10 @@ services:
 
   swarm:
     env_file: []
-    volumes: []
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    group_add:
+      - "${DOCKER_GID:-0}"
     environment:
       # Keep using HAProxy like production for consistency
       REDIS_URL: redis://default:${REDIS_PASSWORD}@haproxy-redis:6380/0
