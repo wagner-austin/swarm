@@ -19,6 +19,8 @@ services:
       # Override to use only local Redis - no Upstash
       # Same URL repeated so HAProxy has primary/backup but both point to local
       # Include password since local Redis requires authentication
+      HAPROXY_REDIS_URLS: >-
+        redis://default:${REDIS_PASSWORD}@redis:6379/0;redis://default:${REDIS_PASSWORD}@redis:6379/0
       CELERY_BROKER_URLS: >-
         redis://default:${REDIS_PASSWORD}@redis:6379/0;redis://default:${REDIS_PASSWORD}@redis:6379/0
       HAPROXY_CONFIG_OUTPUT: /config/haproxy-redis-generated.cfg
