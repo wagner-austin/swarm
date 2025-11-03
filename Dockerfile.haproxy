@@ -18,8 +18,8 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 # Drop back to unprivileged user for runtime security
 USER haproxy
 
-# Health check - verify HAProxy is proxying Redis (port 6380)
-HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
-    CMD nc -z 127.0.0.1 6380 || exit 1
+# Health check - verify HAProxy is listening on 6380 using Python (nc may be unavailable)
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 6380)); s.close()"]
 
 ENTRYPOINT ["/entrypoint.sh"]
