@@ -231,9 +231,16 @@ def test_lifecycle_ttl_cleanup_clears_registry(redis_client: redis_mod.Redis[str
             else:
                 pytest.fail("Lifecycle did not expire session within timeout")
 
-            # Registry affinity should be cleared by cleanup path
+            # Registry affinity should be cleared by cleanup path.
+            # Allow for minor scheduling skew between metrics update and registry delete.
             reg2 = SessionRegistry()
-            owner = await reg2.get_session_owner("sess-L1")
+            owner = None
+            deadline2 = time.time() + 3.0
+            while time.time() < deadline2:
+                owner = await reg2.get_session_owner("sess-L1")
+                if owner is None:
+                    break
+                await asyncio.sleep(0.05)
             await reg2.close()
             assert owner is None
         finally:
